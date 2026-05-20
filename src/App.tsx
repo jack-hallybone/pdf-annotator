@@ -35,6 +35,13 @@ import {
   writePdfAnnotations
 } from './pdfWriter';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
+import {
+  canPickLocalPdfFile,
+  localPdfFileFromDrop,
+  pickLocalPdfFile,
+  savePdfToLocalFile
+} from './localFileAccess';
+import type { LocalPdfFileHandle } from './localFileAccess';
 import { readPdfFile } from './pdfFile';
 import {
   createDefaultToolPresets,
@@ -95,6 +102,7 @@ export default function App() {
   const activePageIndexRef = useRef(0);
   const printBlobUrlRef = useRef<string | null>(null);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const localFileHandleRef = useRef<LocalPdfFileHandle | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfFingerprint, setPdfFingerprint] = useState('');
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
@@ -440,6 +448,7 @@ export default function App() {
   }, [
     annotations,
     focusedAnnotationId,
+    hasUnsavedChanges,
     pages.length,
     redoStack,
     selectedAnnotationIds,
@@ -629,6 +638,7 @@ export default function App() {
     structureReloadInProgressRef.current = false;
     removedAnnotationSourceIdsRef.current.clear();
     pdfFingerprintRef.current = '';
+    localFileHandleRef.current = null;
     setPdfBytes(null);
     setPdfFingerprint('');
     setPdfDoc(null);
@@ -733,7 +743,11 @@ export default function App() {
   async function loadPdfBytes(
     bytes: Uint8Array,
     name: string,
-    options: { activePage?: number; clearWorkingAnnotations?: boolean } = {}
+    options: {
+      activePage?: number;
+      clearWorkingAnnotations?: boolean;
+      fileHandle?: LocalPdfFileHandle | null;
+    } = {}
   ) {
     const currentPdfDoc = pdfDoc;
     const generation = loadGenerationRef.current + 1;
@@ -790,6 +804,7 @@ export default function App() {
       });
       setPages(initialPages);
       setFileName(name);
+      localFileHandleRef.current = options.fileHandle ?? null;
       activePageIndexRef.current = activePage;
       setActivePageIndex(activePage);
 
@@ -1158,10 +1173,38 @@ export default function App() {
     setAnnotations((current) => mergeImportedAnnotations(current, importedAnnotations));
   }
 
-  async function openPdfFile(file: File) {
+  async function handleOpenPdfRequest() {
+    if (pages.length > 0) {
+      setStatus('Close the current PDF before opening another PDF.');
+      return;
+    }
+
+    if (!canPickLocalPdfFile()) {
+      fileInputRef.current?.click();
+      return;
+    }
+
+    try {
+      const picked = await pickLocalPdfFile();
+      if (!picked) {
+        return;
+      }
+
+      await openPdfFile(picked.file, picked.handle);
+    } catch (error) {
+      console.error(error);
+      setStatus('Could not use local file access. Falling back to browser open.');
+      fileInputRef.current?.click();
+    }
+  }
+
+  async function openPdfFile(
+    file: File,
+    fileHandle: LocalPdfFileHandle | null = null
+  ) {
     try {
       const bytes = await readPdfFile(file);
-      await loadPdfBytes(bytes, file.name);
+      await loadPdfBytes(bytes, file.name, { fileHandle });
     } catch (error) {
       console.error(error);
       setStatus(error instanceof Error ? error.message : 'Could not open PDF.');
@@ -1229,6 +1272,16 @@ export default function App() {
     if (pages.length > 0) {
       setStatus('Close the current PDF before opening another PDF.');
       return;
+    }
+
+    try {
+      const localFile = await localPdfFileFromDrop(event.dataTransfer);
+      if (localFile) {
+        await openPdfFile(localFile.file, localFile.handle);
+        return;
+      }
+    } catch (error) {
+      console.error(error);
     }
 
     await openPdfFile(file);
@@ -1368,26 +1421,78 @@ export default function App() {
     }
   }
 
+  function markCurrentWorkClean() {
+    cleanAnnotationsRef.current = persistedAnnotations.map(normalizeAnnotationLayout);
+    setCleanWorkSignature(
+      createWorkSignature(pdfFingerprintRef.current, cleanAnnotationsRef.current)
+    );
+  }
+
   async function handleSave() {
     if (!pdfBytes) {
       return;
     }
 
+    if (!hasUnsavedChanges) {
+      setStatus('No unsaved changes to save.');
+      return;
+    }
+
     setBusy(true);
-    setStatus('Writing PDF annotations...');
+    setStatus('Writing PDF...');
+
+    try {
+      const savedBytes = await annotatedPdfBytes();
+      const localFileHandle = localFileHandleRef.current;
+
+      if (localFileHandle) {
+        try {
+          setStatus('Saving PDF to the original file...');
+          await savePdfToLocalFile(localFileHandle, savedBytes);
+          markCurrentWorkClean();
+          setStatus(`Saved ${fileName}. Annotations remain editable here.`);
+          return;
+        } catch (error) {
+          console.error(error);
+          const outputName = annotatedName(fileName);
+          downloadPdf(savedBytes, outputName);
+          setStatus(
+            `Could not save to the original file. Downloaded ${outputName} instead; verify the download before closing.`
+          );
+          return;
+        }
+      }
+
+      const outputName = annotatedName(fileName);
+      downloadPdf(savedBytes, outputName);
+      markCurrentWorkClean();
+      setStatus(`Downloaded ${outputName}. Annotations remain editable here.`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : 'Could not save PDF.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownload() {
+    if (!pdfBytes) {
+      return;
+    }
+
+    setBusy(true);
+    setStatus('Preparing PDF download...');
 
     try {
       const savedBytes = await annotatedPdfBytes();
       const outputName = annotatedName(fileName);
       downloadPdf(savedBytes, outputName);
-      cleanAnnotationsRef.current = persistedAnnotations.map(normalizeAnnotationLayout);
-      setCleanWorkSignature(
-        createWorkSignature(pdfFingerprintRef.current, cleanAnnotationsRef.current)
-      );
-      setStatus(`Downloaded ${outputName}. Annotations remain editable here.`);
+      setStatus(`Downloaded ${outputName}. Unsaved changes remain tracked.`);
     } catch (error) {
       console.error(error);
-      setStatus(error instanceof Error ? error.message : 'Could not save PDF.');
+      setStatus(
+        error instanceof Error ? error.message : 'Could not download PDF.'
+      );
     } finally {
       setBusy(false);
     }
@@ -1913,7 +2018,7 @@ export default function App() {
             <div className="ui-frame screen-only p-1 text-app-ink">
               <button
                 className="ui-button flex items-center gap-3 px-5 py-4 text-base font-medium"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => void handleOpenPdfRequest()}
                 type="button"
               >
                 <FolderOpen size={22} />
@@ -1990,7 +2095,9 @@ export default function App() {
 
           <FloatingDocumentControls
             busy={busy}
+            canSave={hasUnsavedChanges}
             onClosePdf={handleClosePdf}
+            onDownload={handleDownload}
             onPrint={handlePrint}
             onSave={handleSave}
             onToggleAnnotations={handleToggleAnnotations}

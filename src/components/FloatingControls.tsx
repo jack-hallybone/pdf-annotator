@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import {
   Eye,
   EyeOff,
+  Download,
   Minus,
   MoreVertical,
   Plus,
@@ -343,7 +344,9 @@ export function FloatingZoomControls({
 
 type FloatingDocumentControlsProps = {
   busy: boolean;
+  canSave: boolean;
   onClosePdf: () => void;
+  onDownload: () => void;
   onPrint: () => void;
   onSave: () => void;
   onToggleAnnotations: () => void;
@@ -352,7 +355,9 @@ type FloatingDocumentControlsProps = {
 
 export function FloatingDocumentControls({
   busy,
+  canSave,
   onClosePdf,
+  onDownload,
   onPrint,
   onSave,
   onToggleAnnotations,
@@ -366,8 +371,11 @@ export function FloatingDocumentControls({
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}
       </IconButton>
-      <IconButton disabled={busy} label="Save PDF" onClick={onSave}>
+      <IconButton disabled={busy || !canSave} label="Save PDF" onClick={onSave}>
         <Save size={16} />
+      </IconButton>
+      <IconButton disabled={busy} label="Download PDF copy" onClick={onDownload}>
+        <Download size={16} />
       </IconButton>
       <IconButton disabled={busy} label="Print PDF" onClick={onPrint}>
         <Printer size={16} />
