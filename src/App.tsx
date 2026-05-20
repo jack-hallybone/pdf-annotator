@@ -138,7 +138,7 @@ export default function App() {
   );
   const [undoStack, setUndoStack] = useState<PdfAnnotation[][]>([]);
   const [redoStack, setRedoStack] = useState<PdfAnnotation[][]>([]);
-  const [status, setStatus] = useState('Open a PDF to begin.');
+  const [, setStatus] = useState('Open a PDF to begin.');
   const [busy, setBusy] = useState(false);
   const [loadingPageCount, setLoadingPageCount] = useState(0);
   const [pdfDragActive, setPdfDragActive] = useState(false);
@@ -2021,7 +2021,6 @@ export default function App() {
           pages={pages}
           setPageMenuIndex={setPageMenuIndex}
           showAnnotations={showAnnotations}
-          status={busy ? 'Working...' : status}
           width={sidebarWidth}
         />
       ) : null}
@@ -2031,7 +2030,7 @@ export default function App() {
           <button
             className="ui-button grid h-8 w-8 place-items-center"
             onClick={() => setSidebarOpen(true)}
-            title="Show pages"
+            title="Show sidebar"
             type="button"
           >
             <ChevronRight size={18} />
@@ -2048,30 +2047,39 @@ export default function App() {
         ref={scrollContainerRef}
       >
         {pages.length === 0 ? (
-          <div className="grid h-full place-items-center">
-            <div className="ui-frame screen-only w-[min(92vw,28rem)] p-2 text-app-ink">
-              <button
-                className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={busy}
-                onClick={() => void handleOpenPdfRequest()}
-                type="button"
-              >
-                <FolderOpen size={22} />
-                Open a PDF
-              </button>
-              <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
-                {PDF_TEMPLATES.map(({ kind, label }) => (
-                  <button
-                    className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={busy}
-                    key={kind}
-                    onClick={() => void handleCreatePdfTemplate(kind)}
-                    type="button"
-                  >
-                    <FilePlus2 size={18} />
-                    <span>{label}</span>
-                  </button>
-                ))}
+          <div className="grid h-full place-items-center px-4">
+            <div className="screen-only flex w-[min(92vw,28rem)] flex-col items-center gap-8 text-app-ink">
+              <h1 className="w-full">
+                <img
+                  alt="PDF Annotator"
+                  className="mx-auto h-auto w-[min(80vw,24rem)]"
+                  src={`${import.meta.env.BASE_URL}title.svg`}
+                />
+              </h1>
+              <div className="ui-frame w-full p-2">
+                <button
+                  className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                  disabled={busy}
+                  onClick={() => void handleOpenPdfRequest()}
+                  type="button"
+                >
+                  <FolderOpen size={22} />
+                  Open
+                </button>
+                <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
+                  {PDF_TEMPLATES.map(({ kind, label }) => (
+                    <button
+                      className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                      disabled={busy}
+                      key={kind}
+                      onClick={() => void handleCreatePdfTemplate(kind)}
+                      type="button"
+                    >
+                      <FilePlus2 size={18} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

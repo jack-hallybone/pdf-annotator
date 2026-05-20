@@ -41,7 +41,6 @@ type DocumentSidebarProps = {
   pages: LoadedPage[];
   setPageMenuIndex: (pageIndex: number | null) => void;
   showAnnotations: boolean;
-  status: string;
   width: number;
 };
 
@@ -64,7 +63,6 @@ export function DocumentSidebar({
   pages,
   setPageMenuIndex,
   showAnnotations,
-  status,
   width
 }: DocumentSidebarProps) {
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
@@ -112,13 +110,12 @@ export function DocumentSidebar({
     <aside
       className="ui-frame screen-only absolute bottom-2 left-2 top-2 z-30 flex max-w-[calc(100vw-1rem)] flex-col text-app-ink sm:bottom-3 sm:left-3 sm:top-3"
       style={{ width }}
-      title={status}
     >
       <div className="flex justify-end border-b border-app-ink/10 p-1.5">
         <button
           className={SIDEBAR_ICON_BUTTON_CLASS}
           onClick={onClose}
-          title="Hide pages"
+          title="Hide sidebar"
           type="button"
         >
           <ChevronLeft size={16} />
@@ -155,6 +152,7 @@ export function DocumentSidebar({
             className="ui-button mb-1 flex w-full items-center justify-center gap-2 border-dashed border-app-ink/20 bg-app-ui px-2 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
             disabled={busy}
             onClick={onMergePdf}
+            title="Add PDF"
             type="button"
           >
             <FilePlus2 size={14} />

@@ -371,16 +371,16 @@ export function FloatingDocumentControls({
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}
       </IconButton>
-      <IconButton disabled={busy || !canSave} label="Save PDF" onClick={onSave}>
+      <IconButton disabled={busy || !canSave} label="Save" onClick={onSave}>
         <Save size={16} />
       </IconButton>
-      <IconButton disabled={busy} label="Download PDF copy" onClick={onDownload}>
+      <IconButton disabled={busy} label="Download copy" onClick={onDownload}>
         <Download size={16} />
       </IconButton>
-      <IconButton disabled={busy} label="Print PDF" onClick={onPrint}>
+      <IconButton disabled={busy} label="Print" onClick={onPrint}>
         <Printer size={16} />
       </IconButton>
-      <IconButton disabled={busy} label="Close PDF" onClick={onClosePdf}>
+      <IconButton disabled={busy} label="Close" onClick={onClosePdf}>
         <X size={16} />
       </IconButton>
     </div>
