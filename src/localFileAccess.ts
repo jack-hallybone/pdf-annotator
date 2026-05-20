@@ -1,7 +1,9 @@
 export type LocalPdfFileHandle = {
   kind: 'file';
   name: string;
-  createWritable: () => Promise<LocalWritableFileStream>;
+  createWritable: (
+    options?: LocalCreateWritableOptions
+  ) => Promise<LocalWritableFileStream>;
   getFile: () => Promise<File>;
   queryPermission?: (
     descriptor?: LocalFilePermissionDescriptor
@@ -19,6 +21,11 @@ type LocalWritableFileStream = {
   abort?: () => Promise<void>;
   close: () => Promise<void>;
   write: (data: Blob) => Promise<void>;
+};
+
+type LocalCreateWritableOptions = {
+  keepExistingData?: boolean;
+  mode?: 'exclusive' | 'siloed';
 };
 
 type LocalWindow = Window &
@@ -102,7 +109,7 @@ export async function savePdfToLocalFile(
 ) {
   await requestReadWritePermission(handle);
 
-  const writable = await handle.createWritable();
+  const writable = await createWritable(handle);
   let closed = false;
   try {
     await writable.write(pdfBlob(bytes));
@@ -111,6 +118,17 @@ export async function savePdfToLocalFile(
   } catch (error) {
     if (!closed) {
       await abortWritable(writable);
+    }
+    throw error;
+  }
+}
+
+async function createWritable(handle: LocalPdfFileHandle) {
+  try {
+    return await handle.createWritable({ mode: 'exclusive' });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return handle.createWritable();
     }
     throw error;
   }
