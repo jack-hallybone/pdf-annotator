@@ -1,0 +1,212 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: #F3F3F3;
+  --color-app-ui: #FFFFFF;
+  --color-app-ink: #171C1C;
+  --color-app-blue: #4394D3;
+  --color-app-green: #5CB339;
+  --color-app-red: #E62D2A;
+  --color-app-purple: #CC41BF;
+  --color-app-highlight: #FFFE4E;
+}
+
+@layer base {
+  :root {
+    font-family:
+      Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    min-width: 320px;
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .ui-frame {
+    background: #FFFFFF;
+    border: 1px solid rgb(23 28 28 / 0.12);
+    border-radius: 6px;
+    box-shadow: 0 8px 22px rgb(23 28 28 / 0.05);
+    color: #171C1C;
+  }
+
+  .ui-panel {
+    background: #FFFFFF;
+    border: 1px solid rgb(23 28 28 / 0.12);
+    border-radius: 6px;
+    box-shadow: 0 12px 30px rgb(23 28 28 / 0.08);
+    color: #171C1C;
+  }
+
+  .ui-button {
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #171C1C;
+    transition:
+      background-color 120ms ease,
+      border-color 120ms ease,
+      box-shadow 120ms ease,
+      opacity 120ms ease;
+  }
+
+  .ui-button:hover:not(:disabled) {
+    background: #F3F3F3;
+  }
+
+  .ui-button:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(204 65 191 / 0.32);
+  }
+
+  .ui-button-active {
+    background: #F3F3F3;
+    border-color: rgb(23 28 28 / 0.68);
+    box-shadow: inset 0 0 0 1px rgb(23 28 28 / 0.04);
+  }
+
+  .ui-input {
+    background: #FFFFFF;
+    border: 1px solid rgb(23 28 28 / 0.16);
+    border-radius: 4px;
+    color: #171C1C;
+    outline: none;
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .ui-input:focus {
+    border-color: rgb(23 28 28 / 0.62);
+    box-shadow: 0 0 0 2px rgb(204 65 191 / 0.18);
+  }
+
+  .pdf-page .textLayer {
+    pointer-events: auto;
+  }
+
+  .pdf-page .annotationLayer {
+    pointer-events: none;
+  }
+
+  .pdf-page .annotationLayer .linkAnnotation,
+  .pdf-page .annotationLayer .linkAnnotation > a,
+  .pdf-page .annotationLayer [data-internal-link],
+  .pdf-page .annotationLayer .pdf-external-link {
+    pointer-events: auto;
+  }
+
+  .pdf-page .annotationLayer .linkAnnotation > a,
+  .pdf-page .annotationLayer .pdf-external-link {
+    cursor: pointer;
+  }
+
+  .pdf-page .pdfViewer {
+    --page-border: 0 solid transparent;
+    --page-margin: 0;
+    --loading-icon-delay: 0ms;
+  }
+
+  .pdf-page:not(.show-delayed-spinner) .pdfViewer .page.loadingIcon::after {
+    display: none !important;
+  }
+
+  .pdf-page .pdfViewer .page {
+    border: 0;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .pdf-page .pdfViewer .canvasWrapper {
+    height: 100%;
+    inset: 0;
+    overflow: hidden;
+    position: absolute;
+    width: 100%;
+  }
+
+  .pdf-page .pdfViewer .canvasWrapper canvas {
+    display: block;
+    height: 100%;
+    inset: 0;
+    margin: 0;
+    position: absolute;
+    width: 100%;
+  }
+
+  .pdf-page .textLayer ::selection {
+    background: rgb(204 65 191 / 0.28);
+  }
+
+  .pdf-page svg {
+    user-select: none;
+  }
+
+  @media print {
+    @page {
+      margin: 0;
+      size: auto;
+    }
+
+    html,
+    body,
+    #root {
+      background: white !important;
+      height: auto !important;
+      min-height: 0 !important;
+      overflow: visible !important;
+    }
+
+    body {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .screen-only {
+      display: none !important;
+    }
+
+    main {
+      background: white !important;
+      height: auto !important;
+      overflow: visible !important;
+    }
+
+    .pdf-scroll-root {
+      height: auto !important;
+      overflow: visible !important;
+      padding: 0 !important;
+    }
+
+    .pdf-page-slot {
+      break-after: page;
+      margin: 0 !important;
+      page-break-after: always;
+    }
+
+    .pdf-page-slot:last-child {
+      break-after: auto;
+      page-break-after: auto;
+    }
+
+    .pdf-page-slot > article {
+      box-shadow: none !important;
+      margin: 0 !important;
+    }
+
+    .pdf-page {
+      box-shadow: none !important;
+    }
+  }
+}

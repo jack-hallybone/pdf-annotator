@@ -1,0 +1,22 @@
+services:
+  app:
+    image: node:22-bookworm-slim
+    init: true
+    working_dir: /workspace
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    volumes:
+      - .:/workspace
+      - node_modules:/workspace/node_modules
+
+    ports:
+      - "127.0.0.1:5173:5173"
+      - "127.0.0.1:4173:4173"
+
+    command: sh -c "npm ci --ignore-scripts && npm run dev"
+
+volumes:
+  node_modules:
