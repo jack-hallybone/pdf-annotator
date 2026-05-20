@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
+  FilePlus2,
   FolderOpen
 } from 'lucide-react';
 import { getDocument } from 'pdfjs-dist';
@@ -44,6 +45,10 @@ import {
 import type { LocalPdfFileHandle } from './localFileAccess';
 import { readPdfFile } from './pdfFile';
 import {
+  createPdfTemplate
+} from './pdfTemplates';
+import type { PdfTemplateKind } from './pdfTemplates';
+import {
   createDefaultToolPresets,
   defaultToolKeyForTool,
   defaultToolSettings,
@@ -75,6 +80,11 @@ import {
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
+const PDF_TEMPLATES: Array<{ kind: PdfTemplateKind; label: string }> = [
+  { kind: 'a4Blank', label: 'A4 blank' },
+  { kind: 'a4Lined', label: 'A4 lined' },
+  { kind: 'a4Cornell', label: 'A4 Cornell' }
+];
 
 export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1211,6 +1221,30 @@ export default function App() {
     }
   }
 
+  async function handleCreatePdfTemplate(kind: PdfTemplateKind) {
+    if (pages.length > 0) {
+      setStatus('Close the current PDF before creating another PDF.');
+      return;
+    }
+
+    setBusy(true);
+    setStatus('Creating PDF...');
+
+    try {
+      const { bytes, name } = await createPdfTemplate(kind);
+      await loadPdfBytes(bytes, name);
+      setCleanWorkSignature(
+        createWorkSignature(`unsaved:${byteFingerprint(bytes)}`, [])
+      );
+      setStatus(`${name} created. Save or download it when ready.`);
+    } catch (error) {
+      console.error(error);
+      setStatus(error instanceof Error ? error.message : 'Could not create PDF.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
@@ -2015,15 +2049,30 @@ export default function App() {
       >
         {pages.length === 0 ? (
           <div className="grid h-full place-items-center">
-            <div className="ui-frame screen-only p-1 text-app-ink">
+            <div className="ui-frame screen-only w-[min(92vw,28rem)] p-2 text-app-ink">
               <button
-                className="ui-button flex items-center gap-3 px-5 py-4 text-base font-medium"
+                className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={busy}
                 onClick={() => void handleOpenPdfRequest()}
                 type="button"
               >
                 <FolderOpen size={22} />
                 Open a PDF
               </button>
+              <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
+                {PDF_TEMPLATES.map(({ kind, label }) => (
+                  <button
+                    className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={busy}
+                    key={kind}
+                    onClick={() => void handleCreatePdfTemplate(kind)}
+                    type="button"
+                  >
+                    <FilePlus2 size={18} />
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
