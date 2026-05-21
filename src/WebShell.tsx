@@ -1,10 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FilePlus2, FolderOpen } from 'lucide-react';
-import { byteFingerprint } from './annotationState';
 import {
   canPickLocalPdfFile,
   localPdfFileFromDrop,
-  pickLocalPdfFile
+  pickLocalPdfFile,
+  savePdfToLocalFile
 } from './localFileAccess';
 import type { LocalPdfFileHandle } from './localFileAccess';
 import { readPdfFile } from './pdfFile';
@@ -13,7 +13,7 @@ import {
 } from './pdfTemplates';
 import type { PdfTemplateKind } from './pdfTemplates';
 import { PdfWorkspace } from './PdfWorkspace';
-import type { PdfWorkspaceSource } from './PdfWorkspace';
+import type { PdfSaveTarget, PdfWorkspaceSource } from './PdfWorkspace';
 
 const PDF_TEMPLATES: Array<{ kind: PdfTemplateKind; label: string }> = [
   { kind: 'a4Blank', label: 'A4 blank' },
@@ -27,6 +27,12 @@ export function WebShell() {
   const [busy, setBusy] = useState(false);
   const [pdfDragActive, setPdfDragActive] = useState(false);
   const [source, setSource] = useState<PdfWorkspaceSource | null>(null);
+
+  useEffect(() => {
+    if (!source) {
+      document.title = 'PDF Annotator';
+    }
+  }, [source]);
 
   async function handleOpenPdfRequest() {
     if (!canPickLocalPdfFile()) {
@@ -56,8 +62,8 @@ export function WebShell() {
       const bytes = await readPdfFile(file);
       openPdfSource({
         bytes,
-        fileHandle,
-        name: file.name
+        name: file.name,
+        saveTarget: fileHandle ? browserFileSaveTarget(fileHandle) : null
       });
     } catch (error) {
       console.error(error);
@@ -154,22 +160,22 @@ export function WebShell() {
 
   function openPdfSource({
     bytes,
-    fileHandle = null,
     markDirty = false,
-    name
+    name,
+    saveTarget = null
   }: {
     bytes: Uint8Array;
-    fileHandle?: LocalPdfFileHandle | null;
     markDirty?: boolean;
     name: string;
+    saveTarget?: PdfSaveTarget | null;
   }) {
     sourceIdRef.current += 1;
     setSource({
       bytes,
-      fileHandle,
       markDirty,
       name,
-      sourceId: `${sourceIdRef.current}:${name}:${byteFingerprint(bytes)}`
+      saveTarget,
+      sourceId: `${sourceIdRef.current}:${name}`
     });
   }
 
@@ -208,41 +214,44 @@ export function WebShell() {
               />
             </h1>
             <div className="ui-frame w-full p-2">
-              <button
-                className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={busy}
-                onClick={() => void handleOpenPdfRequest()}
-                type="button"
-              >
-                <FolderOpen size={22} />
-                Open
-              </button>
-              <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
-                {PDF_TEMPLATES.map(({ kind, label }) => (
+              {pdfDragActive ? (
+                <div
+                  aria-live="polite"
+                  className="grid min-h-36 place-items-center text-sm font-medium text-app-ink"
+                >
+                  Drop PDF to open
+                </div>
+              ) : (
+                <div className="min-h-36">
                   <button
-                    className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                    className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
                     disabled={busy}
-                    key={kind}
-                    onClick={() => void handleCreatePdfTemplate(kind)}
+                    onClick={() => void handleOpenPdfRequest()}
                     type="button"
                   >
-                    <FilePlus2 size={18} />
-                    <span>{label}</span>
+                    <FolderOpen size={22} />
+                    Open
                   </button>
-                ))}
-              </div>
+                  <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
+                    {PDF_TEMPLATES.map(({ kind, label }) => (
+                      <button
+                        className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                        disabled={busy}
+                        key={kind}
+                        onClick={() => void handleCreatePdfTemplate(kind)}
+                        type="button"
+                      >
+                        <FilePlus2 size={18} />
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       </section>
-
-      {pdfDragActive ? (
-        <div className="screen-only pointer-events-none absolute inset-0 z-50 grid place-items-center bg-app-ink/10">
-          <div className="ui-frame px-5 py-4 text-sm font-medium text-app-ink">
-            Drop PDF to open
-          </div>
-        </div>
-      ) : null}
     </main>
   );
 }
@@ -259,4 +268,12 @@ function pdfFileFromList(files: FileList) {
         file.name.toLowerCase().endsWith('.pdf')
     ) ?? null
   );
+}
+
+function browserFileSaveTarget(
+  fileHandle: LocalPdfFileHandle
+): PdfSaveTarget {
+  return {
+    save: (bytes) => savePdfToLocalFile(fileHandle, bytes)
+  };
 }

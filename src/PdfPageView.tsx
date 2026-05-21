@@ -115,6 +115,7 @@ type PdfPageViewProps = {
   onEnsureAnnotationsVisible: () => void;
   onNavigateDestination: (destination: string | unknown[]) => void;
   onNavigatePage: (pageIndex: number) => void;
+  onPageReady?: (pageIndex: number) => void;
   onSelectAnnotations: (annotationIds: string[]) => void;
   onToolChange: (tool: Tool) => void;
   onUpdateAnnotation: (
@@ -145,6 +146,7 @@ export function PdfPageView({
   onEnsureAnnotationsVisible,
   onNavigateDestination,
   onNavigatePage,
+  onPageReady,
   onSelectAnnotations,
   onToolChange,
   onUpdateAnnotation
@@ -153,6 +155,7 @@ export function PdfPageView({
   const pageRef = useRef<HTMLDivElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const annotationLayerRef = useRef<HTMLDivElement>(null);
+  const existingAnnotationsPageRef = useRef<PDFPageProxy | null>(null);
   const renderRequestRef = useRef<{
     cancel: () => void;
     key: string;
@@ -231,6 +234,7 @@ export function PdfPageView({
     tool === 'eraser' ||
     tool === 'lasso';
   const shouldMountInteractionOverlay = showAnnotations || overlayCapturesPointer;
+  const showSynchronizedAnnotations = showAnnotations && baseLayerReady;
   const pageStyle = {
     width: viewport.width,
     height: viewport.height,
@@ -242,6 +246,12 @@ export function PdfPageView({
     '--scale-round-x': '1px',
     '--scale-round-y': '1px'
   } as React.CSSProperties;
+
+  useEffect(() => {
+    if (baseLayerReady) {
+      onPageReady?.(pageIndex);
+    }
+  }, [baseLayerReady, onPageReady, pageIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -414,13 +424,21 @@ export function PdfPageView({
   }, [renderKey, renderPriority]);
 
   useEffect(() => {
-    let cancelled = false;
-
     setExistingAnnotations([]);
+    existingAnnotationsPageRef.current = null;
+  }, [page]);
+
+  useEffect(() => {
+    if (!baseLayerReady || existingAnnotationsPageRef.current === page) {
+      return;
+    }
+
+    let cancelled = false;
     const cancelScheduledRead = schedulePriorityTask(renderPriority, () => {
       void getDisplayAnnotations(page)
         .then((annotationsForDisplay) => {
           if (!cancelled) {
+            existingAnnotationsPageRef.current = page;
             setExistingAnnotations(annotationsForDisplay);
           }
         })
@@ -435,7 +453,7 @@ export function PdfPageView({
       cancelled = true;
       cancelScheduledRead();
     };
-  }, [page]);
+  }, [baseLayerReady, page, renderPriority]);
 
   useEffect(() => {
     async function renderAnnotationLayer() {
@@ -445,7 +463,7 @@ export function PdfPageView({
       }
 
       div.replaceChildren();
-      if (!showAnnotations) {
+      if (!showAnnotations || !baseLayerReady) {
         return;
       }
 
@@ -488,6 +506,7 @@ export function PdfPageView({
     };
   }, [
     existingAnnotations,
+    baseLayerReady,
     linkService,
     page,
     showAnnotations,
@@ -1177,7 +1196,7 @@ export function PdfPageView({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
             >
-            {showAnnotations
+            {showSynchronizedAnnotations
               ? existingAnnotations
                   .filter(
                     (annotation, index) =>
@@ -1201,7 +1220,7 @@ export function PdfPageView({
                     );
                   })
               : null}
-            {showAnnotations ? annotations.map((annotation) => (
+            {showSynchronizedAnnotations ? annotations.map((annotation) => (
               <AnnotationShape
                 annotation={annotation}
                 focused={focusedAnnotationId === annotation.id}
@@ -1277,7 +1296,7 @@ export function PdfPageView({
                 viewport={viewport}
               />
             )) : null}
-            {showAnnotations && selectedPageAnnotations.length > 0 ? (
+            {showSynchronizedAnnotations && selectedPageAnnotations.length > 0 ? (
               <SelectionToolbar
                 annotations={selectedPageAnnotations}
                 onBeginEdit={onBeginAnnotationEdit}

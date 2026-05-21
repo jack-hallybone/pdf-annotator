@@ -34,10 +34,6 @@ import {
   writePdfAnnotations
 } from './pdfWriter';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
-import {
-  savePdfToLocalFile
-} from './localFileAccess';
-import type { LocalPdfFileHandle } from './localFileAccess';
 import { readPdfFile } from './pdfFile';
 import {
   createDefaultToolPresets,
@@ -74,10 +70,14 @@ const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
 
 export type PdfWorkspaceSource = {
   bytes: Uint8Array;
-  fileHandle?: LocalPdfFileHandle | null;
   markDirty?: boolean;
   name: string;
+  saveTarget?: PdfSaveTarget | null;
   sourceId: string;
+};
+
+export type PdfSaveTarget = {
+  save: (bytes: Uint8Array) => Promise<void>;
 };
 
 type PdfWorkspaceProps = {
@@ -108,9 +108,12 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     pageIndex: number;
   } | null>(null);
   const activePageIndexRef = useRef(0);
+  const initialVisualPageIndexRef = useRef(0);
+  const initialVisualReadyRef = useRef(false);
+  const afterInitialVisualReadyRef = useRef<Array<() => void>>([]);
   const printBlobUrlRef = useRef<string | null>(null);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
-  const localFileHandleRef = useRef<LocalPdfFileHandle | null>(null);
+  const saveTargetRef = useRef<PdfSaveTarget | null>(null);
   const sourceLoadRef = useRef<string | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfFingerprint, setPdfFingerprint] = useState('');
@@ -118,6 +121,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   const [pages, setPages] = useState<LoadedPage[]>([]);
   const [pageSize, setPageSize] = useState<PageSize | null>(null);
   const [fileName, setFileName] = useState('document.pdf');
+  const [initialVisualReady, setInitialVisualReady] = useState(false);
   const [scale, setScale] = useState(ACTUAL_SIZE_ZOOM);
   const [activePageIndex, setActivePageIndex] = useState(0);
   const [tool, setTool] = useState<Tool>('select');
@@ -161,6 +165,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     currentWorkSignature !== cleanWorkSignature;
   const loadedPageCount = pages.filter(Boolean).length;
   const showPageLoadNotice =
+    initialVisualReady &&
     pages.length > EAGER_PAGE_LIMIT &&
     loadingPageCount > 0 &&
     loadedPageCount > 0 &&
@@ -176,6 +181,25 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     },
     []
   );
+  const handlePageReady = useCallback((pageIndex: number) => {
+    if (pageIndex === initialVisualPageIndexRef.current) {
+      initialVisualReadyRef.current = true;
+      setInitialVisualReady(true);
+      const queuedCallbacks = afterInitialVisualReadyRef.current.splice(0);
+      for (const callback of queuedCallbacks) {
+        scheduleAfterVisiblePaint(callback);
+      }
+    }
+  }, []);
+
+  function runAfterInitialVisualReady(callback: () => void) {
+    if (initialVisualReadyRef.current) {
+      scheduleAfterVisiblePaint(callback);
+      return;
+    }
+
+    afterInitialVisualReadyRef.current.push(callback);
+  }
 
   useEffect(() => {
     document.title =
@@ -184,14 +208,14 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         : 'PDF Annotator';
   }, [fileName, hasUnsavedChanges, pages.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (sourceLoadRef.current === source.sourceId) {
       return;
     }
 
     sourceLoadRef.current = source.sourceId;
     void loadPdfBytes(source.bytes, source.name, {
-      fileHandle: source.fileHandle ?? null
+      saveTarget: source.saveTarget ?? null
     }).then(() => {
       if (source.markDirty && sourceLoadRef.current === source.sourceId) {
         setCleanWorkSignature(
@@ -558,7 +582,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   }, [pages.length, scale]);
 
   useEffect(() => {
-    if (!pdfDoc || pages.length === 0) {
+    if (!initialVisualReady || !pdfDoc || pages.length === 0) {
       return;
     }
 
@@ -567,7 +591,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     for (let pageIndex = start; pageIndex <= end; pageIndex += 1) {
       void ensurePageLoaded(pageIndex);
     }
-  }, [activePageIndex, pages.length, pdfDoc]);
+  }, [activePageIndex, initialVisualReady, pages.length, pdfDoc]);
 
   useEffect(() => {
     function endLiveEdit() {
@@ -664,14 +688,18 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     structureReloadInProgressRef.current = false;
     removedAnnotationSourceIdsRef.current.clear();
     pdfFingerprintRef.current = '';
-    localFileHandleRef.current = null;
+    saveTargetRef.current = null;
     setPdfBytes(null);
     setPdfFingerprint('');
     setPdfDoc(null);
     setPages([]);
     setPageSize(null);
+    setInitialVisualReady(false);
     setScale(ACTUAL_SIZE_ZOOM);
     activePageIndexRef.current = 0;
+    initialVisualPageIndexRef.current = 0;
+    initialVisualReadyRef.current = false;
+    afterInitialVisualReadyRef.current = [];
     setActivePageIndex(0);
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
@@ -729,15 +757,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
     const currentPdfDoc = pdfDoc;
     loadGenerationRef.current += 1;
-    shouldImportAnnotationsRef.current = true;
-    resetPdfState();
-    setTool('select');
-    setActiveToolKey('select');
-    setBusy(false);
-    setStatus('Open a PDF to begin.');
+    cleanupPrintResources();
+    onClose();
     await cancelLoadingTask();
     await destroyPdfDocument(currentPdfDoc);
-    onClose();
   }
 
   async function handlePrint() {
@@ -773,7 +796,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     options: {
       activePage?: number;
       clearWorkingAnnotations?: boolean;
-      fileHandle?: LocalPdfFileHandle | null;
+      saveTarget?: PdfSaveTarget | null;
     } = {}
   ) {
     const currentPdfDoc = pdfDoc;
@@ -820,6 +843,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       initialPages[activePage] = firstPage;
       pagesRef.current = initialPages;
       markPageAccess(activePage);
+      initialVisualPageIndexRef.current = activePage;
+      initialVisualReadyRef.current = false;
+      afterInitialVisualReadyRef.current = [];
+      setInitialVisualReady(false);
 
       pdfFingerprintRef.current = nextPdfFingerprint;
       setPdfBytes(bytes);
@@ -831,7 +858,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       });
       setPages(initialPages);
       setFileName(name);
-      localFileHandleRef.current = options.fileHandle ?? null;
+      saveTargetRef.current = options.saveTarget ?? null;
       activePageIndexRef.current = activePage;
       setActivePageIndex(activePage);
 
@@ -863,7 +890,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         setStatus(
           `${name} opened. Loading remaining ${loadedPdf.numPages - 1} page(s) after the visible page.`
         );
-        scheduleAfterVisiblePaint(() => {
+        runAfterInitialVisualReady(() => {
           if (generation !== loadGenerationRef.current) {
             return;
           }
@@ -1006,7 +1033,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         loadedPdf.numPages <= EAGER_PAGE_LIMIT &&
         remainingPageIndexes.length > 0
       ) {
-        scheduleAfterVisiblePaint(() => {
+        runAfterInitialVisualReady(() => {
           if (generation !== loadGenerationRef.current) {
             return;
           }
@@ -1398,12 +1425,12 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
     try {
       const savedBytes = await annotatedPdfBytes();
-      const localFileHandle = localFileHandleRef.current;
+      const saveTarget = saveTargetRef.current;
 
-      if (localFileHandle) {
+      if (saveTarget) {
         try {
           setStatus('Saving PDF to the original file...');
-          await savePdfToLocalFile(localFileHandle, savedBytes);
+          await saveTarget.save(savedBytes);
           markCurrentWorkClean();
           setStatus(`Saved ${fileName}. Annotations remain editable here.`);
           return;
@@ -1915,7 +1942,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         type="file"
       />
 
-      {pages.length > 0 ? (
+      {initialVisualReady && pages.length > 0 ? (
         <DocumentSidebar
           activePageIndex={activePageIndex}
           annotationsByPage={annotationsByPage}
@@ -1939,7 +1966,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         />
       ) : null}
 
-      {pages.length > 0 && !sidebarOpen ? (
+      {initialVisualReady && pages.length > 0 && !sidebarOpen ? (
         <div className="ui-frame screen-only absolute left-2 top-2 z-40 p-1 text-app-ink sm:left-3 sm:top-3">
           <button
             className="ui-button grid h-8 w-8 place-items-center"
@@ -1956,13 +1983,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         className="pdf-scroll-root h-full overflow-auto pt-4 pb-[50vh]"
         ref={scrollContainerRef}
       >
-        {pages.length === 0 ? (
-          <div className="screen-only grid h-full place-items-center px-4">
-            <div className="ui-frame px-4 py-3 text-sm font-medium text-app-ink">
-              Loading PDF...
-            </div>
-          </div>
-        ) : (
+        {pages.length > 0 ? (
           pages.map((page, index) => (
             <div
               className="pdf-page-slot"
@@ -1994,6 +2015,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
                     void handlePdfDestination(destination)
                   }
                   onNavigatePage={handlePdfPageNavigation}
+                  onPageReady={handlePageReady}
                   selectedAnnotationIds={selectedAnnotationIds}
                   showAnnotations={showAnnotations}
                   tool={tool}
@@ -2008,10 +2030,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
               )}
             </div>
           ))
-        )}
+        ) : null}
       </section>
 
-      {pages.length > 0 ? (
+      {initialVisualReady && pages.length > 0 ? (
         <>
           <FloatingToolDock
             activeTool={tool}
@@ -2071,6 +2093,14 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
           loadedPageCount={loadedPageCount}
           pageCount={pages.length}
         />
+      ) : null}
+
+      {!initialVisualReady ? (
+        <div className="screen-only absolute inset-0 z-50 grid place-items-center bg-app-bg px-4">
+          <div className="ui-frame px-4 py-3 text-sm font-medium text-app-ink">
+            Loading PDF...
+          </div>
+        </div>
       ) : null}
 
       {pdfDragActive ? (
