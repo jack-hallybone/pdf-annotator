@@ -28,14 +28,10 @@ import {
 import type { Tool, ToolPresetMap, ToolSettings } from '../types';
 import { ToolSettingsEditor } from './ToolSettingsEditor';
 
-const FLOATING_FRAME_CLASS =
-  'ui-frame screen-only absolute z-40 p-1 text-app-ink';
-const ICON_BUTTON_CLASS =
-  'ui-button grid h-8 w-8 place-items-center disabled:cursor-not-allowed disabled:opacity-40';
-const MENU_BUTTON_CLASS =
-  'ui-button h-8 rounded px-2 text-left font-medium';
-const POPOVER_CLASS =
-  'ui-panel absolute p-2 text-xs font-medium text-app-ink';
+const FLOATING_FRAME_CLASS = 'floating-frame ui-frame screen-only';
+const ICON_BUTTON_CLASS = 'icon-button ui-button';
+const MENU_BUTTON_CLASS = 'menu-button ui-button';
+const POPOVER_CLASS = 'floating-popover ui-panel';
 
 type FloatingToolDockProps = {
   activeTool: Tool;
@@ -65,7 +61,7 @@ export function FloatingToolDock({
 
   return (
     <div
-      className={`${FLOATING_FRAME_CLASS} right-2 top-1/2 flex -translate-y-1/2 flex-col gap-1 sm:right-8`}
+      className={`${FLOATING_FRAME_CLASS} tool-dock`}
       ref={dockRef}
     >
       {tools.map(({ icon: Icon, key, label, preset, tool }) => {
@@ -75,11 +71,11 @@ export function FloatingToolDock({
         const hasSettings = toolHasSettings(tool);
 
         return (
-          <div className="relative flex items-center gap-1" key={key}>
+          <div className="tool-dock-row" key={key}>
             <button
               aria-label={label}
               aria-pressed={active}
-              className={`ui-button relative grid h-10 w-10 place-items-center ${
+              className={`tool-button ui-button ${
                 active ? 'ui-button-active' : ''
               }`}
               onClick={() => onSelectTool(key)}
@@ -96,7 +92,7 @@ export function FloatingToolDock({
             {hasSettings ? (
               <button
                 aria-label={`${label} settings`}
-                className="ui-button grid h-7 w-5 place-items-center"
+                className="tool-settings-button ui-button"
                 onClick={() => {
                   if (!active) {
                     onSelectTool(key);
@@ -110,7 +106,7 @@ export function FloatingToolDock({
               </button>
             ) : null}
             {hasSettings && settingsToolKey === key ? (
-              <div className={`${POPOVER_CLASS} right-full top-0 mr-2 w-max min-w-44 max-w-[calc(100vw-5rem)]`}>
+              <div className={`${POPOVER_CLASS} tool-settings-popover`}>
                 <ToolSettingsEditor
                   settings={settings}
                   tool={tool}
@@ -140,7 +136,7 @@ function ToolIndicator({
     const width = preset?.drawWidth ?? settings.drawWidth;
     return (
       <span
-        className="absolute bottom-1 left-2 right-2 rounded-full"
+        className="tool-indicator"
         style={{
           backgroundColor: rgbToHex(color),
           height: Math.max(2, Math.min(6, width)),
@@ -154,7 +150,7 @@ function ToolIndicator({
     const width = Math.max(2, Math.min(6, settings.highlightWidth / 2));
     return (
       <span
-        className="absolute bottom-1 left-2 right-2 rounded-full"
+        className="tool-indicator"
         style={{
           backgroundColor: rgbToHex(settings.highlightColor),
           height: width,
@@ -239,7 +235,7 @@ export function FloatingZoomControls({
 
   return (
     <div
-      className={`${FLOATING_FRAME_CLASS} bottom-3 right-2 flex items-center gap-1 text-xs font-medium sm:right-8`}
+      className={`${FLOATING_FRAME_CLASS} zoom-controls`}
       ref={zoomPanelRef}
     >
       <button
@@ -252,7 +248,7 @@ export function FloatingZoomControls({
         <Minus size={16} />
       </button>
       <button
-        className="ui-button h-8 min-w-14 px-2 font-medium"
+        className="zoom-button ui-button"
         onClick={() => setZoomPanelOpen((open) => !open)}
         title="Zoom settings"
         type="button"
@@ -268,11 +264,11 @@ export function FloatingZoomControls({
       >
         <Plus size={16} />
       </button>
-      <div className="ml-1 flex h-8 items-center gap-1 border-l border-app-ink/12 pl-2 pr-2">
+      <div className="page-jump-control">
         <span>Page</span>
         <input
           aria-label="Page number"
-          className="ui-input h-6 w-9 px-1 text-center font-medium"
+          className="page-number-input ui-input"
           inputMode="numeric"
           max={pageCount}
           min={1}
@@ -288,11 +284,11 @@ export function FloatingZoomControls({
         <span>of {pageCount}</span>
       </div>
       {zoomPanelOpen ? (
-        <div className={`${POPOVER_CLASS} bottom-full right-0 mb-2 w-40`}>
-          <label className="ui-input mb-2 flex h-8 items-center px-2">
+        <div className={`${POPOVER_CLASS} zoom-popover`}>
+          <label className="zoom-percent-field ui-input">
             <input
               aria-label="Zoom percent"
-              className="min-w-0 flex-1 bg-transparent text-right font-medium outline-none"
+              className="zoom-percent-input"
               inputMode="decimal"
               onBlur={commitZoom}
               onChange={(event) => setZoomText(event.target.value)}
@@ -304,9 +300,9 @@ export function FloatingZoomControls({
               }}
               value={zoomText}
             />
-            <span className="pl-1 text-app-ink/70">%</span>
+            <span className="zoom-percent-unit">%</span>
           </label>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="zoom-preset-grid">
             <button
               className={MENU_BUTTON_CLASS}
               onClick={() => applyZoomPreset(onFitWidth)}
@@ -364,7 +360,7 @@ export function FloatingDocumentControls({
   showAnnotations
 }: FloatingDocumentControlsProps) {
   return (
-    <div className={`${FLOATING_FRAME_CLASS} right-2 top-3 flex items-center gap-1 sm:right-8`}>
+    <div className={`${FLOATING_FRAME_CLASS} document-controls`}>
       <IconButton
         label={showAnnotations ? 'Hide annotations' : 'Show annotations'}
         onClick={onToggleAnnotations}
@@ -406,7 +402,7 @@ export function FloatingHistoryControls({
 }: FloatingHistoryControlsProps) {
   return (
     <div
-      className={`${FLOATING_FRAME_CLASS} bottom-3 flex items-center gap-1`}
+      className={`${FLOATING_FRAME_CLASS} history-controls`}
       style={{ left: sidebarOpen ? sidebarWidth + 24 : 12 }}
     >
       <button
@@ -441,9 +437,9 @@ export function PageLoadNotice({
   pageCount
 }: PageLoadNoticeProps) {
   return (
-    <div className="screen-only absolute left-14 right-14 top-2 z-40 flex items-center justify-center sm:left-1/2 sm:right-auto sm:top-3 sm:-translate-x-1/2">
+    <div className="page-load-notice screen-only">
       <div
-        className="ui-frame max-w-full px-3 py-2 text-xs font-medium text-app-ink"
+        className="page-load-notice-message ui-frame"
         title="Pages are loading."
       >
         {loadedPageCount} of {pageCount} pages loaded

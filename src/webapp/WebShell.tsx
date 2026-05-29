@@ -7,13 +7,12 @@ import {
   savePdfToLocalFile
 } from './localFileAccess';
 import type { LocalPdfFileHandle } from './localFileAccess';
-import { readPdfFile } from './pdfFile';
 import {
   createPdfTemplate
 } from './pdfTemplates';
 import type { PdfTemplateKind } from './pdfTemplates';
-import { PdfWorkspace } from './PdfWorkspace';
-import type { PdfSaveTarget, PdfWorkspaceSource } from './PdfWorkspace';
+import { PdfWorkspace, readPdfFile } from '../annotator';
+import type { PdfSaveTarget, PdfWorkspaceSource } from '../annotator';
 
 const PDF_TEMPLATES: Array<{ kind: PdfTemplateKind; label: string }> = [
   { kind: 'a4Blank', label: 'A4 blank' },
@@ -190,7 +189,7 @@ export function WebShell() {
 
   return (
     <main
-      className="relative h-screen min-w-0 overflow-hidden bg-app-bg text-app-ink"
+      className="webapp-landing"
       onDragEnter={handlePdfDragEnter}
       onDragLeave={handlePdfDragLeave}
       onDragOver={handlePdfDragOver}
@@ -198,33 +197,33 @@ export function WebShell() {
     >
       <input
         accept="application/pdf"
-        className="hidden"
+        className="webapp-hidden-input"
         onChange={handleFileChange}
         ref={fileInputRef}
         type="file"
       />
-      <section className="pdf-scroll-root h-full overflow-auto">
-        <div className="grid h-full place-items-center px-4">
-          <div className="screen-only flex w-[min(92vw,28rem)] flex-col items-center gap-8 text-app-ink">
-            <h1 className="w-full">
+      <section className="webapp-landing-scroll">
+        <div className="webapp-landing-center">
+          <div className="webapp-landing-panel">
+            <h1 className="webapp-title">
               <img
                 alt="PDF Annotator"
-                className="mx-auto h-auto w-[min(80vw,24rem)]"
+                className="webapp-title-image"
                 src={`${import.meta.env.BASE_URL}title.svg`}
               />
             </h1>
-            <div className="ui-frame w-full p-2">
+            <div className="webapp-action-frame">
               {pdfDragActive ? (
                 <div
                   aria-live="polite"
-                  className="grid min-h-36 place-items-center text-sm font-medium text-app-ink"
+                  className="webapp-drop-message"
                 >
                   Drop PDF to open
                 </div>
               ) : (
-                <div className="min-h-36">
+                <div className="webapp-action-stack">
                   <button
-                    className="ui-button flex w-full items-center justify-center gap-3 px-5 py-4 text-base font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                    className="webapp-open-button"
                     disabled={busy}
                     onClick={() => void handleOpenPdfRequest()}
                     type="button"
@@ -232,10 +231,10 @@ export function WebShell() {
                     <FolderOpen size={22} />
                     Open
                   </button>
-                  <div className="mt-2 grid grid-cols-1 gap-1 border-t border-app-ink/12 pt-2 sm:grid-cols-3">
+                  <div className="webapp-template-grid">
                     {PDF_TEMPLATES.map(({ kind, label }) => (
                       <button
-                        className="ui-button flex min-h-16 flex-col items-center justify-center gap-2 px-3 py-3 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-45"
+                        className="webapp-template-button"
                         disabled={busy}
                         key={kind}
                         onClick={() => void handleCreatePdfTemplate(kind)}

@@ -25,7 +25,7 @@ export function SettingsPanelShell({
 }: {
   children: ReactNode;
 }) {
-  return <section className="grid gap-2 text-sm">{children}</section>;
+  return <section className="settings-panel">{children}</section>;
 }
 
 export function ColorPalette({
@@ -40,13 +40,13 @@ export function ColorPalette({
   onCommit?: () => void;
 }) {
   return (
-    <div className="grid gap-1 text-xs font-medium text-app-ink">
+    <div className="settings-field">
       {label ? <span>{label}</span> : null}
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="color-palette">
         {annotationColorSwatches.map((swatch) => (
           <button
             aria-label={`Set ${rgbToHex(swatch)}`}
-            className="ui-button h-5 w-5 rounded-full border-app-ink/20"
+            className="color-swatch ui-button"
             key={swatch.join('-')}
             onClick={() => {
               onChange(swatch);
@@ -57,16 +57,16 @@ export function ColorPalette({
           />
         ))}
         <label
-          className="ui-button relative grid h-5 w-5 place-items-center overflow-hidden rounded-full border-app-ink/20 bg-app-ui text-app-ink"
+          className="color-picker-button ui-button"
           title="Custom colour"
         >
-          <span className="pointer-events-none flex gap-0.5" aria-hidden="true">
-            <span className="h-0.5 w-0.5 rounded-full bg-current" />
-            <span className="h-0.5 w-0.5 rounded-full bg-current" />
-            <span className="h-0.5 w-0.5 rounded-full bg-current" />
+          <span className="color-picker-dots" aria-hidden="true">
+            <span className="color-picker-dot" />
+            <span className="color-picker-dot" />
+            <span className="color-picker-dot" />
           </span>
           <input
-            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            className="color-picker-input"
             aria-label="Custom colour"
             onChange={(event) => {
               onChange(hexToRgb(event.target.value));
@@ -96,10 +96,10 @@ export function NumberSetting({
   value: number;
 }) {
   return (
-    <label className="flex items-center justify-between gap-2 text-xs font-medium text-app-ink">
+    <label className="number-setting">
       <span>{label}</span>
       <input
-        className="ui-input h-7 w-16 px-2 text-right text-xs font-medium"
+        className="number-setting-input ui-input"
         max={max}
         min={min}
         onChange={(event) => {

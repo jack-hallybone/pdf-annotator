@@ -18,9 +18,8 @@ import {
 } from '../viewerConfig';
 
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
-const SIDEBAR_ICON_BUTTON_CLASS = 'ui-button grid h-8 w-8 place-items-center';
-const PAGE_MENU_ITEM_CLASS =
-  'ui-button rounded px-2 py-1 text-left font-medium disabled:opacity-40';
+const SIDEBAR_ICON_BUTTON_CLASS = 'icon-button ui-button';
+const PAGE_MENU_ITEM_CLASS = 'page-menu-item ui-button';
 
 type DocumentSidebarProps = {
   activePageIndex: number;
@@ -108,10 +107,10 @@ export function DocumentSidebar({
 
   return (
     <aside
-      className="ui-frame screen-only absolute bottom-2 left-2 top-2 z-30 flex max-w-[calc(100vw-1rem)] flex-col text-app-ink sm:bottom-3 sm:left-3 sm:top-3"
+      className="document-sidebar ui-frame screen-only"
       style={{ width }}
     >
-      <div className="flex justify-end border-b border-app-ink/10 p-1.5">
+      <div className="document-sidebar-header">
         <button
           className={SIDEBAR_ICON_BUTTON_CLASS}
           onClick={onClose}
@@ -122,7 +121,7 @@ export function DocumentSidebar({
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto p-2" ref={sidebarScrollRef}>
+      <div className="document-sidebar-scroll" ref={sidebarScrollRef}>
         {pages.map((page, index) => (
           <PageThumbnail
             active={index === activePageIndex}
@@ -149,7 +148,7 @@ export function DocumentSidebar({
         ))}
         {pages.length > 0 ? (
           <button
-            className="ui-button mb-1 flex w-full items-center justify-center gap-2 border-dashed border-app-ink/20 bg-app-ui px-2 py-2 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+            className="merge-pdf-button ui-button"
             disabled={busy}
             onClick={onMergePdf}
             title="Add PDF"
@@ -163,7 +162,7 @@ export function DocumentSidebar({
 
       <button
         aria-label="Resize pages sidebar"
-        className="ui-button absolute bottom-0 right-0 top-0 w-2 cursor-ew-resize rounded-r"
+        className="sidebar-resize-handle ui-button"
         onPointerDown={(event) => {
           event.preventDefault();
           const startX = event.clientX;
@@ -279,7 +278,7 @@ function PageThumbnail({
 
   return (
     <div
-      className="relative mb-3"
+      className="page-thumbnail"
       data-thumbnail-index={pageIndex}
       onBlur={(event) => {
         if (menuOpen && !event.currentTarget.contains(event.relatedTarget)) {
@@ -289,14 +288,14 @@ function PageThumbnail({
       ref={thumbnailRef}
     >
       <button
-        className={`ui-button block w-full bg-app-ui p-1 text-left ${
-          active ? 'ui-button-active' : 'border-app-ink/12'
+        className={`page-thumbnail-button ui-button ${
+          active ? 'ui-button-active' : 'page-thumbnail-button-inactive'
         }`}
         onClick={onSelect}
         type="button"
       >
         <div
-          className="relative mx-auto overflow-hidden bg-app-ui"
+          className="page-thumbnail-preview"
           style={{
             aspectRatio: `${thumbnailSize.width} / ${thumbnailSize.height}`,
             width: thumbnailWidth
@@ -315,17 +314,17 @@ function PageThumbnail({
               ) : null}
             </>
           ) : (
-            <div className="absolute inset-0 grid place-items-center bg-app-bg text-[10px] font-medium text-app-ink/50">
+            <div className="page-thumbnail-placeholder">
               {pageIndex + 1}
             </div>
           )}
         </div>
-        <div className="mt-1 text-center text-[11px] font-medium text-app-ink/85">
+        <div className="page-thumbnail-number">
           {pageIndex + 1}
         </div>
       </button>
       <button
-        className="ui-button absolute right-1 top-1 grid h-6 w-6 place-items-center bg-app-ui shadow-sm shadow-app-ink/5"
+        className="page-thumbnail-menu-toggle ui-button"
         onClick={(event) => {
           event.stopPropagation();
           onMenuToggle();
@@ -336,7 +335,7 @@ function PageThumbnail({
         <MoreVertical size={14} />
       </button>
       {menuOpen ? (
-        <div className="ui-panel absolute right-1 top-8 z-50 grid w-36 gap-1 p-1 text-xs font-medium text-app-ink">
+        <div className="page-menu ui-panel">
           <button
             className={PAGE_MENU_ITEM_CLASS}
             onClick={onAddBefore}
@@ -505,7 +504,7 @@ function ThumbnailPageCanvas({
     };
   }, [page, width]);
 
-  return <canvas className="absolute inset-0 h-full w-full" ref={canvasRef} />;
+  return <canvas className="thumbnail-canvas" ref={canvasRef} />;
 }
 
 function isRenderCancellation(error: unknown) {
@@ -529,7 +528,7 @@ function ThumbnailAnnotations({
 }) {
   return (
     <svg
-      className="absolute inset-0 h-full w-full"
+      className="thumbnail-annotations"
       viewBox={`0 0 ${width} ${height}`}
     >
       {annotations.map((annotation) => {

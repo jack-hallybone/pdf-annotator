@@ -1146,12 +1146,12 @@ export function PdfPageView({
   return (
     <article
       aria-current={active ? 'page' : undefined}
-      className="mx-auto mb-4 w-fit bg-white shadow-lg shadow-slate-900/15"
+      className="pdf-page-frame"
       data-page-ready={baseLayerReady ? 'true' : 'false'}
       onClick={() => onActivate(pageIndex)}
     >
       <div
-        className="pdf-page relative overflow-hidden bg-white"
+        className="pdf-page"
         ref={pageRef}
         style={pageStyle}
         onPointerDown={handlePagePointerDown}
@@ -1164,9 +1164,9 @@ export function PdfPageView({
           }
         }}
       >
-        <div className="absolute inset-0">
+        <div className="pdfa-fill">
           <div
-            className="pdfViewer absolute inset-0"
+            className="pdfViewer pdfa-fill"
             ref={baseLayerRef}
             style={{
               '--page-border': '0 solid transparent',
@@ -1175,13 +1175,13 @@ export function PdfPageView({
             } as React.CSSProperties}
           />
           <div
-            className="annotationLayer absolute inset-0"
+            className="annotationLayer pdfa-fill"
             ref={annotationLayerRef}
             style={{ pointerEvents: 'none' }}
           />
           {shouldMountInteractionOverlay ? (
             <svg
-              className="absolute inset-0"
+              className="pdfa-fill"
               height={viewport.height}
               style={{
                 pointerEvents:
@@ -1369,7 +1369,7 @@ export function PdfPageView({
         </div>
         {highlightContextMenu ? (
           <div
-            className="absolute z-20 min-w-32 rounded border border-app-ink/20 bg-app-ui py-1 text-sm font-semibold text-app-ink shadow-lg shadow-app-ink/10"
+            className="highlight-context-menu"
             style={{
               left: highlightContextMenu.x,
               top: highlightContextMenu.y
@@ -1378,7 +1378,7 @@ export function PdfPageView({
             onPointerDown={(event) => event.stopPropagation()}
           >
             <button
-              className="block w-full px-3 py-1.5 text-left hover:bg-app-bg"
+              className="highlight-context-menu-button"
               onClick={() => {
                 if (highlightContextMenu.text) {
                   void navigator.clipboard.writeText(highlightContextMenu.text);
@@ -1583,7 +1583,7 @@ function AnnotationShape({
             {editable ? (
               <AutoFocusTextarea
                 autoFocus={focused}
-                className="h-full w-full resize-none overflow-hidden border-0 bg-transparent px-0 py-0 outline outline-1 outline-app-ink"
+                className="free-text-editor"
                 onChange={(event) =>
                   onUpdate((current) =>
                     current.kind === 'freeText'
@@ -1608,7 +1608,7 @@ function AnnotationShape({
               />
             ) : (
               <div
-                className="h-full w-full overflow-hidden whitespace-pre-wrap"
+                className="free-text-view"
                 style={{
                   color: rgbToCss(annotation.color),
                   fontSize: annotation.fontSize * scale,
@@ -1695,7 +1695,7 @@ function TextHighlightHandles({
   return (
     <g style={{ pointerEvents: 'auto' }}>
       <circle
-        className="cursor-ew-resize"
+        className="highlight-handle"
         cx={start[0]}
         cy={start[1]}
         fill="#047857"
@@ -1705,7 +1705,7 @@ function TextHighlightHandles({
         strokeWidth="2"
       />
       <circle
-        className="cursor-ew-resize"
+        className="highlight-handle"
         cx={end[0]}
         cy={end[1]}
         fill="#047857"
@@ -1771,7 +1771,7 @@ function SelectionToolbar({
       onPointerUp={(event) => event.stopPropagation()}
     >
       <div
-        className="rounded border border-app-ink/20 bg-app-ui p-2 shadow-xl shadow-app-ink/15"
+        className="selection-toolbar"
         style={{ height: toolbarHeight, width: toolbarWidth }}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
@@ -1846,7 +1846,7 @@ function SelectionToolbar({
             </div>
           ) : null}
           <button
-            className="grid h-8 w-8 place-items-center rounded border border-app-ink/20 text-app-ink hover:bg-app-bg"
+            className="selection-delete-button"
             onClick={onDelete}
             title="Delete"
             type="button"

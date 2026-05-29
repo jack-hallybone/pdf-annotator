@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import {
   ChevronRight
 } from 'lucide-react';
@@ -67,6 +77,10 @@ import {
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
+const RENDER_RESOURCE_RELEASE_DELAY_MS = 500;
+const DEFAULT_WORKSPACE_CLASS = 'pdf-annotator--fullscreen';
+const DISCARD_UNSAVED_MESSAGE =
+  'You have unsaved changes. Close this PDF and discard them?';
 
 export type PdfWorkspaceSource = {
   bytes: Uint8Array;
@@ -80,12 +94,75 @@ export type PdfSaveTarget = {
   save: (bytes: Uint8Array) => Promise<void>;
 };
 
-type PdfWorkspaceProps = {
-  onClose: () => void;
-  source: PdfWorkspaceSource;
+export type PdfWorkspaceSession = {
+  activePageIndex: number;
+  activeToolKey: string;
+  annotations: PdfAnnotation[];
+  cleanAnnotations: PdfAnnotation[];
+  cleanWorkSignature: string;
+  fileName: string;
+  hasUnsavedChanges: boolean;
+  importedAnnotationPageIndexes: number[];
+  managedAnnotationPageIndexes: number[];
+  pdfBytes: Uint8Array;
+  pdfFingerprint: string;
+  redoStack: PdfAnnotation[][];
+  removedAnnotationSourceIds: string[];
+  scale: number;
+  showAnnotations: boolean;
+  shouldImportAnnotations: boolean;
+  sidebarOpen: boolean;
+  sidebarWidth: number;
+  sourceId: string;
+  tool: Tool;
+  toolPresets: ToolPresetMap;
+  toolSettings: ToolSettings;
+  undoStack: PdfAnnotation[][];
+  version: 1;
 };
 
-export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
+export type PdfWorkspaceHandle = {
+  releaseRenderResources: () => Promise<void>;
+  snapshot: () => PdfWorkspaceSession | null;
+};
+
+export type PdfWorkspaceProps = {
+  className?: string;
+  confirmDiscardChanges?: (
+    session: PdfWorkspaceSession
+  ) => boolean | Promise<boolean>;
+  enableGlobalShortcuts?: boolean;
+  enableWheelZoom?: boolean;
+  initialSession?: PdfWorkspaceSession | null;
+  manageDocumentTitle?: boolean;
+  onClose: () => void;
+  onDirtyChange?: (hasUnsavedChanges: boolean) => void;
+  onDocumentTitleChange?: (title: string) => void;
+  onSessionChange?: (session: PdfWorkspaceSession) => void;
+  source: PdfWorkspaceSource;
+  style?: CSSProperties;
+  warnBeforeUnload?: boolean;
+};
+
+export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
+  function PdfWorkspace(
+    {
+      className = DEFAULT_WORKSPACE_CLASS,
+      confirmDiscardChanges,
+      enableGlobalShortcuts = true,
+      enableWheelZoom = true,
+      initialSession = null,
+      manageDocumentTitle = true,
+      onClose,
+      onDirtyChange,
+      onDocumentTitleChange,
+      onSessionChange,
+      source,
+      style,
+      warnBeforeUnload = true
+    },
+    ref
+  ) {
   const mergeFileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const lastUndoCommitTimeRef = useRef(0);
@@ -115,6 +192,9 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
   const saveTargetRef = useRef<PdfSaveTarget | null>(null);
   const sourceLoadRef = useRef<string | null>(null);
+  const workspaceSourceIdRef = useRef(source.sourceId);
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
+  const unmountCleanupTimerRef = useRef<number | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
   const [pdfFingerprint, setPdfFingerprint] = useState('');
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
@@ -163,6 +243,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     Boolean(pdfBytes) &&
     cleanWorkSignature.length > 0 &&
     currentWorkSignature !== cleanWorkSignature;
+  const workspaceTitle =
+    pages.length > 0
+      ? `${hasUnsavedChanges ? '*' : ''}${fileName}`
+      : 'PDF Annotator';
   const loadedPageCount = pages.filter(Boolean).length;
   const showPageLoadNotice =
     initialVisualReady &&
@@ -201,21 +285,161 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     afterInitialVisualReadyRef.current.push(callback);
   }
 
-  useEffect(() => {
-    document.title =
-      pages.length > 0
-        ? `${hasUnsavedChanges ? '*' : ''}${fileName}`
-        : 'PDF Annotator';
-  }, [fileName, hasUnsavedChanges, pages.length]);
+  function createWorkspaceSession(): PdfWorkspaceSession | null {
+    if (!pdfBytes) {
+      return null;
+    }
 
-  useLayoutEffect(() => {
-    if (sourceLoadRef.current === source.sourceId) {
+    return {
+      activePageIndex,
+      activeToolKey,
+      annotations,
+      cleanAnnotations: cleanAnnotationsRef.current,
+      cleanWorkSignature,
+      fileName,
+      hasUnsavedChanges,
+      importedAnnotationPageIndexes: Array.from(
+        importedAnnotationPagesRef.current
+      ),
+      managedAnnotationPageIndexes: Array.from(
+        managedAnnotationPagesRef.current
+      ),
+      pdfBytes,
+      pdfFingerprint,
+      redoStack,
+      removedAnnotationSourceIds: Array.from(
+        removedAnnotationSourceIdsRef.current
+      ),
+      scale,
+      showAnnotations,
+      shouldImportAnnotations: shouldImportAnnotationsRef.current,
+      sidebarOpen,
+      sidebarWidth,
+      sourceId: workspaceSourceIdRef.current,
+      tool,
+      toolPresets,
+      toolSettings,
+      undoStack,
+      version: 1
+    };
+  }
+
+  async function releaseRenderResources() {
+    const currentPdfDoc = pdfDocRef.current;
+    pdfDocRef.current = null;
+    loadGenerationRef.current += 1;
+    cleanupPrintResources();
+    await cancelLoadingTask();
+    await destroyPdfDocument(currentPdfDoc);
+  }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      releaseRenderResources,
+      snapshot: createWorkspaceSession
+    }),
+    [
+      activePageIndex,
+      activeToolKey,
+      annotations,
+      cleanWorkSignature,
+      fileName,
+      hasUnsavedChanges,
+      pdfBytes,
+      pdfFingerprint,
+      redoStack,
+      scale,
+      showAnnotations,
+      sidebarOpen,
+      sidebarWidth,
+      tool,
+      toolPresets,
+      toolSettings,
+      undoStack
+    ]
+  );
+
+  useEffect(() => {
+    pdfDocRef.current = pdfDoc;
+  }, [pdfDoc]);
+
+  useEffect(() => {
+    if (!onSessionChange) {
       return;
     }
 
-    sourceLoadRef.current = source.sourceId;
+    const session = createWorkspaceSession();
+    if (session) {
+      onSessionChange(session);
+    }
+  }, [
+    activePageIndex,
+    activeToolKey,
+    annotations,
+    cleanWorkSignature,
+    fileName,
+    hasUnsavedChanges,
+    onSessionChange,
+    pdfBytes,
+    pdfFingerprint,
+    redoStack,
+    scale,
+    showAnnotations,
+    sidebarOpen,
+    sidebarWidth,
+    tool,
+    toolPresets,
+    toolSettings,
+    undoStack
+  ]);
+
+  useLayoutEffect(() => {
+    if (unmountCleanupTimerRef.current !== null) {
+      window.clearTimeout(unmountCleanupTimerRef.current);
+      unmountCleanupTimerRef.current = null;
+    }
+
+    return () => {
+      unmountCleanupTimerRef.current = window.setTimeout(() => {
+        const currentPdfDoc = pdfDocRef.current;
+        pdfDocRef.current = null;
+        sourceLoadRef.current = null;
+        loadGenerationRef.current += 1;
+        cleanupPrintResources();
+        void cancelLoadingTask();
+        void destroyPdfDocument(currentPdfDoc);
+      }, RENDER_RESOURCE_RELEASE_DELAY_MS);
+    };
+  }, []);
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+
+  useEffect(() => {
+    onDocumentTitleChange?.(workspaceTitle);
+    if (manageDocumentTitle) {
+      document.title = workspaceTitle;
+    }
+  }, [manageDocumentTitle, onDocumentTitleChange, workspaceTitle]);
+
+  useLayoutEffect(() => {
+    const nextSourceId = initialSession?.sourceId ?? source.sourceId;
+    if (sourceLoadRef.current === nextSourceId) {
+      return;
+    }
+
+    sourceLoadRef.current = nextSourceId;
+    if (initialSession) {
+      void restoreWorkspaceSession(initialSession);
+      return;
+    }
+
+    workspaceSourceIdRef.current = source.sourceId;
     void loadPdfBytes(source.bytes, source.name, {
-      saveTarget: source.saveTarget ?? null
+      saveTarget: source.saveTarget ?? null,
+      sourceId: source.sourceId
     }).then(() => {
       if (source.markDirty && sourceLoadRef.current === source.sourceId) {
         setCleanWorkSignature(
@@ -223,7 +447,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
         );
       }
     });
-  }, [source]);
+  }, [initialSession, source]);
 
   function markPageAccess(pageIndex: number) {
     pageAccessClockRef.current += 1;
@@ -325,7 +549,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   }
 
   useEffect(() => {
-    if (!hasUnsavedChanges) {
+    if (!warnBeforeUnload || !hasUnsavedChanges) {
       return;
     }
 
@@ -336,7 +560,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
+  }, [hasUnsavedChanges, warnBeforeUnload]);
 
   function updateZoom(delta: number) {
     captureZoomAnchor();
@@ -428,6 +652,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   }, [pages.length, scale]);
 
   useEffect(() => {
+    if (!enableGlobalShortcuts) {
+      return;
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isEditingText =
@@ -497,6 +725,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     annotations,
+    enableGlobalShortcuts,
     focusedAnnotationId,
     hasUnsavedChanges,
     pages.length,
@@ -506,6 +735,10 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
   ]);
 
   useEffect(() => {
+    if (!enableWheelZoom) {
+      return;
+    }
+
     function handleWheel(event: WheelEvent) {
       if (!event.ctrlKey && !event.metaKey) {
         return;
@@ -517,7 +750,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
     window.addEventListener('wheel', handleWheel, { passive: false });
     return () => window.removeEventListener('wheel', handleWheel);
-  }, []);
+  }, [enableWheelZoom]);
 
   useEffect(() => {
     const container = scrollContainerRef.current;
@@ -712,7 +945,9 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
     if (clearFileInfo) {
       setFileName('document.pdf');
-      document.title = 'PDF Annotator';
+      if (manageDocumentTitle) {
+        document.title = 'PDF Annotator';
+      }
     }
 
     if (clearAnnotations) {
@@ -743,19 +978,31 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     }
   }
 
-  function confirmDiscardUnsavedChanges() {
-    return (
-      !hasUnsavedChanges ||
-      window.confirm('You have unsaved changes. Close this PDF and discard them?')
-    );
+  async function confirmDiscardUnsavedChanges() {
+    if (!hasUnsavedChanges) {
+      return true;
+    }
+
+    const session = createWorkspaceSession();
+    if (confirmDiscardChanges && session) {
+      try {
+        return await confirmDiscardChanges(session);
+      } catch (error) {
+        console.error(error);
+        return false;
+      }
+    }
+
+    return window.confirm(DISCARD_UNSAVED_MESSAGE);
   }
 
   async function handleClosePdf() {
-    if (!confirmDiscardUnsavedChanges()) {
+    if (!(await confirmDiscardUnsavedChanges())) {
       return;
     }
 
     const currentPdfDoc = pdfDoc;
+    pdfDocRef.current = null;
     loadGenerationRef.current += 1;
     cleanupPrintResources();
     onClose();
@@ -790,24 +1037,53 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     }
   }
 
+  async function restoreWorkspaceSession(session: PdfWorkspaceSession) {
+    await loadPdfBytes(session.pdfBytes, session.fileName, {
+      activePage: session.activePageIndex,
+      clearWorkingAnnotations: false,
+      restoredSession: session,
+      saveTarget: source.saveTarget ?? null,
+      sourceId: session.sourceId
+    });
+  }
+
   async function loadPdfBytes(
     bytes: Uint8Array,
     name: string,
     options: {
       activePage?: number;
       clearWorkingAnnotations?: boolean;
+      restoredSession?: PdfWorkspaceSession | null;
       saveTarget?: PdfSaveTarget | null;
+      sourceId?: string;
     } = {}
   ) {
     const currentPdfDoc = pdfDoc;
     const generation = loadGenerationRef.current + 1;
     const nextPdfFingerprint = byteFingerprint(bytes);
+    const restoredSession = options.restoredSession ?? null;
     loadGenerationRef.current = generation;
-    shouldImportAnnotationsRef.current = true;
     resetPdfState({
       clearAnnotations: options.clearWorkingAnnotations ?? true,
       clearFileInfo: false
     });
+    workspaceSourceIdRef.current =
+      options.sourceId ?? workspaceSourceIdRef.current;
+    if (restoredSession) {
+      importedAnnotationPagesRef.current = new Set(
+        restoredSession.importedAnnotationPageIndexes
+      );
+      managedAnnotationPagesRef.current = new Set(
+        restoredSession.managedAnnotationPageIndexes
+      );
+      removedAnnotationSourceIdsRef.current = new Set(
+        restoredSession.removedAnnotationSourceIds
+      );
+      shouldImportAnnotationsRef.current =
+        restoredSession.shouldImportAnnotations;
+    } else {
+      shouldImportAnnotationsRef.current = true;
+    }
     setBusy(true);
     setStatus('Loading PDF...');
 
@@ -862,7 +1138,27 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       activePageIndexRef.current = activePage;
       setActivePageIndex(activePage);
 
-      if (options.clearWorkingAnnotations ?? true) {
+      if (restoredSession) {
+        cleanAnnotationsRef.current = restoredSession.cleanAnnotations.map(
+          normalizeAnnotationLayout
+        );
+        setTool(restoredSession.tool);
+        setActiveToolKey(restoredSession.activeToolKey);
+        setToolSettings(restoredSession.toolSettings);
+        setToolPresets(restoredSession.toolPresets);
+        setScale(restoredSession.scale);
+        setShowAnnotations(restoredSession.showAnnotations);
+        setSidebarOpen(restoredSession.sidebarOpen);
+        setSidebarWidth(restoredSession.sidebarWidth);
+        setCleanWorkSignature(restoredSession.cleanWorkSignature);
+        setAnnotations(
+          restoredSession.annotations.map(normalizeAnnotationLayout)
+        );
+        setSelectedAnnotationIds([]);
+        setFocusedAnnotationId(null);
+        setUndoStack(restoredSession.undoStack);
+        setRedoStack(restoredSession.redoStack);
+      } else if (options.clearWorkingAnnotations ?? true) {
         setTool('select');
         setActiveToolKey('select');
         cleanAnnotationsRef.current = [];
@@ -1928,7 +2224,8 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
 
   return (
     <main
-      className="relative h-screen min-w-0 overflow-hidden bg-app-bg text-app-ink"
+      className={['pdf-annotator', className].filter(Boolean).join(' ')}
+      style={style}
       onDragEnter={handlePdfDragEnter}
       onDragLeave={handlePdfDragLeave}
       onDragOver={handlePdfDragOver}
@@ -1936,7 +2233,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
     >
       <input
         accept="application/pdf"
-        className="hidden"
+        className="pdfa-hidden-input"
         onChange={handleMergeFileChange}
         ref={mergeFileInputRef}
         type="file"
@@ -1967,9 +2264,9 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       ) : null}
 
       {initialVisualReady && pages.length > 0 && !sidebarOpen ? (
-        <div className="ui-frame screen-only absolute left-2 top-2 z-40 p-1 text-app-ink sm:left-3 sm:top-3">
+        <div className="sidebar-toggle ui-frame screen-only">
           <button
-            className="ui-button grid h-8 w-8 place-items-center"
+            className="icon-button ui-button"
             onClick={() => setSidebarOpen(true)}
             title="Show sidebar"
             type="button"
@@ -1980,7 +2277,7 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       ) : null}
 
       <section
-        className="pdf-scroll-root h-full overflow-auto pt-4 pb-[50vh]"
+        className="pdf-scroll-root"
         ref={scrollContainerRef}
       >
         {pages.length > 0 ? (
@@ -2096,23 +2393,24 @@ export function PdfWorkspace({ onClose, source }: PdfWorkspaceProps) {
       ) : null}
 
       {!initialVisualReady ? (
-        <div className="screen-only absolute inset-0 z-50 grid place-items-center bg-app-bg px-4">
-          <div className="ui-frame px-4 py-3 text-sm font-medium text-app-ink">
+        <div className="loading-overlay screen-only">
+          <div className="loading-message ui-frame">
             Loading PDF...
           </div>
         </div>
       ) : null}
 
       {pdfDragActive ? (
-        <div className="screen-only pointer-events-none absolute inset-0 z-50 grid place-items-center bg-app-ink/10">
-          <div className="ui-frame px-5 py-4 text-sm font-medium text-app-ink">
+        <div className="blocked-drop-overlay screen-only">
+          <div className="blocked-drop-message ui-frame">
             Close the current PDF before opening another
           </div>
         </div>
       ) : null}
     </main>
   );
-}
+  }
+);
 
 function downloadPdf(bytes: Uint8Array, name: string) {
   const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
@@ -2142,7 +2440,7 @@ function PdfPagePlaceholder({
   return (
     <article
       aria-label={`Loading page ${pageIndex + 1}`}
-      className="mx-auto mb-4 grid w-fit place-items-center bg-app-ui text-xs font-medium text-app-ink/50 shadow-sm shadow-app-ink/5"
+      className="pdf-page-placeholder"
       style={{ height, width }}
     >
       Page {pageIndex + 1}

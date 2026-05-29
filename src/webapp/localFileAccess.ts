@@ -173,13 +173,15 @@ async function abortWritable(writable: LocalWritableFileStream) {
 }
 
 function isPdfFileHandle(handle: unknown): handle is LocalPdfFileHandle {
+  const candidate = handle as Partial<LocalPdfFileHandle> | null;
   return (
     typeof handle === 'object' &&
     handle !== null &&
-    (handle as LocalPdfFileHandle).kind === 'file' &&
-    typeof (handle as LocalPdfFileHandle).getFile === 'function' &&
-    typeof (handle as LocalPdfFileHandle).createWritable === 'function' &&
-    (handle as LocalPdfFileHandle).name.toLowerCase().endsWith('.pdf')
+    candidate?.kind === 'file' &&
+    typeof candidate.name === 'string' &&
+    typeof candidate.getFile === 'function' &&
+    typeof candidate.createWritable === 'function' &&
+    candidate.name.toLowerCase().endsWith('.pdf')
   );
 }
 

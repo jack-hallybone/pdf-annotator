@@ -1,6 +1,5 @@
 import type { PreviewServerHook, ViteDevServer } from 'vite';
 import { defineConfig } from 'vite';
-import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 
 declare const process: {
@@ -90,7 +89,7 @@ function normalizeBasePath(value: string | undefined) {
 
 export default defineConfig({
   base,
-  plugins: [tailwindcss(), react(), {
+  plugins: [react(), {
     name: 'local-security-headers',
     configureServer: applyHeaders(devSecurityHeaders),
     configurePreviewServer: applyHeaders(previewSecurityHeaders)

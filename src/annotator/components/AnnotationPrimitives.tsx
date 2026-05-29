@@ -118,7 +118,7 @@ export function NotePopover({
       {editable ? (
         <AutoFocusTextarea
           autoFocus={autoFocus}
-          className="resize-none overflow-hidden rounded border border-amber-300 bg-amber-50 p-2 text-sm leading-5 text-slate-900 shadow-lg shadow-app-ink/10 outline-none focus:ring-2 focus:ring-app-purple/20"
+          className="note-popover note-popover-editor"
           onChange={(event) => onTextChange?.(event.target.value)}
           onBlur={onBlur}
           onFocus={onFocus}
@@ -133,7 +133,7 @@ export function NotePopover({
         />
       ) : (
         <div
-          className="overflow-auto rounded border border-amber-300 bg-amber-50 p-2 text-sm leading-5 text-slate-900 shadow-lg shadow-app-ink/10"
+          className="note-popover"
           style={{
             backgroundColor,
             borderColor,

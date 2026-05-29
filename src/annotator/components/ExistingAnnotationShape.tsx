@@ -125,7 +125,7 @@ export function ExistingAnnotationShape({
           x={rect.x}
           y={rect.y}
         >
-          <div className="h-full w-full whitespace-pre-wrap rounded border border-app-ink/12 bg-app-ui px-2 py-1 text-[12px] leading-snug text-app-ink">
+          <div className="existing-free-text">
             {(annotation.textContent ?? [annotation.contentsObj?.str ?? ''])
               .filter(Boolean)
               .join('\n')}
