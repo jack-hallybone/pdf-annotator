@@ -35,7 +35,13 @@ export function PdfView() {
   }
 
   return source ? (
-    <PdfWorkspace source={source} onClose={() => setSource(null)} />
+    <PdfWorkspace
+      source={source}
+      onClose={() => setSource(null)}
+      onOpenExternalLink={(url) =>
+        window.open(url, '_blank', 'noopener,noreferrer')
+      }
+    />
   ) : (
     <input
       accept="application/pdf"
@@ -51,6 +57,33 @@ export function PdfView() {
 
 For a PDF already hosted by your site, fetch it and set `bytes: new Uint8Array(await response.arrayBuffer())`.
 
+Required props:
+
+- `source`: a `PdfWorkspaceSource` containing PDF bytes or a loader.
+- `onClose`: called when the workspace close button is pressed.
+
+Optional props:
+
+- `className`, `style`: size and style the workspace host element.
+- `confirmDiscardChanges(session)`: override the unsaved-close confirmation.
+- `enableGlobalShortcuts`: enable `Ctrl+S`, undo/redo, zoom shortcuts. Defaults to `true`.
+- `enableWheelZoom`: enable `Ctrl+wheel` zoom. Defaults to `true`.
+- `initialSession`: restore a previous `PdfWorkspaceSession`.
+- `manageDocumentTitle`: let the component update `document.title`. Defaults to `true`.
+- `onDirtyChange(isDirty)`: observe unsaved-change state.
+- `onDocumentTitleChange(title)`: observe the current document title.
+- `onOpenExternalLink(url, context)`: open confirmed external PDF links. If omitted, links open in a new browser tab.
+- `onSessionChange(session)`: observe the current workspace session.
+- `showCloseButton`: show the workspace close button. Defaults to `true`.
+- `warnBeforeUnload`: show the browser unsaved-changes prompt. Defaults to `true`.
+
+`source` can be:
+
+- `{ bytes, name, sourceId }` for already-loaded PDF bytes.
+- `{ kind: 'loader', loadBytes, name, sourceId }` to let the workspace show its loading UI while bytes are fetched.
+- Either source may include `saveTarget.save(bytes)` to write back to the original file. If saving fails or no `saveTarget` is supplied, the workspace downloads a copy.
+- Either source may include `initialAnnotations` to open a generated PDF with editable unsaved annotations already on the page.
+
 Style it by overriding CSS variables and, if needed, passing `className`/`style` to control size.
 
 ```css
@@ -61,3 +94,45 @@ Style it by overriding CSS variables and, if needed, passing `className`/`style`
   --pdfa-accent: #cc41bf;
 }
 ```
+
+## Reusable pieces
+
+The code is split into reusable layers:
+
+- `src/annotator`: single-PDF viewer/editor component. It does not know how the host opens files.
+- `src/tabbedapp`: reusable multi-PDF tab shell. It owns tabs, snapshots, dirty state and resource cleanup.
+- `src/browserapp`: browser/GitHub Pages host. It provides file-system access and the branded home page.
+
+Browser apps can use the default external-link opener. Desktop hosts should pass `onOpenExternalLink` and open confirmed links through the system browser.
+
+Import `TabbedPdfShell` from `src/tabbedapp` and provide a `PdfHostAdapter`. Browser-only file picker and drag/drop code lives in `src/browserapp`; it is not part of the reusable tabbed shell.
+
+```tsx
+const shellRef = useRef<TabbedPdfShellHandle>(null);
+
+<TabbedPdfShell
+  fileAdapter={myFileAdapter}
+  ref={shellRef}
+  workspaceOptions={{ onOpenExternalLink: openInHostBrowser }}
+/>
+
+shellRef.current?.openDocument({
+  fileKey: referenceItem.id,
+  source: {
+    kind: 'loader',
+    loadBytes: () => loadPdfBytesForReference(referenceItem),
+    name: referenceItem.pdfName
+  }
+});
+```
+
+The shell also accepts `initialDocuments`, `onDocumentsChange`, `confirmCloseDocuments`, and `renderHome`. The default home tab is intentionally blank; host apps can pass `renderHome` to provide a library, dashboard or landing page inside the home tab. The browser app uses this to supply the current Open PDFs/Create PDF home screen.
+
+## Workspace lifecycle
+
+Desktop-style hosts should keep one workspace mounted for the active tab. Before hiding a tab, call `snapshot()` from the component ref and store the returned `PdfWorkspaceSession`. After hiding it, call `releaseRenderResources()` to discard PDF.js canvases/pages. When showing that tab again, pass the saved session back as `initialSession`.
+
+Ref methods:
+
+- `snapshot()`: returns the current `PdfWorkspaceSession`, or `null` if no PDF is loaded.
+- `releaseRenderResources()`: releases PDF.js render resources for a hidden workspace.

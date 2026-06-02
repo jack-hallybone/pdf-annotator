@@ -2,6 +2,7 @@ const PDF_LINK_REL = 'noopener noreferrer nofollow';
 const PDF_LINK_ALLOWED_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
 
 type PdfLinkServiceOptions = {
+  onExternalLinkRequest: (url: string) => void;
   onNavigateDestination: (destination: string | unknown[]) => void;
   onNavigatePage: (pageIndex: number) => void;
   pageCount: number;
@@ -9,6 +10,7 @@ type PdfLinkServiceOptions = {
 };
 
 export function createPdfLinkService({
+  onExternalLinkRequest,
   onNavigateDestination,
   onNavigatePage,
   pageCount,
@@ -30,12 +32,28 @@ export function createPdfLinkService({
         return;
       }
 
-      link.href = safeUrl;
+      link.removeAttribute('href');
       link.rel = PDF_LINK_REL;
       link.referrerPolicy = 'no-referrer';
+      link.role = 'link';
+      link.tabIndex = 0;
       link.target = '_blank';
       link.title = safePdfLinkTitle(safeUrl);
       link.classList.add('pdf-external-link');
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onExternalLinkRequest(safeUrl);
+      });
+      link.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        onExternalLinkRequest(safeUrl);
+      });
     },
     getDestinationHash: () => '#',
     getAnchorUrl: (hash: string) => hash || '#',

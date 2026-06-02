@@ -22,6 +22,28 @@ export async function readPdfFile(file: File) {
   return new Uint8Array(await file.arrayBuffer());
 }
 
+export function createPdfFileLoader(
+  file: File,
+  { preload = false }: { preload?: boolean } = {}
+) {
+  let request: Promise<Uint8Array> | null = preload ? load() : null;
+
+  function load() {
+    const nextRequest = readPdfFile(file).catch((error) => {
+      if (request === nextRequest) {
+        request = null;
+      }
+      throw error;
+    });
+    return nextRequest;
+  }
+
+  return () => {
+    request ??= load();
+    return request;
+  };
+}
+
 function hasPdfHeader(bytes: Uint8Array) {
   const header = [37, 80, 68, 70, 45]; // %PDF-
   const maxStart = bytes.length - header.length;

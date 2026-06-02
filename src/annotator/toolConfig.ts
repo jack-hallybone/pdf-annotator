@@ -62,7 +62,7 @@ export const tools: ToolDefinition[] = [
 
 export const defaultToolSettings: ToolSettings = {
   highlightColor: inkColors.yellow,
-  highlightOpacity: 0.35,
+  highlightOpacity: 0.5,
   highlightWidth: 8,
   drawColor: inkColors.blue,
   drawOpacity: 1,
@@ -115,15 +115,6 @@ export function toolAccent(
     case 'select':
       return '#334155';
   }
-}
-
-export function toolButtonActive(
-  activeTool: Tool,
-  activeToolKey: string,
-  tool: Tool,
-  toolKey: string
-) {
-  return activeTool === tool && activeToolKey === toolKey;
 }
 
 export function defaultToolKeyForTool(tool: Tool) {

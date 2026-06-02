@@ -1,5 +1,10 @@
 import { AnnotationType } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
+import {
+  boundsForPoints,
+  pathLooksClosed,
+  rectToQuadPoints
+} from './annotationGeometry';
 import type { PdfAnnotation, PdfPoint, PdfRect } from './types';
 
 export type ExistingPdfAnnotation = Record<string, any>;
@@ -43,8 +48,15 @@ function mapExistingAnnotation(
   pageIndex: number,
   annotationIndex: number
 ): PdfAnnotation | null {
-  const sourceId = existingAnnotationId(annotation, annotationIndex);
-  const id = `imported-${pageIndex}-${sourceId}`;
+  const sourceId = existingAnnotationSourceId(
+    annotation,
+    pageIndex,
+    annotationIndex
+  );
+  const id = `imported-${pageIndex}-${existingAnnotationId(
+    annotation,
+    annotationIndex
+  )}`;
   const color = pdfjsColorToRgb(
     annotation.color ?? annotation.defaultAppearanceData?.fontColor,
     [1, 0.85, 0.15]
@@ -73,7 +85,11 @@ function mapExistingAnnotation(
       };
     }
 
-    case AnnotationType.INK:
+    case AnnotationType.INK: {
+      if (!isEditableExistingAnnotation(annotation)) {
+        return null;
+      }
+
       const inkLists = normalizeInkLists(annotation);
       if (inkLists.length === 0) {
         return null;
@@ -93,8 +109,13 @@ function mapExistingAnnotation(
         width: inkWidth(annotation, inkIsHighlight),
         contents: ''
       };
+    }
 
     case AnnotationType.FREETEXT:
+      if (!isEditableExistingAnnotation(annotation)) {
+        return null;
+      }
+
       const freeTextRect = rectFromArray(annotation.rect);
       if (!freeTextRect) {
         return null;
@@ -116,6 +137,10 @@ function mapExistingAnnotation(
       };
 
     case AnnotationType.TEXT:
+      if (!isEditableExistingAnnotation(annotation)) {
+        return null;
+      }
+
       const noteRect = rectFromArray(annotation.rect);
       if (!noteRect) {
         return null;
@@ -134,6 +159,73 @@ function mapExistingAnnotation(
     default:
       return null;
   }
+}
+
+export function isEditableExistingAnnotation(annotation: ExistingPdfAnnotation) {
+  switch (annotation.annotationType) {
+    case AnnotationType.HIGHLIGHT:
+      return true;
+
+    case AnnotationType.INK:
+      return isSimpleInkAnnotation(annotation);
+
+    case AnnotationType.FREETEXT:
+      return isSimpleFreeTextAnnotation(annotation);
+
+    case AnnotationType.TEXT:
+      return isSimpleStickyNoteAnnotation(annotation);
+
+    default:
+      return false;
+  }
+}
+
+function isSimpleFreeTextAnnotation(annotation: ExistingPdfAnnotation) {
+  const text = extractAnnotationText(annotation).trim();
+  if (!text || hasComplexFreeTextIntent(annotation)) {
+    return false;
+  }
+
+  if (
+    hasAnyAnnotationProperty(annotation, [
+      'callout',
+      'calloutLine',
+      'calloutLines',
+      'calloutPoints',
+      'lineCoordinates',
+      'vertices'
+    ])
+  ) {
+    return false;
+  }
+
+  const borderWidth = firstFiniteNumber(
+    annotation.borderStyle?.width,
+    annotation.borderStyle?.rawWidth
+  );
+  if (borderWidth !== null && borderWidth > 0) {
+    return false;
+  }
+
+  const subject = annotationTextHint(annotation.subject).toLowerCase();
+  return !/callout|equation|formula|shape|stamp/.test(subject);
+}
+
+function isSimpleStickyNoteAnnotation(annotation: ExistingPdfAnnotation) {
+  return extractAnnotationText(annotation).trim().length > 0;
+}
+
+function isSimpleInkAnnotation(annotation: ExistingPdfAnnotation) {
+  const paths = normalizeInkLists(annotation);
+  if (paths.length === 0 || hasComplexInkIntent(annotation)) {
+    return false;
+  }
+
+  if (isInkHighlight(annotation)) {
+    return true;
+  }
+
+  return !isAppearanceBackedClosedInk(annotation, paths);
 }
 
 type InkList =
@@ -295,7 +387,7 @@ function pathLooksLikeHighlightBand(path: PdfPoint[]) {
     return false;
   }
 
-  const bounds = boundsForPath(path);
+  const bounds = boundsForPoints(path);
   const width = Math.abs(bounds.x2 - bounds.x1);
   const height = Math.abs(bounds.y2 - bounds.y1);
   const shorterSide = Math.min(width, height);
@@ -305,36 +397,6 @@ function pathLooksLikeHighlightBand(path: PdfPoint[]) {
     longerSide >= 18 &&
     shorterSide >= 3 &&
     longerSide / Math.max(shorterSide, 1) >= 2.2
-  );
-}
-
-export function pathLooksClosed(path: PdfPoint[]) {
-  if (path.length < 4) {
-    return false;
-  }
-
-  const first = path[0];
-  const last = path[path.length - 1];
-  const bounds = boundsForPath(path);
-  const diagonal = Math.hypot(bounds.x2 - bounds.x1, bounds.y2 - bounds.y1);
-  const closingDistance = Math.hypot(first.x - last.x, first.y - last.y);
-  return closingDistance <= Math.max(2, diagonal * 0.03);
-}
-
-function boundsForPath(path: PdfPoint[]) {
-  return path.reduce(
-    (bounds, point) => ({
-      x1: Math.min(bounds.x1, point.x),
-      y1: Math.min(bounds.y1, point.y),
-      x2: Math.max(bounds.x2, point.x),
-      y2: Math.max(bounds.y2, point.y)
-    }),
-    {
-      x1: Number.POSITIVE_INFINITY,
-      y1: Number.POSITIVE_INFINITY,
-      x2: Number.NEGATIVE_INFINITY,
-      y2: Number.NEGATIVE_INFINITY
-    }
   );
 }
 
@@ -354,6 +416,129 @@ function hasHighlightHint(annotation: ExistingPdfAnnotation) {
     .toLowerCase();
 
   return text.includes('highlight') || text.includes('highlighter');
+}
+
+function isAppearanceBackedClosedInk(
+  annotation: ExistingPdfAnnotation,
+  paths: PdfPoint[][]
+) {
+  if (!hasNormalAppearance(annotation)) {
+    return false;
+  }
+
+  const effectiveWidth = firstFiniteNumber(
+    annotation.borderStyle?.width,
+    annotation.width,
+    annotation.thickness
+  );
+  if (effectiveWidth !== null && effectiveWidth > 0.05) {
+    return false;
+  }
+
+  return looksLikeClosedAppearanceInk(paths);
+}
+
+function looksLikeClosedAppearanceInk(paths: PdfPoint[][]) {
+  const closedPaths = paths.filter(
+    (path) => path.length >= 4 && pathLooksClosed(path)
+  );
+  if (closedPaths.length === 0 || closedPaths.length / paths.length < 0.75) {
+    return false;
+  }
+
+  const points = paths.flat();
+  const bounds = boundsForPoints(points);
+  const width = Math.abs(bounds.x2 - bounds.x1);
+  const height = Math.abs(bounds.y2 - bounds.y1);
+  const pointCount = points.length;
+
+  return width >= 6 && height >= 6 && pointCount >= 20;
+}
+
+function hasNormalAppearance(annotation: ExistingPdfAnnotation) {
+  return Boolean(
+    annotation.hasAppearance ||
+      annotation.hasOwnCanvas ||
+      annotation.appearance ||
+      annotation.appearanceData ||
+      annotation.appearanceStream ||
+      annotation.appearanceRef ||
+      annotation.ap ||
+      annotation.AP
+  );
+}
+
+function hasComplexInkIntent(annotation: ExistingPdfAnnotation) {
+  const text = [
+    annotation.it,
+    annotation.intent,
+    annotation.annotationIntent,
+    annotation.name,
+    annotation.subject,
+    annotation.title,
+    annotation.titleObj?.str,
+    annotation.contents,
+    annotation.contentsObj?.str
+  ]
+    .map(annotationTextHint)
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return /equation|formula|math|stamp|shape|callout|text/.test(text);
+}
+
+function hasComplexFreeTextIntent(annotation: ExistingPdfAnnotation) {
+  const text = [
+    annotation.it,
+    annotation.intent,
+    annotation.annotationIntent,
+    annotation.name,
+    annotation.title,
+    annotation.titleObj?.str,
+    annotation.contents,
+    annotation.contentsObj?.str
+  ]
+    .map(annotationTextHint)
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return /callout|equation|formula|shape|stamp/.test(text);
+}
+
+function hasAnyAnnotationProperty(
+  annotation: ExistingPdfAnnotation,
+  keys: string[]
+) {
+  return keys.some((key) => hasAnnotationProperty(annotation, key));
+}
+
+function hasAnnotationProperty(annotation: ExistingPdfAnnotation, key: string) {
+  const value = annotation[key];
+  if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+    return Array.isArray(value) ? value.length > 0 : value.byteLength > 0;
+  }
+
+  return value !== undefined && value !== null;
+}
+
+function annotationTextHint(value: unknown) {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value && typeof value === 'object') {
+    const candidate = value as { str?: unknown; text?: unknown };
+    if (typeof candidate.str === 'string') {
+      return candidate.str;
+    }
+    if (typeof candidate.text === 'string') {
+      return candidate.text;
+    }
+  }
+
+  return '';
 }
 
 function isNearBlack([r, g, b]: [number, number, number]) {
@@ -425,6 +610,106 @@ export function existingAnnotationId(
   );
 }
 
+function existingAnnotationSourceId(
+  annotation: ExistingPdfAnnotation,
+  pageIndex: number,
+  annotationIndex: number
+) {
+  return uniqueSourceIdCandidates([
+    annotation.id,
+    annotation.refName,
+    annotation.annotationId,
+    annotation.nm,
+    annotation.NM,
+    annotation.nameObj?.str,
+    annotation.nameObj?.text,
+    annotationGeometrySourceKey(annotation),
+    `page:${pageIndex}:annotation-${annotationIndex}`
+  ]).join('|');
+}
+
+function annotationGeometrySourceKey(annotation: ExistingPdfAnnotation) {
+  const rect = rectSourceKey(annotation.rect);
+  if (!rect) {
+    return '';
+  }
+
+  const subtype = annotationTextHint(annotation.subtype).trim();
+  if (!subtype) {
+    return '';
+  }
+
+  const text = annotationContentsSourceText(annotation).trim();
+  return `geom:${subtype.toLowerCase()}:${rect}:${
+    text ? textHash(text) : 'empty'
+  }`;
+}
+
+function annotationContentsSourceText(annotation: ExistingPdfAnnotation) {
+  return (
+    annotationTextHint(annotation.contentsObj) ||
+    annotationTextHint(annotation.contents) ||
+    extractAnnotationText(annotation)
+  );
+}
+
+function rectSourceKey(rect: unknown) {
+  if (!Array.isArray(rect) && !(rect instanceof Float32Array)) {
+    return '';
+  }
+
+  const values = Array.from(rect).slice(0, 4).map(Number);
+  if (values.length < 4 || !values.every(Number.isFinite)) {
+    return '';
+  }
+
+  return normalizedRectValues(values).map(sourceKeyNumber).join(',');
+}
+
+function normalizedRectValues(values: number[]) {
+  return [
+    Math.min(values[0], values[2]),
+    Math.min(values[1], values[3]),
+    Math.max(values[0], values[2]),
+    Math.max(values[1], values[3])
+  ];
+}
+
+function sourceKeyNumber(value: number) {
+  return Number(value.toFixed(2)).toString();
+}
+
+function textHash(text: string) {
+  let hash = 2166136261;
+  for (const character of text) {
+    hash ^= character.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function uniqueSourceIdCandidates(values: unknown[]) {
+  const seen = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const value of values) {
+    const text = annotationTextHint(value).trim();
+    if (!text) {
+      continue;
+    }
+
+    const key = text.toLowerCase().replace(/\s+/g, '');
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    candidates.push(text);
+  }
+
+  return candidates;
+}
+
 function quadPointsToRects(quadPoints?: number[], rect?: number[]) {
   if (quadPoints?.length) {
     return chunkQuadPoints(quadPoints)
@@ -445,19 +730,6 @@ function chunkQuadPoints(quadPoints: number[]) {
   return Array.from({ length: Math.floor(quadPoints.length / 8) }, (_, index) =>
     quadPoints.slice(index * 8, index * 8 + 8)
   );
-}
-
-function rectToQuadPoints(rect: PdfRect) {
-  return [
-    rect.x1,
-    rect.y2,
-    rect.x2,
-    rect.y2,
-    rect.x1,
-    rect.y1,
-    rect.x2,
-    rect.y1
-  ];
 }
 
 function pointsArrayToPath(points: InkList): PdfPoint[] {

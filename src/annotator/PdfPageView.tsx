@@ -1,8 +1,9 @@
 import { Trash2 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AnnotationLayer,
-  AnnotationMode
+  AnnotationMode,
+  AnnotationType
 } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import {
@@ -21,17 +22,17 @@ import {
   NumberSetting,
   SettingsPanelShell
 } from './SettingsPanel';
+import { rgbToCss } from './annotationColors';
 import {
-  isEditableExistingAnnotation,
-  isSvgRenderedExistingAnnotation,
-  rgbToCss
-} from './annotationColors';
-import { existingAnnotationId, getDisplayAnnotations } from './annotationImport';
+  getDisplayAnnotations,
+  isEditableExistingAnnotation
+} from './annotationImport';
 import type { ExistingPdfAnnotation } from './annotationImport';
 import {
   annotationBounds,
   annotationHitTest,
   annotationWhollyInsidePolygon,
+  appendInkPoint,
   boundsForRects,
   dotPath,
   isLassoSelectableAnnotation,
@@ -40,9 +41,10 @@ import {
   pathHitTest,
   pathLength,
   rectToQuadPoints,
-  smoothPath
+  simplifyInkPath
 } from './annotationGeometry';
 import {
+  pdfArrayRectToViewportRect,
   pdfRectToViewportRect,
   viewportPointToPdfPoint,
   viewportRectToPdfRect
@@ -54,6 +56,7 @@ import {
   cachePageBaseRenderMode,
   cachedPageBaseRenderMode,
   canvasLooksEmpty,
+  pageHasRenderableContent,
   safeCanvasPixelRatio
 } from './pdfRender';
 import { createPdfLinkService, downloadManager } from './pdfLinks';
@@ -78,7 +81,7 @@ import {
   SELECTION_ACCENT,
   TEXT_HIGHLIGHT_STYLE
 } from './components/AnnotationPrimitives';
-import { ExistingAnnotationShape } from './components/ExistingAnnotationShape';
+import { FREE_TEXT_LINE_HEIGHT } from './freeTextLayout';
 
 type PageViewport = ReturnType<PDFPageProxy['getViewport']>;
 type EraserScope = 'all' | 'draw' | 'highlight';
@@ -109,10 +112,11 @@ type PdfPageViewProps = {
   toolSettings: ToolSettings;
   onActivate: (pageIndex: number) => void;
   onAddAnnotation: (annotation: PdfAnnotation) => void;
-  onBeginAnnotationEdit: () => void;
+  onBeginAnnotationEdit: (options?: { finishOnPointerUp?: boolean }) => void;
   onDeleteAnnotations: (annotationIds: string[]) => void;
   onFocusAnnotationConsumed: (annotationId: string) => void;
   onEnsureAnnotationsVisible: () => void;
+  onExternalLinkRequest: (url: string) => void;
   onNavigateDestination: (destination: string | unknown[]) => void;
   onNavigatePage: (pageIndex: number) => void;
   onPageReady?: (pageIndex: number) => void;
@@ -144,6 +148,7 @@ export function PdfPageView({
   onDeleteAnnotations,
   onFocusAnnotationConsumed,
   onEnsureAnnotationsVisible,
+  onExternalLinkRequest,
   onNavigateDestination,
   onNavigatePage,
   onPageReady,
@@ -154,6 +159,7 @@ export function PdfPageView({
   const baseLayerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
+  const appearanceLayerRef = useRef<HTMLCanvasElement>(null);
   const annotationLayerRef = useRef<HTMLDivElement>(null);
   const existingAnnotationsPageRef = useRef<PDFPageProxy | null>(null);
   const renderRequestRef = useRef<{
@@ -193,14 +199,18 @@ export function PdfPageView({
     text: string;
   } | null>(null);
   const navigateDestinationRef = useRef(onNavigateDestination);
+  const externalLinkRequestRef = useRef(onExternalLinkRequest);
   const navigatePageRef = useRef(onNavigatePage);
   navigateDestinationRef.current = onNavigateDestination;
+  externalLinkRequestRef.current = onExternalLinkRequest;
   navigatePageRef.current = onNavigatePage;
   const viewport = useMemo(() => page.getViewport({ scale }), [page, scale]);
   const renderKey = `${page.pageNumber}:${scale}`;
   const linkService = useMemo(
     () =>
       createPdfLinkService({
+        onExternalLinkRequest: (url) =>
+          externalLinkRequestRef.current(url),
         onNavigateDestination: (destination) =>
           navigateDestinationRef.current(destination),
         onNavigatePage: (targetPageIndex) =>
@@ -216,15 +226,6 @@ export function PdfPageView({
       return annotations.filter((annotation) => selectedIds.has(annotation.id));
     },
     [annotations, selectedAnnotationIds]
-  );
-  const importedExistingAnnotationIds = useMemo(
-    () =>
-      new Set(
-        annotations
-          .map((annotation) => annotation.sourceId)
-          .filter((sourceId): sourceId is string => Boolean(sourceId))
-      ),
-    [annotations]
   );
   const overlayCapturesPointer =
     tool === 'draw' ||
@@ -258,6 +259,7 @@ export function PdfPageView({
     let pageView: PdfJsPageView | null = null;
     let fallbackRenderTask: ReturnType<PDFPageProxy['render']> | null = null;
     let spinnerTimer: number | null = null;
+    let canvasRevealed = false;
     let started = false;
 
     async function renderPdfPageView() {
@@ -283,6 +285,25 @@ export function PdfPageView({
       setBaseLayerReady(false);
       const cachedRenderMode = cachedPageBaseRenderMode(page);
 
+      function revealCanvasIfReady() {
+        if (cancelled || canvasRevealed) {
+          return;
+        }
+
+        const canvas = renderContainer.querySelector<HTMLCanvasElement>(
+          '.canvasWrapper canvas'
+        );
+        if (!canvas || canvasLooksEmpty(canvas)) {
+          return;
+        }
+
+        canvasRevealed = true;
+        if (cachedRenderMode !== 'annotationAppearance') {
+          cachePageBaseRenderMode(page, 'normal');
+        }
+        setBaseLayerReady(true);
+      }
+
       async function renderRasterFallbackWithRecovery() {
         const fallbackCanvas = await renderRasterFallback(
           page,
@@ -294,6 +315,12 @@ export function PdfPageView({
           }
         );
         if (!cancelled && fallbackCanvas && canvasLooksEmpty(fallbackCanvas)) {
+          const hasPageContent = await pageHasRenderableContent(page);
+          if (!hasPageContent) {
+            cachePageBaseRenderMode(page, 'normal');
+            return;
+          }
+
           const recoveredCanvas = await renderRasterFallback(
             page,
             viewport,
@@ -316,21 +343,27 @@ export function PdfPageView({
 
       try {
         if (cachedRenderMode === 'annotationAppearance') {
+          const hasPageContent = await pageHasRenderableContent(page);
           await renderRasterFallback(
             page,
             viewport,
             renderContainer,
-            AnnotationMode.ENABLE,
+            hasPageContent ? AnnotationMode.ENABLE : AnnotationMode.DISABLE,
             (renderTask) => {
               fallbackRenderTask = renderTask;
             }
           );
+          if (!hasPageContent) {
+            cachePageBaseRenderMode(page, 'normal');
+          }
         } else {
+          const eventBus = new EventBus();
+          eventBus.on('pagerendered', revealCanvasIfReady, { once: true });
           pageView = new PdfJsPageView({
             annotationMode: AnnotationMode.DISABLE,
             container,
             defaultViewport: page.getViewport({ scale }),
-            eventBus: new EventBus(),
+            eventBus,
             id: pageIndex + 1,
             maxCanvasPixels: PDFJS_MAX_CANVAS_PIXELS,
             scale: scale / PDF_TO_CSS_UNITS,
@@ -376,7 +409,9 @@ export function PdfPageView({
         ((pageView as any).textLayer?.div as HTMLDivElement | undefined) ??
         container.querySelector<HTMLDivElement>('.textLayer');
       activeTextGeometryRef.current = null;
-      setBaseLayerReady(true);
+      if (!canvasRevealed) {
+        setBaseLayerReady(true);
+      }
     }
 
     const cancelScheduledRender = schedulePriorityTask(
@@ -402,6 +437,7 @@ export function PdfPageView({
       pageView?.destroy();
       fallbackRenderTask?.cancel();
       if (baseLayerRef.current) {
+        disposeCanvases(baseLayerRef.current);
         baseLayerRef.current.replaceChildren();
       }
       textLayerRef.current = null;
@@ -456,6 +492,110 @@ export function PdfPageView({
   }, [baseLayerReady, page, renderPriority]);
 
   useEffect(() => {
+    async function renderAnnotationAppearanceOverlay() {
+      const overlayCanvas = appearanceLayerRef.current;
+      const baseCanvas =
+        baseLayerRef.current?.querySelector<HTMLCanvasElement>(
+          '.canvasWrapper canvas'
+        );
+      if (!overlayCanvas) {
+        return;
+      }
+
+      clearCanvas(overlayCanvas);
+      if (
+        !showAnnotations ||
+        !baseLayerReady ||
+        !baseCanvas ||
+        !existingAnnotations.some((annotation, index) =>
+          shouldRenderExistingAnnotationInAppearanceOverlay(
+            annotation,
+            index
+          )
+        )
+      ) {
+        return;
+      }
+
+      const context = overlayCanvas.getContext('2d', {
+        willReadFrequently: true
+      });
+      const baseContext = baseCanvas.getContext('2d', {
+        willReadFrequently: true
+      });
+      if (!context || !baseContext) {
+        return;
+      }
+
+      const width = baseCanvas.width;
+      const height = baseCanvas.height;
+      if (width === 0 || height === 0) {
+        return;
+      }
+
+      overlayCanvas.width = width;
+      overlayCanvas.height = height;
+      overlayCanvas.style.width = `${viewport.width}px`;
+      overlayCanvas.style.height = `${viewport.height}px`;
+
+      const scaleX = width / Math.max(1, viewport.width);
+      const scaleY = height / Math.max(1, viewport.height);
+      context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+      const renderTask = page.render({
+        annotationMode: AnnotationMode.ENABLE,
+        canvas: overlayCanvas,
+        canvasContext: context,
+        viewport
+      });
+      appearanceRenderTask = renderTask;
+      await renderTask.promise;
+
+      if (cancelled || appearanceRenderTask !== renderTask) {
+        return;
+      }
+
+      context.setTransform(1, 0, 0, 1, 0, 0);
+      const appearancePixels = context.getImageData(0, 0, width, height);
+      const basePixels = baseContext.getImageData(0, 0, width, height);
+      keepOnlyChangedPixels(appearancePixels, basePixels);
+      context.putImageData(appearancePixels, 0, 0);
+      clearEditableExistingAnnotationRects(
+        context,
+        existingAnnotations,
+        viewport,
+        scaleX,
+        scaleY
+      );
+    }
+
+    let cancelled = false;
+    let appearanceRenderTask: ReturnType<PDFPageProxy['render']> | null = null;
+    const cancelScheduledRender = schedulePriorityTask(renderPriority, () => {
+      void renderAnnotationAppearanceOverlay().catch((error) => {
+        if (!cancelled && !isRenderCancellation(error)) {
+          console.error(error);
+        }
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelScheduledRender();
+      appearanceRenderTask?.cancel();
+      if (appearanceLayerRef.current) {
+        clearCanvas(appearanceLayerRef.current);
+      }
+    };
+  }, [
+    baseLayerReady,
+    existingAnnotations,
+    page,
+    renderPriority,
+    showAnnotations,
+    viewport
+  ]);
+
+  useEffect(() => {
     async function renderAnnotationLayer() {
       const div = annotationLayerRef.current;
       if (!div) {
@@ -469,7 +609,11 @@ export function PdfPageView({
 
       const annotationViewport = viewport.clone({ dontFlip: true });
       const htmlAnnotations = existingAnnotations.filter(
-        (annotation) => !isSvgRenderedExistingAnnotation(annotation)
+        (annotation, index) =>
+          shouldRenderExistingAnnotationInPdfJsLayer(
+            annotation,
+            index
+          )
       );
       if (htmlAnnotations.length === 0) {
         return;
@@ -555,7 +699,7 @@ export function PdfPageView({
     if ((tool === 'draw' || tool === 'highlight') && isRightButton) {
       setHighlightContextMenu(null);
       event.preventDefault();
-      onBeginAnnotationEdit();
+      onBeginAnnotationEdit({ finishOnPointerUp: true });
       eraserScopeRef.current = tool === 'draw' ? 'draw' : 'highlight';
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -591,7 +735,7 @@ export function PdfPageView({
     }
 
     if (tool === 'eraser') {
-      onBeginAnnotationEdit();
+      onBeginAnnotationEdit({ finishOnPointerUp: true });
       eraserScopeRef.current = 'all';
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -624,7 +768,7 @@ export function PdfPageView({
     if (tool === 'highlight' && isRightButton) {
       setHighlightContextMenu(null);
       event.preventDefault();
-      onBeginAnnotationEdit();
+      onBeginAnnotationEdit({ finishOnPointerUp: true });
       eraserScopeRef.current = 'highlight';
       const point = eventToPdfPointFromElement(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -714,7 +858,9 @@ export function PdfPageView({
     }
 
     const point = eventToPdfPointFromElement(event, viewport);
-    setDraftPath((current) => (current ? [...current, point] : current));
+    setDraftPath((current) =>
+      current ? appendDraftInkPoint(current, point, viewport) : current
+    );
   }
 
   function getActiveTextGeometry() {
@@ -809,11 +955,18 @@ export function PdfPageView({
     }
 
     releasePointer(event, event.pointerId);
-    const path = [...draftPath, eventToPdfPointFromElement(event, viewport)];
-    const normalizedPath = smoothPath(path);
+    const path = appendDraftInkPoint(
+      draftPath,
+      eventToPdfPointFromElement(event, viewport),
+      viewport
+    );
+    const normalizedPath = normalizeDraftInkPath(path, viewport);
     setDraftPath(null);
 
-    if (path.length > 2 && pathLength(path) > 4 / scale) {
+    if (
+      path.length > 2 &&
+      pathLength(path) > freehandHighlightMinLength(viewport)
+    ) {
       onAddAnnotation({
         id: crypto.randomUUID(),
         kind: 'freehandHighlight',
@@ -889,7 +1042,9 @@ export function PdfPageView({
     }
 
     const point = eventToPdfPoint(event, viewport);
-    setDraftPath((current) => (current ? [...current, point] : current));
+    setDraftPath((current) =>
+      current ? appendDraftInkPoint(current, point, viewport) : current
+    );
   }
 
   function handlePointerUp(event: React.PointerEvent<SVGSVGElement>) {
@@ -936,18 +1091,23 @@ export function PdfPageView({
 
     if (draftPath && (tool === 'draw' || tool === 'freehandHighlight')) {
       event.currentTarget.releasePointerCapture(event.pointerId);
-      const path = [...draftPath, eventToPdfPoint(event, viewport)];
+      const path = appendDraftInkPoint(
+        draftPath,
+        eventToPdfPoint(event, viewport),
+        viewport
+      );
       const normalizedPath =
-        tool === 'draw' && pathLength(path) <= 1 / scale
+        tool === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
           ? dotPath(path[0], toolSettings.drawWidth)
-          : smoothPath(path);
+          : normalizeDraftInkPath(path, viewport);
       setDraftPath(null);
 
       if (
         (tool === 'draw'
           ? normalizedPath.length > 0
           : path.length > 2) &&
-        (tool !== 'freehandHighlight' || pathLength(path) > 4 / scale)
+        (tool !== 'freehandHighlight' ||
+          pathLength(path) > freehandHighlightMinLength(viewport))
       ) {
         onAddAnnotation({
           id: crypto.randomUUID(),
@@ -1038,7 +1198,7 @@ export function PdfPageView({
     const annotationIds = selectedOnPage.includes(annotationId)
       ? selectedOnPage
       : [annotationId];
-    onBeginAnnotationEdit();
+    onBeginAnnotationEdit({ finishOnPointerUp: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     const nextDragSelection = {
       annotationIds,
@@ -1143,6 +1303,10 @@ export function PdfPageView({
         : [],
     [draftTextHighlight]
   );
+  const previewDraftPath = useMemo(
+    () => (draftPath ? normalizeDraftInkPath(draftPath, viewport) : null),
+    [draftPath, viewport]
+  );
   return (
     <article
       aria-current={active ? 'page' : undefined}
@@ -1174,6 +1338,10 @@ export function PdfPageView({
               '--scale-factor': String(scale)
             } as React.CSSProperties}
           />
+          <canvas
+            className="pdfa-annotation-appearance-layer pdfa-fill"
+            ref={appearanceLayerRef}
+          />
           <div
             className="annotationLayer pdfa-fill"
             ref={annotationLayerRef}
@@ -1196,30 +1364,6 @@ export function PdfPageView({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
             >
-            {showSynchronizedAnnotations
-              ? existingAnnotations
-                  .filter(
-                    (annotation, index) =>
-                      !isEditableExistingAnnotation(annotation) &&
-                      !importedExistingAnnotationIds.has(
-                        existingAnnotationId(annotation, index)
-                      )
-                  )
-                  .map((annotation, index) => {
-                    const annotationKey = existingAnnotationId(annotation, index);
-                    return (
-                      <ExistingAnnotationShape
-                        annotation={annotation}
-                        isHovered={hoveredAnnotationId === annotationKey}
-                        key={annotationKey}
-                        onHoverChange={(hovered) =>
-                          setHoveredAnnotationId(hovered ? annotationKey : null)
-                        }
-                        viewport={viewport}
-                      />
-                    );
-                  })
-              : null}
             {showSynchronizedAnnotations ? annotations.map((annotation) => (
               <AnnotationShape
                 annotation={annotation}
@@ -1227,7 +1371,7 @@ export function PdfPageView({
                 key={annotation.id}
                 onBeginHighlightHandleDrag={(event, handle) => {
                   event.stopPropagation();
-                  onBeginAnnotationEdit();
+                  onBeginAnnotationEdit({ finishOnPointerUp: true });
                   event.currentTarget.setPointerCapture(event.pointerId);
                   const geometry = getActiveTextGeometry();
                   setDragHandle({
@@ -1316,7 +1460,7 @@ export function PdfPageView({
                 viewport={viewport}
               />
             ) : null}
-            {draftPath ? (
+            {previewDraftPath ? (
               <PathShape
                 color={
                   tool === 'draw'
@@ -1328,7 +1472,7 @@ export function PdfPageView({
                     ? toolSettings.drawOpacity
                     : toolSettings.highlightOpacity
                 }
-                points={draftPath}
+                points={previewDraftPath}
                 viewport={viewport}
                 width={
                   (tool === 'draw'
@@ -1380,8 +1524,10 @@ export function PdfPageView({
             <button
               className="highlight-context-menu-button"
               onClick={() => {
-                if (highlightContextMenu.text) {
-                  void navigator.clipboard.writeText(highlightContextMenu.text);
+                if (highlightContextMenu.text && navigator.clipboard) {
+                  void navigator.clipboard
+                    .writeText(highlightContextMenu.text)
+                    .catch(console.error);
                 }
                 setHighlightContextMenu(null);
               }}
@@ -1597,11 +1743,11 @@ function AnnotationShape({
                     ? undefined
                     : onBeginEdit
                 }
-                placeholder="Type..."
+                placeholder="Text..."
                 style={{
                   color: rgbToCss(annotation.color),
                   fontSize: annotation.fontSize * scale,
-                  lineHeight: 1.25,
+                  lineHeight: FREE_TEXT_LINE_HEIGHT,
                   opacity: annotation.opacity
                 }}
                 value={annotation.text}
@@ -1612,7 +1758,7 @@ function AnnotationShape({
                 style={{
                   color: rgbToCss(annotation.color),
                   fontSize: annotation.fontSize * scale,
-                  lineHeight: 1.25,
+                  lineHeight: FREE_TEXT_LINE_HEIGHT,
                   opacity: annotation.opacity
                 }}
               >
@@ -1741,28 +1887,55 @@ function SelectionToolbar({
   const showsFontSize = annotations.length === 1 && first?.kind === 'freeText';
   const showsStroke = annotations.some(hasStroke);
   const showsOpacity = annotations.some(hasOpacity);
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const rowHeights = [
+    first ? 22 : 0,
+    showsOpacity ? 30 : 0,
+    showsStroke ? 30 : 0,
+    showsFontSize ? 30 : 0,
+    30
+  ].filter((height) => height > 0);
   const toolbarHeight =
-    64 +
-    (first ? 32 : 0) +
-    (showsOpacity ? 36 : 0) +
-    (showsStroke ? 36 : 0) +
-    (showsFontSize ? 36 : 0);
+    22 +
+    rowHeights.reduce((total, height) => total + height, 0) +
+    Math.max(0, rowHeights.length - 1) * 8;
+  const [measuredToolbarHeight, setMeasuredToolbarHeight] =
+    useState(toolbarHeight);
+  const activeToolbarHeight = measuredToolbarHeight || toolbarHeight;
   const toolbarWidth = 216;
   const toolbarX = clamp(
     bounds.x + bounds.width / 2 - toolbarWidth / 2,
     0,
     Math.max(0, viewport.width - toolbarWidth)
   );
-  const aboveY = bounds.y - toolbarHeight - 4;
+  const aboveY = bounds.y - activeToolbarHeight - 4;
   const belowY = bounds.y + bounds.height + 4;
   const toolbarY =
     aboveY >= 0
       ? aboveY
-      : clamp(belowY, 0, Math.max(0, viewport.height - toolbarHeight));
+      : clamp(belowY, 0, Math.max(0, viewport.height - activeToolbarHeight));
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) {
+      return;
+    }
+
+    const updateHeight = () => {
+      setMeasuredToolbarHeight(
+        Math.ceil(toolbar.getBoundingClientRect().height)
+      );
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(toolbar);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <foreignObject
-      height={toolbarHeight}
+      height={activeToolbarHeight}
       style={{ pointerEvents: 'auto' }}
       width={toolbarWidth}
       x={toolbarX}
@@ -1772,7 +1945,8 @@ function SelectionToolbar({
     >
       <div
         className="selection-toolbar"
-        style={{ height: toolbarHeight, width: toolbarWidth }}
+        ref={toolbarRef}
+        style={{ width: toolbarWidth }}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
@@ -2021,6 +2195,100 @@ function releasePointer(event: React.PointerEvent, pointerId: number) {
   }
 }
 
+function shouldRenderExistingAnnotationInPdfJsLayer(
+  annotation: ExistingPdfAnnotation,
+  _annotationIndex: number
+) {
+  return annotation.annotationType === AnnotationType.LINK;
+}
+
+function shouldRenderExistingAnnotationInAppearanceOverlay(
+  annotation: ExistingPdfAnnotation,
+  _annotationIndex: number
+) {
+  if (
+    annotation.annotationType === AnnotationType.LINK ||
+    annotation.annotationType === AnnotationType.POPUP ||
+    annotation.annotationType === AnnotationType.WIDGET
+  ) {
+    return false;
+  }
+
+  return !isEditableExistingAnnotation(annotation);
+}
+
+function keepOnlyChangedPixels(appearance: ImageData, base: ImageData) {
+  const appearanceData = appearance.data;
+  const baseData = base.data;
+  const threshold = 8;
+  for (let index = 0; index < appearanceData.length; index += 4) {
+    const difference =
+      Math.abs(appearanceData[index] - baseData[index]) +
+      Math.abs(appearanceData[index + 1] - baseData[index + 1]) +
+      Math.abs(appearanceData[index + 2] - baseData[index + 2]) +
+      Math.abs(appearanceData[index + 3] - baseData[index + 3]);
+
+    if (difference <= threshold) {
+      appearanceData[index + 3] = 0;
+    } else {
+      appearanceData[index + 3] = 255;
+    }
+  }
+}
+
+function clearEditableExistingAnnotationRects(
+  context: CanvasRenderingContext2D,
+  existingAnnotations: ExistingPdfAnnotation[],
+  viewport: PageViewport,
+  scaleX: number,
+  scaleY: number
+) {
+  const padding = 8;
+  existingAnnotations.forEach((annotation) => {
+    if (!isEditableExistingAnnotation(annotation)) {
+      return;
+    }
+
+    const rect = existingAnnotationViewportRect(annotation, viewport);
+    if (!rect) {
+      return;
+    }
+
+    context.clearRect(
+      Math.floor((rect.x - padding) * scaleX),
+      Math.floor((rect.y - padding) * scaleY),
+      Math.ceil((rect.width + padding * 2) * scaleX),
+      Math.ceil((rect.height + padding * 2) * scaleY)
+    );
+  });
+}
+
+function existingAnnotationViewportRect(
+  annotation: ExistingPdfAnnotation,
+  viewport: PageViewport
+) {
+  if (!Array.isArray(annotation.rect) && !(annotation.rect instanceof Float32Array)) {
+    return null;
+  }
+
+  const rect = Array.from(annotation.rect).map(Number);
+  if (rect.length < 4 || !rect.slice(0, 4).every(Number.isFinite)) {
+    return null;
+  }
+
+  return pdfArrayRectToViewportRect(rect.slice(0, 4), viewport);
+}
+
+function clearCanvas(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+}
+
 function shouldUseRasterFallback(container: HTMLDivElement) {
   const canvas = container.querySelector<HTMLCanvasElement>(
     '.canvasWrapper canvas'
@@ -2098,6 +2366,17 @@ function isRenderCancellation(error: unknown) {
   );
 }
 
+function disposeCanvases(container: Element) {
+  for (const canvas of container.querySelectorAll('canvas')) {
+    releaseCanvasBuffer(canvas);
+  }
+}
+
+function releaseCanvasBuffer(canvas: HTMLCanvasElement) {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
 function isAnnotationCreationTool(tool: Tool) {
   return (
     tool === 'draw' ||
@@ -2107,6 +2386,49 @@ function isAnnotationCreationTool(tool: Tool) {
     tool === 'freeText' ||
     tool === 'stickyNote'
   );
+}
+
+const PDF_UNITS_PER_INCH = 72;
+const MILLIMETRES_PER_INCH = 25.4;
+const INK_POINT_SPACING_MM = 0.15;
+const INK_SIMPLIFICATION_TOLERANCE_MM = 0.08;
+const INK_DOT_MAX_LENGTH_MM = 0.35;
+const FREEHAND_HIGHLIGHT_MIN_LENGTH_MM = 1;
+
+function appendDraftInkPoint(
+  path: PdfPoint[],
+  point: PdfPoint,
+  viewport: PageViewport
+) {
+  return appendInkPoint(path, point, inkPointSpacing(viewport));
+}
+
+function normalizeDraftInkPath(path: PdfPoint[], viewport: PageViewport) {
+  return simplifyInkPath(path, inkSimplificationTolerance(viewport));
+}
+
+function inkPointSpacing(viewport: PageViewport) {
+  return millimetresToPdfUnits(INK_POINT_SPACING_MM, viewport);
+}
+
+function inkSimplificationTolerance(viewport: PageViewport) {
+  return millimetresToPdfUnits(INK_SIMPLIFICATION_TOLERANCE_MM, viewport);
+}
+
+function inkDotMaxLength(viewport: PageViewport) {
+  return millimetresToPdfUnits(INK_DOT_MAX_LENGTH_MM, viewport);
+}
+
+function freehandHighlightMinLength(viewport: PageViewport) {
+  return millimetresToPdfUnits(FREEHAND_HIGHLIGHT_MIN_LENGTH_MM, viewport);
+}
+
+function millimetresToPdfUnits(millimetres: number, viewport: PageViewport) {
+  const userUnit =
+    Number.isFinite(viewport.userUnit) && viewport.userUnit > 0
+      ? viewport.userUnit
+      : 1;
+  return (millimetres * PDF_UNITS_PER_INCH) / MILLIMETRES_PER_INCH / userUnit;
 }
 
 function schedulePriorityTask(

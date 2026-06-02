@@ -50,7 +50,7 @@ type DataTransferItemWithFileSystemHandle = DataTransferItem & {
 
 const pdfPickerOptions: LocalOpenFilePickerOptions = {
   excludeAcceptAllOption: false,
-  multiple: false,
+  multiple: true,
   types: [
     {
       accept: {
@@ -65,42 +65,28 @@ export function canPickLocalPdfFile() {
   return typeof localWindow().showOpenFilePicker === 'function';
 }
 
-export async function pickLocalPdfFile() {
+export async function pickLocalPdfFiles() {
   const picker = localWindow().showOpenFilePicker;
   if (!picker) {
-    return null;
+    return [];
   }
 
   try {
-    const [handle] = await picker(pdfPickerOptions);
-    if (!handle) {
-      return null;
-    }
-
-    return {
-      file: await handle.getFile(),
-      handle
-    };
+    const handles = await picker(pdfPickerOptions);
+    return localPdfFilesFromHandles(handles);
   } catch (error) {
     if (isPickerAbort(error)) {
-      return null;
+      return [];
     }
     throw error;
   }
 }
 
-export async function localPdfFileFromDrop(dataTransfer: DataTransfer) {
-  const handle = await localPdfHandleFromItems(
+export async function localPdfFilesFromDrop(dataTransfer: DataTransfer) {
+  const handles = await localPdfHandlesFromItems(
     Array.from(dataTransfer.items ?? [])
   );
-  if (!handle) {
-    return null;
-  }
-
-  return {
-    file: await handle.getFile(),
-    handle
-  };
+  return localPdfFilesFromHandles(handles);
 }
 
 export async function savePdfToLocalFile(
@@ -134,7 +120,8 @@ async function createWritable(handle: LocalPdfFileHandle) {
   }
 }
 
-async function localPdfHandleFromItems(items: DataTransferItem[]) {
+async function localPdfHandlesFromItems(items: DataTransferItem[]) {
+  const handles: LocalPdfFileHandle[] = [];
   for (const item of items) {
     const getHandle = (item as DataTransferItemWithFileSystemHandle)
       .getAsFileSystemHandle;
@@ -144,11 +131,21 @@ async function localPdfHandleFromItems(items: DataTransferItem[]) {
 
     const handle = await getHandle.call(item);
     if (isPdfFileHandle(handle)) {
-      return handle;
+      handles.push(handle);
     }
   }
 
-  return null;
+  return handles;
+}
+
+async function localPdfFilesFromHandles(handles: LocalPdfFileHandle[]) {
+  const files = await Promise.all(
+    handles.map(async (handle) => ({
+      file: await handle.getFile(),
+      handle
+    }))
+  );
+  return files.filter(({ file }) => isPdfFile(file));
 }
 
 async function requestReadWritePermission(handle: LocalPdfFileHandle) {
@@ -182,6 +179,13 @@ function isPdfFileHandle(handle: unknown): handle is LocalPdfFileHandle {
     typeof candidate.getFile === 'function' &&
     typeof candidate.createWritable === 'function' &&
     candidate.name.toLowerCase().endsWith('.pdf')
+  );
+}
+
+function isPdfFile(file: File) {
+  return (
+    file.type === 'application/pdf' ||
+    file.name.toLowerCase().endsWith('.pdf')
   );
 }
 

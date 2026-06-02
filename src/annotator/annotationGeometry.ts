@@ -241,27 +241,41 @@ export function pathLength(path: PdfPoint[]) {
   }, 0);
 }
 
-export function smoothPath(path: PdfPoint[]) {
-  if (path.length < 4) {
+export function appendInkPoint(
+  path: PdfPoint[],
+  point: PdfPoint,
+  minDistance: number
+) {
+  if (!isFinitePoint(point)) {
     return path;
   }
 
-  const smoothed: PdfPoint[] = [path[0]];
-  for (let index = 1; index < path.length - 1; index += 1) {
-    const previous = path[index - 1];
-    const current = path[index];
-    const next = path[index + 1];
-    smoothed.push({
-      x: previous.x * 0.18 + current.x * 0.64 + next.x * 0.18,
-      y: previous.y * 0.18 + current.y * 0.64 + next.y * 0.18
-    });
+  const previous = path[path.length - 1];
+  if (
+    previous &&
+    Math.hypot(point.x - previous.x, point.y - previous.y) < minDistance
+  ) {
+    return path;
   }
-  smoothed.push(path[path.length - 1]);
-  return smoothed;
+
+  return [...path, point];
+}
+
+export function simplifyInkPath(path: PdfPoint[], tolerance: number) {
+  const points = path.filter(isFinitePoint);
+  if (points.length < 3 || tolerance <= 0) {
+    return points;
+  }
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  simplifyPathSections(points, tolerance, keep);
+  return points.filter((_, index) => keep[index] === 1);
 }
 
 export function dotPath(point: PdfPoint, width: number) {
-  const radius = Math.max(width, 1.5) / 2;
+  const radius = Math.max(width, 0.5) / 2;
   return [
     { x: point.x - radius, y: point.y },
     { x: point.x, y: point.y + radius },
@@ -269,6 +283,20 @@ export function dotPath(point: PdfPoint, width: number) {
     { x: point.x, y: point.y - radius },
     { x: point.x - radius, y: point.y }
   ];
+}
+
+export function pathLooksClosed(path: PdfPoint[]) {
+  const finitePath = path.filter(isFinitePoint);
+  if (finitePath.length < 4) {
+    return false;
+  }
+
+  const first = finitePath[0];
+  const last = finitePath[finitePath.length - 1];
+  const bounds = boundsForPoints(finitePath);
+  const diagonal = Math.hypot(bounds.x2 - bounds.x1, bounds.y2 - bounds.y1);
+  const closingDistance = Math.hypot(first.x - last.x, first.y - last.y);
+  return closingDistance <= Math.max(2, diagonal * 0.03);
 }
 
 function distanceToSegment(point: PdfPoint, start: PdfPoint, end: PdfPoint) {
@@ -286,4 +314,43 @@ function distanceToSegment(point: PdfPoint, start: PdfPoint, end: PdfPoint) {
     1
   );
   return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function simplifyPathSections(
+  points: PdfPoint[],
+  tolerance: number,
+  keep: Uint8Array
+) {
+  const pendingSections: Array<[number, number]> = [[0, points.length - 1]];
+
+  while (pendingSections.length > 0) {
+    const [firstIndex, lastIndex] = pendingSections.pop()!;
+    if (lastIndex <= firstIndex + 1) {
+      continue;
+    }
+
+    let furthestIndex = -1;
+    let furthestDistance = 0;
+    const start = points[firstIndex];
+    const end = points[lastIndex];
+
+    for (let index = firstIndex + 1; index < lastIndex; index += 1) {
+      const distance = distanceToSegment(points[index], start, end);
+      if (distance > furthestDistance) {
+        furthestDistance = distance;
+        furthestIndex = index;
+      }
+    }
+
+    if (furthestIndex === -1 || furthestDistance <= tolerance) {
+      continue;
+    }
+
+    keep[furthestIndex] = 1;
+    pendingSections.push([firstIndex, furthestIndex], [furthestIndex, lastIndex]);
+  }
+}
+
+function isFinitePoint(point: PdfPoint) {
+  return Number.isFinite(point.x) && Number.isFinite(point.y);
 }

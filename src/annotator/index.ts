@@ -1,13 +1,24 @@
 import './styles.css';
 
 export { PdfWorkspace as PdfAnnotatorWorkspace, PdfWorkspace } from './PdfWorkspace';
-export { readPdfFile } from './pdfFile';
+export { attachPdfSourceId } from './host';
+export { createPdfFileLoader, readPdfFile } from './pdfFile';
 export type {
+  PdfExternalLinkContext,
+  PdfExternalLinkOpener,
   PdfSaveTarget,
+  PdfWorkspaceBytesSource,
+  PdfWorkspaceLoaderSource,
+  PdfWorkspaceSource,
+  PdfWorkspaceSourceInput
+} from './host';
+export type {
+  PdfWorkspaceDocumentHistorySnapshot,
   PdfWorkspaceHandle,
+  PdfWorkspaceHistoryEntry,
   PdfWorkspaceProps,
   PdfWorkspaceSession,
-  PdfWorkspaceSource
+  PdfWorkspaceViewPosition
 } from './PdfWorkspace';
 export type {
   FreeTextAnnotation,

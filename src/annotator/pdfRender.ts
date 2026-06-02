@@ -1,3 +1,4 @@
+import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
 
 const pdfjsAssetBase = `${import.meta.env.BASE_URL}pdfjs/`;
@@ -20,7 +21,9 @@ export const PDFJS_TEXT_LAYER_ENABLE = 1;
 export const PDFJS_MAX_CANVAS_PIXELS = 16_777_216;
 export type PdfBaseRenderMode = 'normal' | 'annotationAppearance';
 
+const EMPTY_CANVAS_SAMPLE_SIZE = 32;
 const pageBaseRenderModeCache = new WeakMap<PDFPageProxy, PdfBaseRenderMode>();
+let emptyCanvasSampleContext: CanvasRenderingContext2D | null | undefined;
 
 export function cachedPageBaseRenderMode(page: PDFPageProxy) {
   return pageBaseRenderModeCache.get(page) ?? null;
@@ -48,18 +51,16 @@ export function canvasLooksEmpty(canvas: HTMLCanvasElement) {
     return true;
   }
 
-  const sampleCanvas = document.createElement('canvas');
-  const sampleSize = 32;
-  sampleCanvas.width = sampleSize;
-  sampleCanvas.height = sampleSize;
-  const context = sampleCanvas.getContext('2d', { willReadFrequently: true });
+  const context = emptyCanvasContext();
   if (!context) {
     return false;
   }
 
   try {
-    context.drawImage(canvas, 0, 0, sampleSize, sampleSize);
-    const pixels = context.getImageData(0, 0, sampleSize, sampleSize).data;
+    const size = EMPTY_CANVAS_SAMPLE_SIZE;
+    context.clearRect(0, 0, size, size);
+    context.drawImage(canvas, 0, 0, size, size);
+    const pixels = context.getImageData(0, 0, size, size).data;
     for (let index = 0; index < pixels.length; index += 4) {
       const alpha = pixels[index + 3];
       if (
@@ -76,6 +77,33 @@ export function canvasLooksEmpty(canvas: HTMLCanvasElement) {
   }
 
   return true;
+}
+
+export async function pageHasRenderableContent(page: PDFPageProxy) {
+  try {
+    const operatorList = await (page as any).getOperatorList({
+      annotationMode: AnnotationMode.DISABLE
+    });
+    return (
+      Array.isArray(operatorList?.fnArray) && operatorList.fnArray.length > 0
+    );
+  } catch {
+    return true;
+  }
+}
+
+function emptyCanvasContext() {
+  if (emptyCanvasSampleContext !== undefined) {
+    return emptyCanvasSampleContext;
+  }
+
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = EMPTY_CANVAS_SAMPLE_SIZE;
+  sampleCanvas.height = EMPTY_CANVAS_SAMPLE_SIZE;
+  emptyCanvasSampleContext = sampleCanvas.getContext('2d', {
+    willReadFrequently: true
+  });
+  return emptyCanvasSampleContext;
 }
 
 function clamp(value: number, min: number, max: number) {

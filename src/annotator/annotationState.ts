@@ -1,5 +1,5 @@
 import type { PdfAnnotation, PdfRect } from './types';
-import { clamp } from './viewerConfig';
+import { resizeFreeTextRect } from './freeTextLayout';
 
 export function hasAnnotationContent(annotation: PdfAnnotation) {
   if (annotation.kind === 'freeText' || annotation.kind === 'stickyNote') {
@@ -114,6 +114,10 @@ function annotationSignature(annotation: PdfAnnotation) {
       return {
         ...base,
         fontSize: signatureNumber(annotation.fontSize),
+        layoutWidth:
+          annotation.layoutWidth === undefined
+            ? undefined
+            : signatureNumber(annotation.layoutWidth),
         opacity: signatureNumber(annotation.opacity),
         rect: rectSignature(annotation.rect),
         text: annotation.text
@@ -166,7 +170,9 @@ export function normalizeAnnotationLayout(
   return {
     ...annotation,
     opacity: annotation.opacity ?? 1,
-    rect: resizeFreeTextRect(annotation.rect, annotation.text, annotation.fontSize)
+    rect: resizeFreeTextRect(annotation.rect, annotation.text, annotation.fontSize, {
+      layoutWidth: annotation.layoutWidth
+    })
   };
 }
 
@@ -189,31 +195,4 @@ export function byteFingerprint(bytes: Uint8Array) {
   }
 
   return `${bytes.length}:${(hash >>> 0).toString(16)}`;
-}
-
-function resizeFreeTextRect(rect: PdfRect, text: string, fontSize: number) {
-  const empty = text.trim().length === 0;
-  const lines = empty ? ['Type...'] : text.split(/\r?\n/);
-  const longestLineLength = Math.max(
-    1,
-    ...lines.map((line) => line.trimEnd().length)
-  );
-  const width = clamp(
-    longestLineLength * fontSize * 0.54 + 10,
-    empty ? 96 : 28,
-    420
-  );
-  const height = Math.max(
-    fontSize * 1.35 + 4,
-    lines.length * fontSize * 1.35 + 4
-  );
-  const left = Math.min(rect.x1, rect.x2);
-  const top = Math.max(rect.y1, rect.y2);
-
-  return {
-    x1: left,
-    y1: top - height,
-    x2: left + width,
-    y2: top
-  };
 }

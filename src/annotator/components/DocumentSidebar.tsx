@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import { ChevronLeft, FilePlus2, MoreVertical } from 'lucide-react';
+import {
+  ChevronLeft,
+  FilePlus2,
+  MoreVertical,
+  RotateCw,
+  Trash2
+} from 'lucide-react';
 import { rgbToHex } from '../SettingsPanel';
 import { pathToViewportD, pdfRectToViewportRect } from '../pdfGeometry';
 import {
   cachePageBaseRenderMode,
   cachedPageBaseRenderMode,
   canvasLooksEmpty,
+  pageHasRenderableContent,
   safeCanvasPixelRatio
 } from '../pdfRender';
 import type { LoadedPage, PageSize, PageViewport, PdfAnnotation } from '../types';
@@ -341,21 +348,24 @@ function PageThumbnail({
             onClick={onAddBefore}
             type="button"
           >
-            Add before
+            <FilePlus2 className="page-menu-item-icon" size={14} />
+            <span>Add before</span>
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
             onClick={onAddAfter}
             type="button"
           >
-            Add after
+            <FilePlus2 className="page-menu-item-icon" size={14} />
+            <span>Add after</span>
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
             onClick={onRotate}
             type="button"
           >
-            Rotate
+            <RotateCw className="page-menu-item-icon" size={14} />
+            <span>Rotate</span>
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
@@ -363,7 +373,8 @@ function PageThumbnail({
             onClick={onDelete}
             type="button"
           >
-            Delete page
+            <Trash2 className="page-menu-item-icon" size={14} />
+            <span>Delete page</span>
           </button>
         </div>
       ) : null}
@@ -472,7 +483,13 @@ function ThumbnailPageCanvas({
       try {
         const cachedRenderMode = cachedPageBaseRenderMode(page);
         if (cachedRenderMode === 'annotationAppearance') {
-          await renderThumbnail(AnnotationMode.ENABLE);
+          const hasPageContent = await pageHasRenderableContent(page);
+          await renderThumbnail(
+            hasPageContent ? AnnotationMode.ENABLE : AnnotationMode.DISABLE
+          );
+          if (!hasPageContent) {
+            cachePageBaseRenderMode(page, 'normal');
+          }
           return;
         }
 
@@ -482,6 +499,12 @@ function ThumbnailPageCanvas({
           cachedRenderMode !== 'normal' &&
           canvasLooksEmpty(renderCanvas)
         ) {
+          const hasPageContent = await pageHasRenderableContent(page);
+          if (!hasPageContent || cancelled) {
+            cachePageBaseRenderMode(page, 'normal');
+            return;
+          }
+
           await renderThumbnail(AnnotationMode.ENABLE);
           if (!canvasLooksEmpty(renderCanvas)) {
             cachePageBaseRenderMode(page, 'annotationAppearance');
@@ -501,6 +524,7 @@ function ThumbnailPageCanvas({
     return () => {
       cancelled = true;
       renderTask?.cancel();
+      releaseCanvasBuffer(renderCanvas);
     };
   }, [page, width]);
 
@@ -513,6 +537,11 @@ function isRenderCancellation(error: unknown) {
     (error.name === 'RenderingCancelledException' ||
       error.message.includes('cancelled'))
   );
+}
+
+function releaseCanvasBuffer(canvas: HTMLCanvasElement) {
+  canvas.width = 0;
+  canvas.height = 0;
 }
 
 function ThumbnailAnnotations({

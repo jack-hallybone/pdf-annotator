@@ -72,6 +72,7 @@ export type FreeTextAnnotation = {
   fontSize: number;
   color: [number, number, number];
   opacity: number;
+  layoutWidth?: number;
 };
 
 export type StickyNoteAnnotation = {

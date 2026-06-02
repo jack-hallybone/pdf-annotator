@@ -21,7 +21,6 @@ import {
 } from '../viewerConfig';
 import {
   toolAccent,
-  toolButtonActive,
   toolHasSettings,
   tools
 } from '../toolConfig';
@@ -67,7 +66,7 @@ export function FloatingToolDock({
       {tools.map(({ icon: Icon, key, label, preset, tool }) => {
         const buttonPreset = toolPresets[key] ?? preset;
         const accent = toolAccent(tool, settings, buttonPreset);
-        const active = toolButtonActive(activeTool, activeToolKey, tool, key);
+        const active = activeTool === tool && activeToolKey === key;
         const hasSettings = toolHasSettings(tool);
 
         return (
@@ -345,6 +344,7 @@ type FloatingDocumentControlsProps = {
   onDownload: () => void;
   onPrint: () => void;
   onSave: () => void;
+  showCloseButton?: boolean;
   onToggleAnnotations: () => void;
   showAnnotations: boolean;
 };
@@ -356,6 +356,7 @@ export function FloatingDocumentControls({
   onDownload,
   onPrint,
   onSave,
+  showCloseButton = true,
   onToggleAnnotations,
   showAnnotations
 }: FloatingDocumentControlsProps) {
@@ -376,9 +377,11 @@ export function FloatingDocumentControls({
       <IconButton disabled={busy} label="Print" onClick={onPrint}>
         <Printer size={16} />
       </IconButton>
-      <IconButton disabled={busy} label="Close" onClick={onClosePdf}>
-        <X size={16} />
-      </IconButton>
+      {showCloseButton ? (
+        <IconButton disabled={busy} label="Close" onClick={onClosePdf}>
+          <X size={16} />
+        </IconButton>
+      ) : null}
     </div>
   );
 }
@@ -427,26 +430,6 @@ export function FloatingHistoryControls({
   );
 }
 
-type PageLoadNoticeProps = {
-  loadedPageCount: number;
-  pageCount: number;
-};
-
-export function PageLoadNotice({
-  loadedPageCount,
-  pageCount
-}: PageLoadNoticeProps) {
-  return (
-    <div className="page-load-notice screen-only">
-      <div
-        className="page-load-notice-message ui-frame"
-        title="Pages are loading."
-      >
-        {loadedPageCount} of {pageCount} pages loaded
-      </div>
-    </div>
-  );
-}
 
 function clampZoom(value: number) {
   return clamp(value, MIN_ZOOM, MAX_ZOOM);

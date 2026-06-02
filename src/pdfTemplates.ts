@@ -4,10 +4,21 @@ import type { PDFPage } from 'pdf-lib';
 export type PdfTemplateKind = 'a4Blank' | 'a4Lined' | 'a4Cornell';
 
 const A4_SIZE: [number, number] = [595.28, 841.89];
+const templateMarginX = 42;
+const cornellTitleTopMargin = 35;
+const cornellTop = A4_SIZE[1] - 48;
+const cornellHeaderDividerY = cornellTop - 54;
 const templateLineColor = rgb(0.58, 0.66, 0.7);
 const templateDividerColor = rgb(0.5, 0.56, 0.58);
 const templateMarginColor = rgb(0.68, 0.72, 0.74);
 const lineSpacing = 24;
+
+export const CORNELL_CONTENT_BOUNDS = {
+  left: templateMarginX,
+  right: A4_SIZE[0] - templateMarginX,
+  titleTop: A4_SIZE[1] - cornellTitleTopMargin,
+  titleWidth: A4_SIZE[0] - templateMarginX * 2
+};
 
 export async function createPdfTemplate(kind: PdfTemplateKind) {
   const pdfDoc = await PDFDocument.create();
@@ -28,8 +39,8 @@ export async function createPdfTemplate(kind: PdfTemplateKind) {
 }
 
 function drawLinedPage(page: PDFPage) {
-  const left = 42;
-  const right = A4_SIZE[0] - 42;
+  const left = templateMarginX;
+  const right = A4_SIZE[0] - templateMarginX;
   const top = A4_SIZE[1] - 60;
   const bottom = 60;
 
@@ -48,13 +59,12 @@ function drawLinedPage(page: PDFPage) {
 }
 
 function drawCornellPage(page: PDFPage) {
-  const left = 42;
-  const right = A4_SIZE[0] - 42;
-  const top = A4_SIZE[1] - 48;
+  const left = CORNELL_CONTENT_BOUNDS.left;
+  const right = CORNELL_CONTENT_BOUNDS.right;
   const bottom = 48;
   const cueColumnRight = 184;
   const summaryTop = 168;
-  const headerDividerY = top - 54;
+  const headerDividerY = cornellHeaderDividerY;
   const firstNoteLineY = headerDividerY - lineSpacing;
 
   page.drawLine({

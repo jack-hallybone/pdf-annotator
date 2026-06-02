@@ -39,25 +39,37 @@ export function ColorPalette({
   onChange: (color: RgbColor) => void;
   onCommit?: () => void;
 }) {
+  const customColorSelected = !annotationColorSwatches.some((swatch) =>
+    sameColor(color, swatch)
+  );
+
   return (
     <div className="settings-field">
       {label ? <span>{label}</span> : null}
       <div className="color-palette">
-        {annotationColorSwatches.map((swatch) => (
-          <button
-            aria-label={`Set ${rgbToHex(swatch)}`}
-            className="color-swatch ui-button"
-            key={swatch.join('-')}
-            onClick={() => {
-              onChange(swatch);
-              onCommit?.();
-            }}
-            style={{ background: rgbToHex(swatch) }}
-            type="button"
-          />
-        ))}
+        {annotationColorSwatches.map((swatch) => {
+          const selected = sameColor(color, swatch);
+          return (
+            <button
+              aria-label={`Set ${rgbToHex(swatch)}`}
+              aria-pressed={selected}
+              className={`color-swatch ui-button ${
+                selected ? 'color-swatch-active' : ''
+              }`}
+              key={swatch.join('-')}
+              onClick={() => {
+                onChange(swatch);
+                onCommit?.();
+              }}
+              style={{ background: rgbToHex(swatch) }}
+              type="button"
+            />
+          );
+        })}
         <label
-          className="color-picker-button ui-button"
+          className={`color-picker-button ui-button ${
+            customColorSelected ? 'color-swatch-active' : ''
+          }`}
           title="Custom colour"
         >
           <span className="color-picker-dots" aria-hidden="true">
@@ -137,6 +149,12 @@ export function hexToRgb(hex: string): RgbColor {
 
 function formatValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function sameColor(left: RgbColor, right: RgbColor) {
+  return left.every(
+    (channel, index) => Math.abs(channel - right[index]) < 0.001
+  );
 }
 
 function clamp(value: number, min: number, max: number) {
