@@ -41,6 +41,7 @@ import {
   pathHitTest,
   pathLength,
   rectToQuadPoints,
+  resampleInkPath,
   simplifyInkPath
 } from './annotationGeometry';
 import {
@@ -831,9 +832,11 @@ export function PdfPageView({
 
   function handlePagePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (eraserPath) {
-      const point = eventToPdfPointFromElement(event, viewport);
-      setEraserPath((current) => (current ? [...current, point] : current));
-      eraseAtPoint(point);
+      const points = eventToPdfPointsFromElement(event, viewport);
+      setEraserPath((current) =>
+        current ? appendPdfPoints(current, points) : current
+      );
+      points.forEach(eraseAtPoint);
       return;
     }
 
@@ -857,9 +860,9 @@ export function PdfPageView({
       return;
     }
 
-    const point = eventToPdfPointFromElement(event, viewport);
+    const points = eventToPdfPointsFromElement(event, viewport);
     setDraftPath((current) =>
-      current ? appendDraftInkPoint(current, point, viewport) : current
+      current ? appendDraftInkPoints(current, points, viewport) : current
     );
   }
 
@@ -955,9 +958,9 @@ export function PdfPageView({
     }
 
     releasePointer(event, event.pointerId);
-    const path = appendDraftInkPoint(
+    const path = appendDraftInkPoints(
       draftPath,
-      eventToPdfPointFromElement(event, viewport),
+      eventToPdfPointsFromElement(event, viewport),
       viewport
     );
     const normalizedPath = normalizeDraftInkPath(path, viewport);
@@ -1025,15 +1028,19 @@ export function PdfPageView({
     }
 
     if (eraserPath) {
-      const point = eventToPdfPoint(event, viewport);
-      setEraserPath((current) => (current ? [...current, point] : current));
-      eraseAtPoint(point);
+      const points = eventToPdfPoints(event, viewport);
+      setEraserPath((current) =>
+        current ? appendPdfPoints(current, points) : current
+      );
+      points.forEach(eraseAtPoint);
       return;
     }
 
     if (lassoPath) {
-      const point = eventToPdfPoint(event, viewport);
-      setLassoPath((current) => (current ? [...current, point] : current));
+      const points = eventToPdfPoints(event, viewport);
+      setLassoPath((current) =>
+        current ? appendPdfPoints(current, points) : current
+      );
       return;
     }
 
@@ -1041,9 +1048,9 @@ export function PdfPageView({
       return;
     }
 
-    const point = eventToPdfPoint(event, viewport);
+    const points = eventToPdfPoints(event, viewport);
     setDraftPath((current) =>
-      current ? appendDraftInkPoint(current, point, viewport) : current
+      current ? appendDraftInkPoints(current, points, viewport) : current
     );
   }
 
@@ -1091,9 +1098,9 @@ export function PdfPageView({
 
     if (draftPath && (tool === 'draw' || tool === 'freehandHighlight')) {
       event.currentTarget.releasePointerCapture(event.pointerId);
-      const path = appendDraftInkPoint(
+      const path = appendDraftInkPoints(
         draftPath,
-        eventToPdfPoint(event, viewport),
+        eventToPdfPoints(event, viewport),
         viewport
       );
       const normalizedPath =
@@ -2037,11 +2044,31 @@ function eventToPdfPoint(
   event: React.PointerEvent<SVGSVGElement>,
   viewport: PageViewport
 ) {
-  const point = eventToViewportPoint(event);
-  return viewportPointToPdfPoint(point.x, point.y, viewport);
+  return eventToPdfPoints(event, viewport).at(-1) ?? { x: 0, y: 0 };
+}
+
+function eventToPdfPoints(
+  event: React.PointerEvent<SVGSVGElement>,
+  viewport: PageViewport
+) {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return pointerSamples(event).map((sample) =>
+    viewportPointToPdfPoint(
+      sample.clientX - bounds.left,
+      sample.clientY - bounds.top,
+      viewport
+    )
+  );
 }
 
 function eventToPdfPointFromElement(
+  event: React.PointerEvent<Element>,
+  viewport: PageViewport
+) {
+  return eventToPdfPointsFromElement(event, viewport).at(-1) ?? { x: 0, y: 0 };
+}
+
+function eventToPdfPointsFromElement(
   event: React.PointerEvent<Element>,
   viewport: PageViewport
 ) {
@@ -2049,22 +2076,43 @@ function eventToPdfPointFromElement(
   const bounds = pageElement?.getBoundingClientRect();
 
   if (!bounds) {
-    return { x: 0, y: 0 };
+    return [];
   }
 
-  return viewportPointToPdfPoint(
-    event.clientX - bounds.left,
-    event.clientY - bounds.top,
-    viewport
+  return pointerSamples(event).map((sample) =>
+    viewportPointToPdfPoint(
+      sample.clientX - bounds.left,
+      sample.clientY - bounds.top,
+      viewport
+    )
   );
 }
 
 function eventToViewportPoint(event: React.PointerEvent<SVGSVGElement>) {
   const bounds = event.currentTarget.getBoundingClientRect();
+  const sample = pointerSamples(event).at(-1) ?? event.nativeEvent;
   return {
-    x: event.clientX - bounds.left,
-    y: event.clientY - bounds.top
+    x: sample.clientX - bounds.left,
+    y: sample.clientY - bounds.top
   };
+}
+
+function pointerSamples(event: React.PointerEvent<Element>) {
+  const nativeEvent = event.nativeEvent;
+  const coalesced =
+    typeof nativeEvent.getCoalescedEvents === 'function'
+      ? nativeEvent.getCoalescedEvents()
+      : [];
+  const samples = coalesced.length > 0 ? [...coalesced] : [nativeEvent];
+  const last = samples.at(-1);
+  if (
+    !last ||
+    last.clientX !== nativeEvent.clientX ||
+    last.clientY !== nativeEvent.clientY
+  ) {
+    samples.push(nativeEvent);
+  }
+  return samples;
 }
 
 function nearestTextHitRect(
@@ -2390,8 +2438,9 @@ function isAnnotationCreationTool(tool: Tool) {
 
 const PDF_UNITS_PER_INCH = 72;
 const MILLIMETRES_PER_INCH = 25.4;
+const INK_CAPTURE_SPACING_MM = 0.05;
 const INK_POINT_SPACING_MM = 0.15;
-const INK_SIMPLIFICATION_TOLERANCE_MM = 0.08;
+const INK_SIMPLIFICATION_TOLERANCE_MM = 0.05;
 const INK_DOT_MAX_LENGTH_MM = 0.35;
 const FREEHAND_HIGHLIGHT_MIN_LENGTH_MM = 1;
 
@@ -2400,11 +2449,35 @@ function appendDraftInkPoint(
   point: PdfPoint,
   viewport: PageViewport
 ) {
-  return appendInkPoint(path, point, inkPointSpacing(viewport));
+  return appendInkPoint(path, point, inkCaptureSpacing(viewport));
+}
+
+function appendDraftInkPoints(
+  path: PdfPoint[],
+  points: PdfPoint[],
+  viewport: PageViewport
+) {
+  return points.reduce(
+    (currentPath, point) => appendDraftInkPoint(currentPath, point, viewport),
+    path
+  );
+}
+
+function appendPdfPoints(path: PdfPoint[], points: PdfPoint[]) {
+  return points.reduce(
+    (currentPath, point) =>
+      appendInkPoint(currentPath, point, Number.EPSILON),
+    path
+  );
 }
 
 function normalizeDraftInkPath(path: PdfPoint[], viewport: PageViewport) {
-  return simplifyInkPath(path, inkSimplificationTolerance(viewport));
+  const resampled = resampleInkPath(path, inkPointSpacing(viewport));
+  return simplifyInkPath(resampled, inkSimplificationTolerance(viewport));
+}
+
+function inkCaptureSpacing(viewport: PageViewport) {
+  return millimetresToPdfUnits(INK_CAPTURE_SPACING_MM, viewport);
 }
 
 function inkPointSpacing(viewport: PageViewport) {

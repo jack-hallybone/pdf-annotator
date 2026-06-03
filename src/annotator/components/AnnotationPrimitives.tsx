@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { CSSProperties, ChangeEvent } from 'react';
 import { rgbToCssWithAlpha } from '../annotationColors';
+import { pathToViewportD } from '../pdfGeometry';
 import type { PageViewport, PdfPoint } from '../types';
 import { clamp } from '../viewerConfig';
 
@@ -203,18 +204,14 @@ export function PathShape({
   viewport: PageViewport;
   width: number;
 }) {
-  const d = points
-    .map((point, index) => {
-      const [x, y] = viewport.convertToViewportPoint(point.x, point.y);
-      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-    })
-    .join(' ');
+  const d = pathToViewportD(points, viewport);
 
   return (
     <path
       d={d}
       fill="none"
       opacity={opacity}
+      shapeRendering="geometricPrecision"
       stroke={color}
       strokeLinecap="round"
       strokeLinejoin="round"

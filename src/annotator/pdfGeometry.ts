@@ -1,4 +1,5 @@
 import type { PageViewport, PdfPoint, PdfRect } from './types';
+import { inkPathCommands } from './annotationGeometry';
 
 export function pdfRectToViewportRect(rect: PdfRect, viewport: PageViewport) {
   const [x1, y1, x2, y2] = viewport.convertToViewportRectangle([
@@ -19,10 +20,29 @@ export function pdfRectToViewportRect(rect: PdfRect, viewport: PageViewport) {
 }
 
 export function pathToViewportD(path: PdfPoint[], viewport: PageViewport) {
-  return path
-    .map((point, index) => {
-      const [x, y] = viewport.convertToViewportPoint(point.x, point.y);
-      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+  return inkPathCommands(path)
+    .map((command) => {
+      const [x, y] = viewport.convertToViewportPoint(
+        command.point.x,
+        command.point.y
+      );
+      if (command.type === 'move') {
+        return `M ${x} ${y}`;
+      }
+
+      if (command.type === 'line') {
+        return `L ${x} ${y}`;
+      }
+
+      const [control1X, control1Y] = viewport.convertToViewportPoint(
+        command.control1.x,
+        command.control1.y
+      );
+      const [control2X, control2Y] = viewport.convertToViewportPoint(
+        command.control2.x,
+        command.control2.y
+      );
+      return `C ${control1X} ${control1Y} ${control2X} ${control2Y} ${x} ${y}`;
     })
     .join(' ');
 }

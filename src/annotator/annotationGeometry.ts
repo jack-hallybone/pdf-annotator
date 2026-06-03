@@ -1,6 +1,11 @@
 import { clamp } from './viewerConfig';
 import type { PdfAnnotation, PdfPoint, PdfRect } from './types';
 
+export type InkPathCommand =
+  | { point: PdfPoint; type: 'move' }
+  | { point: PdfPoint; type: 'line' }
+  | { control1: PdfPoint; control2: PdfPoint; point: PdfPoint; type: 'curve' };
+
 export function rectToQuadPoints(rect: PdfRect) {
   return [
     rect.x1,
@@ -274,6 +279,84 @@ export function simplifyInkPath(path: PdfPoint[], tolerance: number) {
   return points.filter((_, index) => keep[index] === 1);
 }
 
+export function resampleInkPath(path: PdfPoint[], spacing: number) {
+  const points = path.filter(isFinitePoint);
+  if (points.length < 2 || spacing <= 0) {
+    return points;
+  }
+
+  const result: PdfPoint[] = [points[0]];
+  let previous = points[0];
+  let distanceSinceLastSample = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    const dx = point.x - previous.x;
+    const dy = point.y - previous.y;
+    const segmentLength = Math.hypot(dx, dy);
+
+    if (segmentLength === 0) {
+      continue;
+    }
+
+    let distanceAlongSegment = spacing - distanceSinceLastSample;
+    while (distanceAlongSegment <= segmentLength) {
+      const ratio = distanceAlongSegment / segmentLength;
+      const sample = {
+        x: previous.x + dx * ratio,
+        y: previous.y + dy * ratio
+      };
+      result.push(sample);
+      distanceAlongSegment += spacing;
+    }
+
+    distanceSinceLastSample =
+      segmentLength - (distanceAlongSegment - spacing);
+    previous = point;
+  }
+
+  const last = points[points.length - 1];
+  const current = result[result.length - 1];
+  if (current && Math.hypot(last.x - current.x, last.y - current.y) > 0.01) {
+    result.push(last);
+  }
+
+  return result;
+}
+
+export function inkPathCommands(path: PdfPoint[]): InkPathCommand[] {
+  const points = path.filter(isFinitePoint);
+  if (points.length === 0) {
+    return [];
+  }
+
+  if (points.length === 1) {
+    return [{ point: points[0], type: 'move' }];
+  }
+
+  if (points.length === 2) {
+    return [
+      { point: points[0], type: 'move' },
+      { point: points[1], type: 'line' }
+    ];
+  }
+
+  const visualPoints = relaxInkVisualPoints(points);
+  const commands: InkPathCommand[] = [{ point: visualPoints[0], type: 'move' }];
+  let current = visualPoints[0];
+  let index = 1;
+  for (; index < visualPoints.length - 2; index += 1) {
+    const end = midpoint(visualPoints[index], visualPoints[index + 1]);
+    commands.push(quadraticAsCubic(current, visualPoints[index], end));
+    current = end;
+  }
+  commands.push(
+    quadraticAsCubic(current, visualPoints[index], visualPoints[index + 1])
+  );
+
+  return commands;
+}
+
 export function dotPath(point: PdfPoint, width: number) {
   const radius = Math.max(width, 0.5) / 2;
   return [
@@ -314,6 +397,100 @@ function distanceToSegment(point: PdfPoint, start: PdfPoint, end: PdfPoint) {
     1
   );
   return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function midpoint(first: PdfPoint, second: PdfPoint): PdfPoint {
+  return {
+    x: (first.x + second.x) / 2,
+    y: (first.y + second.y) / 2
+  };
+}
+
+function relaxInkVisualPoints(points: PdfPoint[]) {
+  if (points.length < 4) {
+    return points;
+  }
+
+  const spacing = medianSegmentLength(points);
+  const baseStrength = 0.24;
+  const sparseStrength = clamp((spacing - 0.75) / 2.25, 0, 1) * 0.3;
+  const strength = baseStrength + sparseStrength;
+
+  let relaxed = points;
+  for (let pass = 0; pass < 2; pass += 1) {
+    relaxed = relaxInkVisualPass(relaxed, strength);
+  }
+
+  return relaxed;
+}
+
+function relaxInkVisualPass(points: PdfPoint[], strength: number) {
+  return points.map((point, index) => {
+    if (index === 0 || index === points.length - 1) {
+      return point;
+    }
+
+    const previous = points[index - 1];
+    const next = points[index + 1];
+    const turnFactor = smoothableTurnFactor(previous, point, next);
+    if (turnFactor <= 0) {
+      return point;
+    }
+
+    const target = midpoint(previous, next);
+    const correction = strength * turnFactor;
+    return {
+      x: point.x + (target.x - point.x) * correction,
+      y: point.y + (target.y - point.y) * correction
+    };
+  });
+}
+
+function medianSegmentLength(points: PdfPoint[]) {
+  const lengths = points
+    .slice(1)
+    .map((point, index) =>
+      Math.hypot(point.x - points[index].x, point.y - points[index].y)
+    )
+    .sort((a, b) => a - b);
+  return lengths[Math.floor(lengths.length / 2)] ?? 0;
+}
+
+function smoothableTurnFactor(
+  previous: PdfPoint,
+  point: PdfPoint,
+  next: PdfPoint
+) {
+  const ax = point.x - previous.x;
+  const ay = point.y - previous.y;
+  const bx = next.x - point.x;
+  const by = next.y - point.y;
+  const denominator = Math.hypot(ax, ay) * Math.hypot(bx, by);
+  if (denominator === 0) {
+    return 1;
+  }
+
+  const cosine = clamp((ax * bx + ay * by) / denominator, -1, 1);
+  return clamp((cosine + 0.2) / 1.2, 0, 1);
+}
+
+function quadraticAsCubic(
+  start: PdfPoint,
+  control: PdfPoint,
+  end: PdfPoint
+): InkPathCommand {
+  return {
+    control1: {
+      x: start.x + (2 / 3) * (control.x - start.x),
+      y: start.y + (2 / 3) * (control.y - start.y)
+    },
+    control2: {
+      x: end.x + (2 / 3) * (control.x - end.x),
+      y: end.y + (2 / 3) * (control.y - end.y)
+    },
+    point: end,
+    type: 'curve'
+  };
 }
 
 function simplifyPathSections(

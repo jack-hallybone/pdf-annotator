@@ -14,6 +14,7 @@ import {
 } from 'pdf-lib';
 import {
   dotPath,
+  inkPathCommands,
   pathLooksClosed,
   rectToQuadPoints
 } from './annotationGeometry';
@@ -449,7 +450,10 @@ function addInkAnnotation(
     return;
   }
 
-  const rect = boundsForPoints(points, options.filledAppearance ? 1 : width * 2);
+  const rect = boundsForPoints(
+    options.filledAppearance ? points : inkAppearanceBoundsPoints(paths),
+    options.filledAppearance ? 1 : width * 2
+  );
   const appearanceRef = options.filledAppearance
     ? filledInkAppearance(page, paths, rect, annotation)
     : strokedInkAppearance(page, paths, rect, annotation, width);
@@ -606,19 +610,45 @@ function strokedPathOperators(
 
   const [first, ...rest] = points;
   return [
-    `${pdfCoordinateNumber(first.x - offsetX)} ${pdfCoordinateNumber(
-      first.y - offsetY
-    )} m`,
-    ...rest.map(
-      (point) =>
-        `${pdfCoordinateNumber(point.x - offsetX)} ${pdfCoordinateNumber(
-          point.y - offsetY
-        )} l`
-    ),
+    ...inkPathCommands([first, ...rest]).map((command) => {
+      if (command.type === 'move') {
+        return `${pdfCoordinateNumber(
+          command.point.x - offsetX
+        )} ${pdfCoordinateNumber(command.point.y - offsetY)} m`;
+      }
+
+      if (command.type === 'line') {
+        return `${pdfCoordinateNumber(
+          command.point.x - offsetX
+        )} ${pdfCoordinateNumber(command.point.y - offsetY)} l`;
+      }
+
+      return `${pdfCoordinateNumber(
+        command.control1.x - offsetX
+      )} ${pdfCoordinateNumber(
+        command.control1.y - offsetY
+      )} ${pdfCoordinateNumber(
+        command.control2.x - offsetX
+      )} ${pdfCoordinateNumber(
+        command.control2.y - offsetY
+      )} ${pdfCoordinateNumber(
+        command.point.x - offsetX
+      )} ${pdfCoordinateNumber(command.point.y - offsetY)} c`;
+    }),
     'S'
   ]
     .filter(Boolean)
     .join('\n');
+}
+
+function inkAppearanceBoundsPoints(paths: PdfPoint[][]) {
+  return paths.flatMap((path) =>
+    inkPathCommands(path).flatMap((command) =>
+      command.type === 'curve'
+        ? [command.control1, command.control2, command.point]
+        : [command.point]
+    )
+  );
 }
 
 function normalizeInkPath(path: PdfPoint[], width: number) {
