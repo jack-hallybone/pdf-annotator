@@ -33,6 +33,9 @@ type LocalWindow = Window &
     showOpenFilePicker?: (
       options?: LocalOpenFilePickerOptions
     ) => Promise<LocalPdfFileHandle[]>;
+    showSaveFilePicker?: (
+      options?: LocalSaveFilePickerOptions
+    ) => Promise<LocalPdfFileHandle>;
   };
 
 type LocalOpenFilePickerOptions = {
@@ -42,6 +45,10 @@ type LocalOpenFilePickerOptions = {
     accept: Record<string, string[]>;
     description?: string;
   }>;
+};
+
+type LocalSaveFilePickerOptions = Omit<LocalOpenFilePickerOptions, 'multiple'> & {
+  suggestedName?: string;
 };
 
 type DataTransferItemWithFileSystemHandle = DataTransferItem & {
@@ -63,6 +70,10 @@ const pdfPickerOptions: LocalOpenFilePickerOptions = {
 
 export function canPickLocalPdfFile() {
   return typeof localWindow().showOpenFilePicker === 'function';
+}
+
+export function canSaveLocalPdfFileAs() {
+  return typeof localWindow().showSaveFilePicker === 'function';
 }
 
 export async function pickLocalPdfFiles() {
@@ -101,9 +112,34 @@ export async function savePdfToLocalFile(
     await writable.write(pdfBlob(bytes));
     await writable.close();
     closed = true;
+    await verifySavedPdfBytes(handle, bytes);
   } catch (error) {
     if (!closed) {
       await abortWritable(writable);
+    }
+    throw error;
+  }
+}
+
+export async function savePdfAsLocalFile(
+  bytes: Uint8Array,
+  suggestedName: string
+) {
+  const picker = localWindow().showSaveFilePicker;
+  if (!picker) {
+    return null;
+  }
+
+  try {
+    const handle = await picker({
+      ...pdfPickerOptions,
+      suggestedName
+    });
+    await savePdfToLocalFile(handle, bytes);
+    return handle;
+  } catch (error) {
+    if (isPickerAbort(error)) {
+      return null;
     }
     throw error;
   }
@@ -117,6 +153,41 @@ async function createWritable(handle: LocalPdfFileHandle) {
       return handle.createWritable();
     }
     throw error;
+  }
+}
+
+async function verifySavedPdfBytes(
+  handle: LocalPdfFileHandle,
+  expectedBytes: Uint8Array
+) {
+  const savedFile = await handle.getFile();
+  if (savedFile.size !== expectedBytes.byteLength) {
+    throw new Error('Saved file verification failed: byte length mismatch.');
+  }
+
+  const reader = savedFile.stream().getReader();
+  let offset = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      for (let index = 0; index < value.byteLength; index += 1) {
+        if (value[index] !== expectedBytes[offset + index]) {
+          throw new Error('Saved file verification failed: byte mismatch.');
+        }
+      }
+      offset += value.byteLength;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (offset !== expectedBytes.byteLength) {
+    throw new Error('Saved file verification failed: incomplete read.');
   }
 }
 
@@ -205,5 +276,7 @@ function isPickerAbort(error: unknown) {
 }
 
 function localWindow() {
-  return window as LocalWindow;
+  return typeof window === 'undefined'
+    ? ({} as LocalWindow)
+    : (window as LocalWindow);
 }

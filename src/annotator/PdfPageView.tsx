@@ -1,5 +1,6 @@
-import { Trash2 } from 'lucide-react';
+import { Copy, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import {
   AnnotationLayer,
   AnnotationMode,
@@ -97,12 +98,22 @@ type DragSelection = {
   lastPoint: PdfPoint;
   pointerId: number;
 };
+type EraserGesture = {
+  pendingUntilDrag: boolean;
+};
+type VisiblePageBounds = {
+  bottom: number;
+  left: number;
+  right: number;
+  top: number;
+};
 
 type PdfPageViewProps = {
   page: PDFPageProxy;
   pageIndex: number;
   pageCount: number;
   renderPriority: PageRenderPriority;
+  readOnly?: boolean;
   scale: number;
   active: boolean;
   tool: Tool;
@@ -135,6 +146,7 @@ export function PdfPageView({
   pageIndex,
   pageCount,
   renderPriority,
+  readOnly = false,
   scale,
   active,
   tool,
@@ -171,6 +183,8 @@ export function PdfPageView({
   const suppressNextTextHighlightRef = useRef(false);
   const dismissedSelectionPointerIdRef = useRef<number | null>(null);
   const eraserScopeRef = useRef<EraserScope>('all');
+  const eraserGestureRef = useRef<EraserGesture | null>(null);
+  const eraserPathRef = useRef<PdfPoint[] | null>(null);
   const [draftPath, setDraftPath] = useState<PdfPoint[] | null>(null);
   const [draftTextHighlight, setDraftTextHighlight] = useState<{
     startIndex: number;
@@ -223,18 +237,23 @@ export function PdfPageView({
   );
   const selectedPageAnnotations = useMemo(
     () => {
+      if (readOnly) {
+        return [];
+      }
+
       const selectedIds = new Set(selectedAnnotationIds);
       return annotations.filter((annotation) => selectedIds.has(annotation.id));
     },
-    [annotations, selectedAnnotationIds]
+    [annotations, readOnly, selectedAnnotationIds]
   );
   const overlayCapturesPointer =
-    tool === 'draw' ||
-    tool === 'freehandHighlight' ||
-    tool === 'freeText' ||
-    tool === 'stickyNote' ||
-    tool === 'eraser' ||
-    tool === 'lasso';
+    !readOnly &&
+    (tool === 'draw' ||
+      tool === 'freehandHighlight' ||
+      tool === 'freeText' ||
+      tool === 'stickyNote' ||
+      tool === 'eraser' ||
+      tool === 'lasso');
   const shouldMountInteractionOverlay = showAnnotations || overlayCapturesPointer;
   const showSynchronizedAnnotations = showAnnotations && baseLayerReady;
   const pageStyle = {
@@ -503,17 +522,20 @@ export function PdfPageView({
         return;
       }
 
+      const hasAppearanceOverlayAnnotations = existingAnnotations.some(
+        (annotation, index) =>
+          shouldRenderExistingAnnotationInAppearanceOverlay(annotation, index)
+      );
+      const hasReadOnlyTextMarkups = existingAnnotations.some(
+        isReadOnlyTextMarkupAnnotation
+      );
+
       clearCanvas(overlayCanvas);
       if (
         !showAnnotations ||
         !baseLayerReady ||
         !baseCanvas ||
-        !existingAnnotations.some((annotation, index) =>
-          shouldRenderExistingAnnotationInAppearanceOverlay(
-            annotation,
-            index
-          )
-        )
+        (!hasAppearanceOverlayAnnotations && !hasReadOnlyTextMarkups)
       ) {
         return;
       }
@@ -541,32 +563,45 @@ export function PdfPageView({
 
       const scaleX = width / Math.max(1, viewport.width);
       const scaleY = height / Math.max(1, viewport.height);
-      context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
-      const renderTask = page.render({
-        annotationMode: AnnotationMode.ENABLE,
-        canvas: overlayCanvas,
-        canvasContext: context,
-        viewport
-      });
-      appearanceRenderTask = renderTask;
-      await renderTask.promise;
+      if (hasAppearanceOverlayAnnotations) {
+        context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+        const renderTask = page.render({
+          annotationMode: AnnotationMode.ENABLE,
+          canvas: overlayCanvas,
+          canvasContext: context,
+          viewport
+        });
+        appearanceRenderTask = renderTask;
+        await renderTask.promise;
 
-      if (cancelled || appearanceRenderTask !== renderTask) {
-        return;
+        if (cancelled || appearanceRenderTask !== renderTask) {
+          return;
+        }
+
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        const appearancePixels = context.getImageData(0, 0, width, height);
+        const basePixels = baseContext.getImageData(0, 0, width, height);
+        keepOnlyChangedPixels(appearancePixels, basePixels);
+        context.putImageData(appearancePixels, 0, 0);
+        clearEditableExistingAnnotationRects(
+          context,
+          existingAnnotations,
+          viewport,
+          scaleX,
+          scaleY
+        );
       }
 
-      context.setTransform(1, 0, 0, 1, 0, 0);
-      const appearancePixels = context.getImageData(0, 0, width, height);
-      const basePixels = baseContext.getImageData(0, 0, width, height);
-      keepOnlyChangedPixels(appearancePixels, basePixels);
-      context.putImageData(appearancePixels, 0, 0);
-      clearEditableExistingAnnotationRects(
-        context,
-        existingAnnotations,
-        viewport,
-        scaleX,
-        scaleY
-      );
+      if (hasReadOnlyTextMarkups && !cancelled) {
+        drawReadOnlyTextDecorations(
+          context,
+          existingAnnotations,
+          viewport,
+          scaleX,
+          scaleY,
+          scale
+        );
+      }
     }
 
     let cancelled = false;
@@ -695,17 +730,21 @@ export function PdfPageView({
 
   function handlePointerDown(event: React.PointerEvent<SVGSVGElement>) {
     onActivate(pageIndex);
+    if (readOnly) {
+      return;
+    }
 
     const isRightButton = event.button === 2 || (event.buttons & 2) === 2;
     if ((tool === 'draw' || tool === 'highlight') && isRightButton) {
       setHighlightContextMenu(null);
       event.preventDefault();
       onBeginAnnotationEdit({ finishOnPointerUp: true });
-      eraserScopeRef.current = tool === 'draw' ? 'draw' : 'highlight';
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
-      setEraserPath([point]);
-      eraseAtPoint(point);
+      beginEraserGesture(point, {
+        requireMovement: true,
+        scope: tool === 'draw' ? 'draw' : 'highlight'
+      });
       return;
     }
 
@@ -737,11 +776,12 @@ export function PdfPageView({
 
     if (tool === 'eraser') {
       onBeginAnnotationEdit({ finishOnPointerUp: true });
-      eraserScopeRef.current = 'all';
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
-      setEraserPath([point]);
-      eraseAtPoint(point);
+      beginEraserGesture(point, {
+        requireMovement: false,
+        scope: 'all'
+      });
       return;
     }
 
@@ -764,17 +804,22 @@ export function PdfPageView({
     if (isPdfLinkTarget(event.target)) {
       return;
     }
+    if (readOnly) {
+      onActivate(pageIndex);
+      return;
+    }
 
     const isRightButton = event.button === 2 || (event.buttons & 2) === 2;
     if (tool === 'highlight' && isRightButton) {
       setHighlightContextMenu(null);
       event.preventDefault();
       onBeginAnnotationEdit({ finishOnPointerUp: true });
-      eraserScopeRef.current = 'highlight';
       const point = eventToPdfPointFromElement(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
-      setEraserPath([point]);
-      eraseAtPoint(point);
+      beginEraserGesture(point, {
+        requireMovement: true,
+        scope: 'highlight'
+      });
       return;
     }
 
@@ -831,12 +876,13 @@ export function PdfPageView({
   }
 
   function handlePagePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (readOnly) {
+      return;
+    }
+
     if (eraserPath) {
       const points = eventToPdfPointsFromElement(event, viewport);
-      setEraserPath((current) =>
-        current ? appendPdfPoints(current, points) : current
-      );
-      points.forEach(eraseAtPoint);
+      appendEraserPoints(points);
       return;
     }
 
@@ -904,6 +950,10 @@ export function PdfPageView({
   }
 
   function handlePagePointerUp(event: React.PointerEvent<HTMLDivElement>) {
+    if (readOnly) {
+      return;
+    }
+
     if (dismissedSelectionPointerIdRef.current === event.pointerId) {
       dismissedSelectionPointerIdRef.current = null;
       return;
@@ -911,8 +961,7 @@ export function PdfPageView({
 
     if (eraserPath) {
       releasePointer(event, event.pointerId);
-      setEraserPath(null);
-      eraserScopeRef.current = 'all';
+      endEraserGesture();
       return;
     }
 
@@ -984,6 +1033,10 @@ export function PdfPageView({
   }
 
   function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
+    if (readOnly) {
+      return;
+    }
+
     const activeDragSelection = dragSelectionRef.current;
     if (activeDragSelection) {
       const point = eventToPdfPoint(event, viewport);
@@ -1029,10 +1082,7 @@ export function PdfPageView({
 
     if (eraserPath) {
       const points = eventToPdfPoints(event, viewport);
-      setEraserPath((current) =>
-        current ? appendPdfPoints(current, points) : current
-      );
-      points.forEach(eraseAtPoint);
+      appendEraserPoints(points);
       return;
     }
 
@@ -1055,6 +1105,10 @@ export function PdfPageView({
   }
 
   function handlePointerUp(event: React.PointerEvent<SVGSVGElement>) {
+    if (readOnly) {
+      return;
+    }
+
     if (dismissedSelectionPointerIdRef.current === event.pointerId) {
       dismissedSelectionPointerIdRef.current = null;
       return;
@@ -1076,8 +1130,7 @@ export function PdfPageView({
 
     if (eraserPath) {
       releasePointer(event, event.pointerId);
-      setEraserPath(null);
-      eraserScopeRef.current = 'all';
+      endEraserGesture();
       return;
     }
 
@@ -1147,16 +1200,26 @@ export function PdfPageView({
 
     if (tool === 'freeText' || tool === 'stickyNote') {
       const origin = eventToViewportPoint(event);
+      const textHeight = Math.max(84, toolSettings.textFontSize * scale * 4);
+      const textLineHeight =
+        toolSettings.textFontSize * scale * FREE_TEXT_LINE_HEIGHT;
+      const noteSize = 28;
       const rect =
         tool === 'freeText'
           ? viewportRectToPdfRect(
               origin.x,
-              origin.y,
+              origin.y - textLineHeight / 2,
               260,
-              Math.max(84, toolSettings.textFontSize * scale * 4),
+              textHeight,
               viewport
             )
-          : viewportRectToPdfRect(origin.x, origin.y, 28, 28, viewport);
+          : viewportRectToPdfRect(
+              origin.x - noteSize / 2,
+              origin.y - noteSize / 2,
+              noteSize,
+              noteSize,
+              viewport
+            );
 
       const annotation: PdfAnnotation =
         tool === 'freeText'
@@ -1188,7 +1251,7 @@ export function PdfPageView({
     event: React.PointerEvent<SVGGElement>,
     annotationId: string
   ) {
-    if (tool !== 'select') {
+    if (readOnly || tool !== 'select') {
       return;
     }
 
@@ -1217,6 +1280,10 @@ export function PdfPageView({
   }
 
   function eraseAtPoint(point: PdfPoint) {
+    if (readOnly) {
+      return;
+    }
+
     const scope = eraserScopeRef.current;
     const deleteIds: string[] = [];
 
@@ -1226,7 +1293,10 @@ export function PdfPageView({
       }
 
       if (annotation.kind === 'draw' || annotation.kind === 'freehandHighlight') {
-        const eraserRadius = Math.max(toolSettings.eraserWidth / 2 / scale, 1 / scale);
+        const eraserRadius = Math.max(
+          toolSettings.eraserWidth / 2 / scale,
+          1 / scale
+        );
         const threshold = Math.max(annotation.width * 1.4, eraserRadius);
         const remainingPaths = annotation.paths.filter(
           (path) => !pathHitTest(path, point, threshold)
@@ -1256,7 +1326,73 @@ export function PdfPageView({
     onDeleteAnnotations(deleteIds);
   }
 
+  function beginEraserGesture(
+    point: PdfPoint,
+    {
+      requireMovement,
+      scope
+    }: {
+      requireMovement: boolean;
+      scope: EraserScope;
+    }
+  ) {
+    eraserScopeRef.current = scope;
+    eraserPathRef.current = [point];
+    eraserGestureRef.current = {
+      pendingUntilDrag: requireMovement
+    };
+    setEraserPath([point]);
+
+    if (!requireMovement) {
+      eraseAtPoint(point);
+    }
+  }
+
+  function appendEraserPoints(points: PdfPoint[]) {
+    if (points.length === 0) {
+      return;
+    }
+
+    const currentPath = eraserPathRef.current;
+    if (!currentPath) {
+      return;
+    }
+
+    const nextPath = appendPdfPoints(currentPath, points);
+    eraserPathRef.current = nextPath;
+    setEraserPath(nextPath);
+
+    const gesture = eraserGestureRef.current;
+    if (!gesture) {
+      points.forEach(eraseAtPoint);
+      return;
+    }
+
+    if (gesture.pendingUntilDrag) {
+      if (pathLength(nextPath) < typeEraserMinLength(viewport)) {
+        return;
+      }
+
+      gesture.pendingUntilDrag = false;
+      nextPath.forEach(eraseAtPoint);
+      return;
+    }
+
+    points.forEach(eraseAtPoint);
+  }
+
+  function endEraserGesture() {
+    eraserPathRef.current = null;
+    eraserGestureRef.current = null;
+    eraserScopeRef.current = 'all';
+    setEraserPath(null);
+  }
+
   function handleMouseUp() {
+    if (readOnly) {
+      return;
+    }
+
     const selection = window.getSelection();
     if (suppressNextTextHighlightRef.current) {
       suppressNextTextHighlightRef.current = false;
@@ -1314,6 +1450,20 @@ export function PdfPageView({
     () => (draftPath ? normalizeDraftInkPath(draftPath, viewport) : null),
     [draftPath, viewport]
   );
+  function copySelectedHighlightText() {
+    const text = getTextForHighlights(
+      selectedPageAnnotations,
+      textLayerRef.current,
+      pageRef.current,
+      viewport
+    );
+    if (!text || !navigator.clipboard) {
+      return;
+    }
+
+    void navigator.clipboard.writeText(text).catch(console.error);
+  }
+
   return (
     <article
       aria-current={active ? 'page' : undefined}
@@ -1432,6 +1582,7 @@ export function PdfPageView({
                     recordUndo: false
                   })
                 }
+                readOnly={readOnly}
                 scale={scale}
                 selected={selectedAnnotationIds.includes(annotation.id)}
                 showPopover={
@@ -1447,7 +1598,7 @@ export function PdfPageView({
                 viewport={viewport}
               />
             )) : null}
-            {showSynchronizedAnnotations && selectedPageAnnotations.length > 0 ? (
+            {!readOnly && showSynchronizedAnnotations && selectedPageAnnotations.length > 0 ? (
               <SelectionToolbar
                 annotations={selectedPageAnnotations}
                 onBeginEdit={onBeginAnnotationEdit}
@@ -1457,6 +1608,7 @@ export function PdfPageView({
                   )
                 }
                 onClose={() => onSelectAnnotations([])}
+                onCopyText={copySelectedHighlightText}
                 onUpdate={(updater) => {
                   for (const annotation of selectedPageAnnotations) {
                     onUpdateAnnotation(annotation.id, updater, {
@@ -1464,6 +1616,7 @@ export function PdfPageView({
                     });
                   }
                 }}
+                pageRef={pageRef}
                 viewport={viewport}
               />
             ) : null}
@@ -1560,6 +1713,7 @@ function AnnotationShape({
   onHoverChange,
   onSelect,
   onUpdate,
+  readOnly,
   scale,
   selected,
   showPopover,
@@ -1582,6 +1736,7 @@ function AnnotationShape({
   onHoverChange: (hovered: boolean) => void;
   onSelect: () => void;
   onUpdate: (updater: (annotation: PdfAnnotation) => PdfAnnotation) => void;
+  readOnly: boolean;
   scale: number;
   selected: boolean;
   showPopover: boolean;
@@ -1590,6 +1745,10 @@ function AnnotationShape({
 }) {
   const commonProps = {
     onPointerDown: (event: React.PointerEvent<SVGGElement>) => {
+      if (readOnly) {
+        return;
+      }
+
       if (tool === 'eraser') {
         return;
       }
@@ -1629,6 +1788,10 @@ function AnnotationShape({
       onBeginMoveDrag(event, annotation.id);
     },
     onPointerUp: (event: React.PointerEvent<SVGGElement>) => {
+      if (readOnly) {
+        return;
+      }
+
       if (tool === 'freeText' || tool === 'stickyNote') {
         event.stopPropagation();
       }
@@ -1660,7 +1823,7 @@ function AnnotationShape({
                   <rect
                     fill="none"
                     height={bounds.height}
-                    stroke="#047857"
+                    stroke={SELECTION_ACCENT}
                     strokeDasharray="4 3"
                     strokeWidth="1.5"
                     width={bounds.width}
@@ -1693,7 +1856,7 @@ function AnnotationShape({
               <g key={`${annotation.id}-${index}`}>
                 {selected ? (
                   <PathShape
-                    color="#047857"
+                    color={SELECTION_ACCENT}
                     opacity={0.28}
                     points={path}
                     viewport={viewport}
@@ -1851,7 +2014,7 @@ function TextHighlightHandles({
         className="highlight-handle"
         cx={start[0]}
         cy={start[1]}
-        fill="#047857"
+        fill={SELECTION_ACCENT}
         onPointerDown={(event) => onBeginDrag(event, 'start')}
         r="6"
         stroke="white"
@@ -1861,7 +2024,7 @@ function TextHighlightHandles({
         className="highlight-handle"
         cx={end[0]}
         cy={end[1]}
-        fill="#047857"
+        fill={SELECTION_ACCENT}
         onPointerDown={(event) => onBeginDrag(event, 'end')}
         r="6"
         stroke="white"
@@ -1875,15 +2038,19 @@ function SelectionToolbar({
   annotations,
   onClose,
   onBeginEdit,
+  onCopyText,
   onDelete,
   onUpdate,
+  pageRef,
   viewport
 }: {
   annotations: PdfAnnotation[];
   onClose: () => void;
   onBeginEdit: () => void;
+  onCopyText?: () => void;
   onDelete: () => void;
   onUpdate: (updater: (annotation: PdfAnnotation) => PdfAnnotation) => void;
+  pageRef: RefObject<HTMLDivElement | null>;
   viewport: PageViewport;
 }) {
   const bounds = pdfRectToViewportRect(
@@ -1894,7 +2061,11 @@ function SelectionToolbar({
   const showsFontSize = annotations.length === 1 && first?.kind === 'freeText';
   const showsStroke = annotations.some(hasStroke);
   const showsOpacity = annotations.some(hasOpacity);
+  const showsCopyText = annotations.some(
+    (annotation) => annotation.kind === 'textHighlight'
+  );
   const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const visibleBounds = useVisiblePageBounds(pageRef, viewport);
   const rowHeights = [
     first ? 22 : 0,
     showsOpacity ? 30 : 0,
@@ -1910,17 +2081,30 @@ function SelectionToolbar({
     useState(toolbarHeight);
   const activeToolbarHeight = measuredToolbarHeight || toolbarHeight;
   const toolbarWidth = 216;
+  const minToolbarX = visibleBounds.left;
+  const maxToolbarX = Math.max(
+    minToolbarX,
+    visibleBounds.right - toolbarWidth
+  );
   const toolbarX = clamp(
     bounds.x + bounds.width / 2 - toolbarWidth / 2,
-    0,
-    Math.max(0, viewport.width - toolbarWidth)
+    minToolbarX,
+    maxToolbarX
   );
   const aboveY = bounds.y - activeToolbarHeight - 4;
   const belowY = bounds.y + bounds.height + 4;
-  const toolbarY =
-    aboveY >= 0
+  const minToolbarY = visibleBounds.top;
+  const maxToolbarY = Math.max(
+    minToolbarY,
+    visibleBounds.bottom - activeToolbarHeight
+  );
+  const preferredToolbarY =
+    aboveY >= minToolbarY
       ? aboveY
-      : clamp(belowY, 0, Math.max(0, viewport.height - activeToolbarHeight));
+      : belowY + activeToolbarHeight <= visibleBounds.bottom
+        ? belowY
+        : belowY;
+  const toolbarY = clamp(preferredToolbarY, minToolbarY, maxToolbarY);
 
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
@@ -2026,17 +2210,130 @@ function SelectionToolbar({
               />
             </div>
           ) : null}
-          <button
-            className="selection-delete-button"
-            onClick={onDelete}
-            title="Delete"
-            type="button"
-          >
-            <Trash2 size={15} />
-          </button>
+          <div className="selection-toolbar-actions">
+            {showsCopyText && onCopyText ? (
+              <button
+                className="selection-copy-button"
+                onClick={onCopyText}
+                type="button"
+              >
+                <Copy size={14} />
+                Copy text
+              </button>
+            ) : null}
+            <button
+              className="selection-delete-button"
+              onClick={onDelete}
+              title="Delete"
+              type="button"
+            >
+              <Trash2 size={15} />
+            </button>
+          </div>
         </SettingsPanelShell>
       </div>
     </foreignObject>
+  );
+}
+
+function useVisiblePageBounds(
+  pageRef: RefObject<HTMLDivElement | null>,
+  viewport: PageViewport
+) {
+  const [bounds, setBounds] = useState<VisiblePageBounds>(() =>
+    fullPageBounds(viewport)
+  );
+
+  useLayoutEffect(() => {
+    let animationFrame = 0;
+
+    const updateBounds = () => {
+      animationFrame = 0;
+      const nextBounds = visiblePageBounds(pageRef.current, viewport);
+      setBounds((current) =>
+        sameVisiblePageBounds(current, nextBounds) ? current : nextBounds
+      );
+    };
+
+    const scheduleUpdate = () => {
+      if (animationFrame) {
+        return;
+      }
+      animationFrame = window.requestAnimationFrame(updateBounds);
+    };
+
+    updateBounds();
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('scroll', scheduleUpdate, true);
+
+    const observedPage = pageRef.current;
+    const observer = observedPage ? new ResizeObserver(scheduleUpdate) : null;
+    if (observedPage) {
+      observer?.observe(observedPage);
+    }
+
+    return () => {
+      if (animationFrame) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('scroll', scheduleUpdate, true);
+      observer?.disconnect();
+    };
+  }, [pageRef, viewport]);
+
+  return bounds;
+}
+
+function visiblePageBounds(
+  pageElement: HTMLDivElement | null,
+  viewport: PageViewport
+): VisiblePageBounds {
+  if (!pageElement) {
+    return fullPageBounds(viewport);
+  }
+
+  const margin = 4;
+  const pageRect = pageElement.getBoundingClientRect();
+  const maxRight = Math.max(margin, viewport.width - margin);
+  const maxBottom = Math.max(margin, viewport.height - margin);
+  let left = clamp(-pageRect.left + margin, margin, maxRight);
+  let right = clamp(window.innerWidth - pageRect.left - margin, margin, maxRight);
+  let top = clamp(-pageRect.top + margin, margin, maxBottom);
+  let bottom = clamp(window.innerHeight - pageRect.top - margin, margin, maxBottom);
+
+  if (right <= left) {
+    left = margin;
+    right = maxRight;
+  }
+
+  if (bottom <= top) {
+    top = margin;
+    bottom = maxBottom;
+  }
+
+  return { bottom, left, right, top };
+}
+
+function fullPageBounds(viewport: PageViewport): VisiblePageBounds {
+  const margin = 4;
+  return {
+    bottom: Math.max(margin, viewport.height - margin),
+    left: margin,
+    right: Math.max(margin, viewport.width - margin),
+    top: margin
+  };
+}
+
+function sameVisiblePageBounds(
+  left: VisiblePageBounds,
+  right: VisiblePageBounds
+) {
+  return (
+    Math.abs(left.bottom - right.bottom) < 0.5 &&
+    Math.abs(left.left - right.left) < 0.5 &&
+    Math.abs(left.right - right.right) < 0.5 &&
+    Math.abs(left.top - right.top) < 0.5
   );
 }
 
@@ -2257,12 +2554,25 @@ function shouldRenderExistingAnnotationInAppearanceOverlay(
   if (
     annotation.annotationType === AnnotationType.LINK ||
     annotation.annotationType === AnnotationType.POPUP ||
-    annotation.annotationType === AnnotationType.WIDGET
+    annotation.annotationType === AnnotationType.WIDGET ||
+    isReadOnlyTextMarkupAnnotation(annotation)
   ) {
     return false;
   }
 
   return !isEditableExistingAnnotation(annotation);
+}
+
+function isReadOnlyTextMarkupAnnotation(annotation: ExistingPdfAnnotation) {
+  if (isEditableExistingAnnotation(annotation)) {
+    return false;
+  }
+
+  return (
+    annotation.annotationType === AnnotationType.UNDERLINE ||
+    annotation.annotationType === AnnotationType.SQUIGGLY ||
+    annotation.annotationType === AnnotationType.STRIKEOUT
+  );
 }
 
 function keepOnlyChangedPixels(appearance: ImageData, base: ImageData) {
@@ -2327,6 +2637,188 @@ function existingAnnotationViewportRect(
   return pdfArrayRectToViewportRect(rect.slice(0, 4), viewport);
 }
 
+function drawReadOnlyTextDecorations(
+  context: CanvasRenderingContext2D,
+  annotations: ExistingPdfAnnotation[],
+  viewport: PageViewport,
+  scaleX: number,
+  scaleY: number,
+  scale: number
+) {
+  context.save();
+  context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+
+  for (const annotation of annotations) {
+    if (!isReadOnlyTextMarkupAnnotation(annotation)) {
+      continue;
+    }
+
+    const rects = textMarkupViewportRects(annotation, viewport);
+    context.strokeStyle = rgbToCss(existingAnnotationColor(annotation));
+    context.globalAlpha = existingAnnotationOpacity(annotation);
+    context.lineWidth = existingAnnotationStrokeWidth(annotation, scale);
+
+    for (const rect of rects) {
+      switch (annotation.annotationType) {
+        case AnnotationType.UNDERLINE:
+          strokeLine(
+            context,
+            rect.x,
+            rect.y + rect.height * 0.9,
+            rect.x + rect.width,
+            rect.y + rect.height * 0.9
+          );
+          break;
+
+        case AnnotationType.SQUIGGLY:
+          strokeSquigglyRect(context, rect);
+          break;
+
+        case AnnotationType.STRIKEOUT:
+          strokeLine(
+            context,
+            rect.x,
+            rect.y + rect.height * 0.55,
+            rect.x + rect.width,
+            rect.y + rect.height * 0.55
+          );
+          break;
+      }
+    }
+  }
+
+  context.restore();
+}
+
+function textMarkupViewportRects(
+  annotation: ExistingPdfAnnotation,
+  viewport: PageViewport
+) {
+  const quadPoints = flatNumberArray(annotation.quadPoints);
+  const rects: ViewportRect[] = [];
+
+  for (let index = 0; index + 7 < quadPoints.length; index += 8) {
+    const xs = [
+      quadPoints[index],
+      quadPoints[index + 2],
+      quadPoints[index + 4],
+      quadPoints[index + 6]
+    ];
+    const ys = [
+      quadPoints[index + 1],
+      quadPoints[index + 3],
+      quadPoints[index + 5],
+      quadPoints[index + 7]
+    ];
+    if (![...xs, ...ys].every(Number.isFinite)) {
+      continue;
+    }
+
+    rects.push(
+      pdfArrayRectToViewportRect(
+        [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)],
+        viewport
+      )
+    );
+  }
+
+  const fallbackRect = existingAnnotationViewportRect(annotation, viewport);
+  return rects.length > 0 ? rects : fallbackRect ? [fallbackRect] : [];
+}
+
+function strokeSquigglyRect(
+  context: CanvasRenderingContext2D,
+  rect: ViewportRect
+) {
+  const amplitude = Math.max(1, Math.min(2.5, rect.height * 0.12));
+  const wavelength = Math.max(4, rect.height * 0.45);
+  const baseline = rect.y + rect.height * 0.9;
+  const endX = rect.x + rect.width;
+
+  context.beginPath();
+  context.moveTo(rect.x, baseline);
+  for (let x = rect.x; x <= endX; x += wavelength / 2) {
+    const nextX = Math.min(x + wavelength / 2, endX);
+    const controlX = (x + nextX) / 2;
+    const controlY =
+      baseline + (Math.floor((x - rect.x) / (wavelength / 2)) % 2 === 0
+        ? -amplitude
+        : amplitude);
+    context.quadraticCurveTo(controlX, controlY, nextX, baseline);
+  }
+  context.stroke();
+}
+
+function strokeLine(
+  context: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+) {
+  context.beginPath();
+  context.moveTo(x1, y1);
+  context.lineTo(x2, y2);
+  context.stroke();
+}
+
+function flatNumberArray(value: unknown) {
+  if (!value || typeof value === 'string') {
+    return [];
+  }
+
+  if (typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== 'function') {
+    return [];
+  }
+
+  return Array.from(value as Iterable<unknown>)
+    .map(Number)
+    .filter(Number.isFinite);
+}
+
+function existingAnnotationColor(
+  annotation: ExistingPdfAnnotation
+): [number, number, number] {
+  const color = annotation.color;
+  if (!color || typeof color === 'string') {
+    return [0.05, 0.2, 0.42];
+  }
+
+  const channels = flatNumberArray(color);
+  if (channels.length < 3) {
+    return [0.05, 0.2, 0.42];
+  }
+
+  const divisor = channels.some((channel) => channel > 1) ? 255 : 1;
+  return [
+    clamp(channels[0] / divisor, 0, 1),
+    clamp(channels[1] / divisor, 0, 1),
+    clamp(channels[2] / divisor, 0, 1)
+  ];
+}
+
+function existingAnnotationOpacity(annotation: ExistingPdfAnnotation) {
+  const opacity = annotation.opacity ?? annotation.ca;
+  return typeof opacity === 'number' && Number.isFinite(opacity)
+    ? clamp(opacity, 0, 1)
+    : 1;
+}
+
+function existingAnnotationStrokeWidth(
+  annotation: ExistingPdfAnnotation,
+  scale: number
+) {
+  const rawWidth =
+    typeof annotation.borderStyle?.rawWidth === 'number'
+      ? annotation.borderStyle.rawWidth
+      : typeof annotation.borderStyle?.width === 'number'
+        ? annotation.borderStyle.width
+        : 1;
+  return Math.max(1, rawWidth * scale);
+}
+
 function clearCanvas(canvas: HTMLCanvasElement) {
   const context = canvas.getContext('2d');
   if (!context) {
@@ -2373,8 +2865,8 @@ async function renderRasterFallback(
     viewport.height,
     Math.max(2, window.devicePixelRatio || 1)
   );
-  canvas.width = Math.floor(viewport.width * pixelRatio);
-  canvas.height = Math.floor(viewport.height * pixelRatio);
+  canvas.width = Math.ceil(viewport.width * pixelRatio);
+  canvas.height = Math.ceil(viewport.height * pixelRatio);
   canvas.style.width = `${viewport.width}px`;
   canvas.style.height = `${viewport.height}px`;
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -2443,6 +2935,7 @@ const INK_POINT_SPACING_MM = 0.15;
 const INK_SIMPLIFICATION_TOLERANCE_MM = 0.05;
 const INK_DOT_MAX_LENGTH_MM = 0.35;
 const FREEHAND_HIGHLIGHT_MIN_LENGTH_MM = 1;
+const TYPE_ERASER_MIN_DISTANCE_PX = 5;
 
 function appendDraftInkPoint(
   path: PdfPoint[],
@@ -2494,6 +2987,12 @@ function inkDotMaxLength(viewport: PageViewport) {
 
 function freehandHighlightMinLength(viewport: PageViewport) {
   return millimetresToPdfUnits(FREEHAND_HIGHLIGHT_MIN_LENGTH_MM, viewport);
+}
+
+function typeEraserMinLength(viewport: PageViewport) {
+  const start = viewportPointToPdfPoint(0, 0, viewport);
+  const end = viewportPointToPdfPoint(TYPE_ERASER_MIN_DISTANCE_PX, 0, viewport);
+  return Math.hypot(end.x - start.x, end.y - start.y);
 }
 
 function millimetresToPdfUnits(millimetres: number, viewport: PageViewport) {

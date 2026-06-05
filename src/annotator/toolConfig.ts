@@ -67,9 +67,9 @@ export const defaultToolSettings: ToolSettings = {
   drawColor: inkColors.blue,
   drawOpacity: 1,
   drawWidth: 1,
-  eraserWidth: 18,
+  eraserWidth: 10,
   textColor: inkColors.blue,
-  textFontSize: 16,
+  textFontSize: 12,
   textOpacity: 1,
   noteColor: inkColors.yellow
 };

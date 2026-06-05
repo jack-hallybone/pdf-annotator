@@ -4,6 +4,18 @@ export type PdfSaveTarget = {
   save: (bytes: Uint8Array) => Promise<void>;
 };
 
+export type PdfSaveAsResult = {
+  fileName?: string;
+  saveTarget?: PdfSaveTarget | null;
+};
+
+export type PdfSaveAsTarget = {
+  saveAs: (
+    bytes: Uint8Array,
+    suggestedName: string
+  ) => Promise<PdfSaveAsResult | null | undefined>;
+};
+
 export type PdfExternalLinkContext = {
   fileName: string;
   sourceId: string;
@@ -18,6 +30,7 @@ type PdfWorkspaceSourceBase = {
   initialAnnotations?: PdfAnnotation[];
   markDirty?: boolean;
   name: string;
+  saveAsTarget?: PdfSaveAsTarget | null;
   saveTarget?: PdfSaveTarget | null;
   sourceId: string;
 };

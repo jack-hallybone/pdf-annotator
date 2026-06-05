@@ -1,4 +1,4 @@
-import type { PdfWorkspaceSourceInput } from '../annotator';
+import type { PdfSaveAsTarget, PdfWorkspaceSourceInput } from '../annotator';
 
 export type PdfHostDocument = {
   fileKey?: string;
@@ -23,4 +23,5 @@ export type PdfHostAdapter = {
   ) => Promise<PdfHostDocument[]>;
   pdfDocumentsFromFileInput?: (files: File[]) => PdfHostDocument[];
   pickPdfDocuments: () => Promise<PdfHostPickResult>;
+  saveAsTarget?: PdfSaveAsTarget | null;
 };

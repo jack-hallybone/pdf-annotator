@@ -14,6 +14,24 @@ Local files can be opened, edited and modifications saved back to the original f
 
 [Try it out](https://jackhallybone.github.io/pdf-annotator/)
 
+## Privacy and security model
+
+The app is client-side. PDF bytes, annotations and generated files are processed in the browser with PDF.js, pdf-lib, React and local application code; the app does not upload documents, annotations or filenames to a server.
+
+Runtime network use is intentionally narrow:
+
+- The app fetches its own same-origin static assets, including the PDF.js worker and optional PDF.js WASM assets.
+- Development mode uses Vite's local websocket for hot reload.
+- External PDF links are opened only after the app's link confirmation flow.
+
+Browser file access uses the File System Access API where available. A writable handle is granted by the browser for the selected file only, is held in memory for the current app session, and JavaScript does not receive the user's full filesystem path. Direct Save and Save As writes are verified by reading the saved handle back and byte-comparing the result. Download a copy uses the browser download flow and does not grant a writable handle.
+
+Password-protected PDFs are unlocked inside the annotator component. Passwords are passed directly to PDF.js, the input is cleared immediately, and this app does not store them in React/app state or persistent browser storage.
+
+Imported editable annotations are tracked by workspace-local IDs plus PDF source identifiers derived from object refs, `/NM`, geometry and page/index fallback data. Page edits remap annotation page indexes, and saves remove/replace only supported annotations on managed pages or with matching source identifiers. Unsupported or flattened annotations remain part of the original PDF content/metadata unless the user edits supported annotations on that page.
+
+Local dev/preview responses include security headers from `vite.config.ts`. The production GitHub Pages build also injects a CSP `<meta>` tag, because GitHub Pages does not support custom response headers. A future desktop wrapper should enforce equivalent CSP/security policy in the wrapper configuration and open external links through the host browser.
+
 ## Use the component
 
 Import the reusable annotator from `src/annotator`. It owns its default CSS; pass PDF bytes in a `source`.
@@ -65,7 +83,7 @@ Required props:
 Optional props:
 
 - `className`, `style`: size and style the workspace host element.
-- `confirmDiscardChanges(session)`: override the unsaved-close confirmation.
+- `confirmDiscardChanges(session)`: provide an unsaved-close confirmation. If omitted, unsaved closes are blocked.
 - `enableGlobalShortcuts`: enable `Ctrl+S`, undo/redo, zoom shortcuts. Defaults to `true`.
 - `enableWheelZoom`: enable `Ctrl+wheel` zoom. Defaults to `true`.
 - `initialSession`: restore a previous `PdfWorkspaceSession`.
@@ -75,13 +93,12 @@ Optional props:
 - `onOpenExternalLink(url, context)`: open confirmed external PDF links. If omitted, links open in a new browser tab.
 - `onSessionChange(session)`: observe the current workspace session.
 - `showCloseButton`: show the workspace close button. Defaults to `true`.
-- `warnBeforeUnload`: show the browser unsaved-changes prompt. Defaults to `true`.
 
 `source` can be:
 
 - `{ bytes, name, sourceId }` for already-loaded PDF bytes.
 - `{ kind: 'loader', loadBytes, name, sourceId }` to let the workspace show its loading UI while bytes are fetched.
-- Either source may include `saveTarget.save(bytes)` to write back to the original file. If saving fails or no `saveTarget` is supplied, the workspace downloads a copy.
+- Either source may include `saveTarget.save(bytes)` to write back to the original file, and `saveAsTarget.saveAs(bytes, suggestedName)` for explicit Save As behavior.
 - Either source may include `initialAnnotations` to open a generated PDF with editable unsaved annotations already on the page.
 
 Style it by overriding CSS variables and, if needed, passing `className`/`style` to control size.

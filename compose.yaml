@@ -16,7 +16,7 @@ services:
       - "127.0.0.1:5173:5173"
       - "127.0.0.1:4173:4173"
 
-    command: sh -c "npm ci --ignore-scripts && npm run dev"
+    command: sh -c "npm ci --ignore-scripts && VITE_HOST=0.0.0.0 npm run dev"
 
 volumes:
   node_modules:

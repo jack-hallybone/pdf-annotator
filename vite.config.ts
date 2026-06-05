@@ -7,6 +7,8 @@ declare const process: {
 };
 
 const base = normalizeBasePath(process.env.BASE_PATH);
+const devServerHost = process.env.VITE_HOST ?? '127.0.0.1';
+const localAllowedHosts = ['localhost', '127.0.0.1', '::1'];
 
 const sharedSecurityHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
@@ -113,7 +115,8 @@ export default defineConfig({
     }
   }],
   server: {
-    host: '0.0.0.0',
+    host: devServerHost,
+    allowedHosts: localAllowedHosts,
     port: 5173,
     strictPort: true,
     watch: {
@@ -121,7 +124,8 @@ export default defineConfig({
     }
   },
   preview: {
-    host: '0.0.0.0',
+    host: devServerHost,
+    allowedHosts: localAllowedHosts,
     port: 4173,
     strictPort: true
   }

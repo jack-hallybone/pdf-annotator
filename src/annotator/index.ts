@@ -6,6 +6,8 @@ export { createPdfFileLoader, readPdfFile } from './pdfFile';
 export type {
   PdfExternalLinkContext,
   PdfExternalLinkOpener,
+  PdfSaveAsResult,
+  PdfSaveAsTarget,
   PdfSaveTarget,
   PdfWorkspaceBytesSource,
   PdfWorkspaceLoaderSource,
@@ -17,6 +19,7 @@ export type {
   PdfWorkspaceHandle,
   PdfWorkspaceHistoryEntry,
   PdfWorkspaceProps,
+  PdfWorkspaceReadOnlyReason,
   PdfWorkspaceSession,
   PdfWorkspaceViewPosition
 } from './PdfWorkspace';

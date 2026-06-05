@@ -1,16 +1,57 @@
+import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 import { browserFileAdapter } from './browserFileAdapter';
 import { TabbedPdfShell } from '../tabbedapp';
-import type { TabbedPdfHomeRenderProps } from '../tabbedapp';
+import type {
+  TabbedPdfCloseDocumentsRequest,
+  TabbedPdfDocumentSummary,
+  TabbedPdfHomeRenderProps
+} from '../tabbedapp';
 import './styles.css';
 
 export function BrowserShell() {
+  const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
+
+  useEffect(() => {
+    if (!documents.some((document) => document.hasUnsavedChanges)) {
+      return;
+    }
+
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [documents]);
+
   return (
     <TabbedPdfShell
+      confirmCloseDocuments={confirmCloseDocuments}
       fileAdapter={browserFileAdapter}
+      onDocumentsChange={setDocuments}
       renderHome={(props) => <BrowserHome {...props} />}
+      workspaceOptions={{
+        confirmDiscardChanges: confirmDiscardWorkspaceChanges
+      }}
     />
   );
+}
+
+function confirmDiscardWorkspaceChanges() {
+  return window.confirm('Close this PDF and discard unsaved changes?');
+}
+
+function confirmCloseDocuments({
+  dirtyCount,
+  documents
+}: TabbedPdfCloseDocumentsRequest) {
+  return window.confirm(closeDocumentsMessage(documents.length, dirtyCount));
+}
+
+function closeDocumentsMessage(tabCount: number, dirtyCount: number) {
+  return `Close ${tabCount} tab${tabCount === 1 ? '' : 's'} and discard unsaved changes in ${dirtyCount} PDF${dirtyCount === 1 ? '' : 's'}?`;
 }
 
 function BrowserHome({

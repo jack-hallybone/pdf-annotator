@@ -45,6 +45,7 @@ type DocumentSidebarProps = {
   pageMenuIndex: number | null;
   pdfDoc: PDFDocumentProxy | null;
   pages: LoadedPage[];
+  readOnly?: boolean;
   setPageMenuIndex: (pageIndex: number | null) => void;
   showAnnotations: boolean;
   width: number;
@@ -67,6 +68,7 @@ export function DocumentSidebar({
   pageMenuIndex,
   pdfDoc,
   pages,
+  readOnly = false,
   setPageMenuIndex,
   showAnnotations,
   width
@@ -148,6 +150,7 @@ export function DocumentSidebar({
             pageIndex={index}
             pageSize={pageSize}
             pdfDoc={pdfDoc}
+            readOnly={readOnly}
             showAnnotations={showAnnotations}
             onThumbnailPageLoad={onThumbnailPageLoad}
             thumbnailWidth={thumbnailWidth}
@@ -156,7 +159,7 @@ export function DocumentSidebar({
         {pages.length > 0 ? (
           <button
             className="merge-pdf-button ui-button"
-            disabled={busy}
+            disabled={busy || readOnly}
             onClick={onMergePdf}
             title="Add PDF"
             type="button"
@@ -215,6 +218,7 @@ type PageThumbnailProps = {
   pageIndex: number;
   pageSize: PageSize | null;
   pdfDoc: PDFDocumentProxy | null;
+  readOnly: boolean;
   showAnnotations: boolean;
   thumbnailWidth: number;
 };
@@ -235,6 +239,7 @@ function PageThumbnail({
   pageIndex,
   pageSize,
   pdfDoc,
+  readOnly,
   showAnnotations,
   thumbnailWidth
 }: PageThumbnailProps) {
@@ -332,6 +337,7 @@ function PageThumbnail({
       </button>
       <button
         className="page-thumbnail-menu-toggle ui-button"
+        disabled={readOnly}
         onClick={(event) => {
           event.stopPropagation();
           onMenuToggle();
@@ -345,6 +351,7 @@ function PageThumbnail({
         <div className="page-menu ui-panel">
           <button
             className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
             onClick={onAddBefore}
             type="button"
           >
@@ -353,6 +360,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
             onClick={onAddAfter}
             type="button"
           >
@@ -361,6 +369,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
             onClick={onRotate}
             type="button"
           >
@@ -369,7 +378,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={pageCount <= 1}
+            disabled={readOnly || pageCount <= 1}
             onClick={onDelete}
             type="button"
           >
@@ -462,8 +471,8 @@ function ThumbnailPageCanvas({
       viewport.height,
       window.devicePixelRatio || 1
     );
-    canvas.width = Math.floor(viewport.width * pixelRatio);
-    canvas.height = Math.floor(viewport.height * pixelRatio);
+    canvas.width = Math.ceil(viewport.width * pixelRatio);
+    canvas.height = Math.ceil(viewport.height * pixelRatio);
     canvas.style.width = `${viewport.width}px`;
     canvas.style.height = `${viewport.height}px`;
     context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);

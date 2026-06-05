@@ -201,8 +201,7 @@ export const TabbedPdfShell = forwardRef<
 
   async function confirmDocumentClose(
     closingDocuments: TabbedPdfDocument[],
-    dirtyCount: number,
-    fallbackMessage: string
+    dirtyCount: number
   ) {
     if (dirtyCount === 0) {
       return true;
@@ -220,7 +219,7 @@ export const TabbedPdfShell = forwardRef<
       }
     }
 
-    return window.confirm(fallbackMessage);
+    return false;
   }
 
   useImperativeHandle(ref, () => ({
@@ -262,20 +261,6 @@ export const TabbedPdfShell = forwardRef<
       ? `${dirtyPrefix}${activeDocument.title}`
       : `${dirtyPrefix}PDF Annotator`;
   }, [activeDocumentId, documents]);
-
-  useEffect(() => {
-    if (!documents.some((document) => document.hasUnsavedChanges)) {
-      return;
-    }
-
-    function handleBeforeUnload(event: BeforeUnloadEvent) {
-      event.preventDefault();
-      event.returnValue = '';
-    }
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [documents]);
 
   useEffect(() => {
     if (
@@ -458,15 +443,20 @@ export const TabbedPdfShell = forwardRef<
 
   function openGeneratedDocument(sourceInput: PdfWorkspaceSourceInput) {
     const id = nextDocumentId(sourceInput.name, nextDocumentIdRef);
+    const sourceWithSaveAs = {
+      ...sourceInput,
+      saveAsTarget: sourceInput.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
+    };
     openTabbedDocuments([
       {
         hasUnsavedChanges: Boolean(
-          sourceInput.markDirty || sourceInput.initialAnnotations?.length
+          sourceWithSaveAs.markDirty ||
+            sourceWithSaveAs.initialAnnotations?.length
         ),
         id,
         session: null,
-        source: attachPdfSourceId(sourceInput, id),
-        title: sourceInput.name
+        source: attachPdfSourceId(sourceWithSaveAs, id),
+        title: sourceWithSaveAs.name
       }
     ]);
   }
@@ -514,15 +504,20 @@ export const TabbedPdfShell = forwardRef<
 
     const openedDocuments = newDocuments.map(({ fileKey, source, title }) => {
       const id = nextDocumentId(source.name, nextDocumentIdRef);
+      const sourceWithSaveAs = {
+        ...source,
+        saveAsTarget: source.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
+      };
       return {
         fileKey,
         hasUnsavedChanges: Boolean(
-          source.markDirty || source.initialAnnotations?.length
+          sourceWithSaveAs.markDirty ||
+            sourceWithSaveAs.initialAnnotations?.length
         ),
         id,
         session: null,
-        source: attachPdfSourceId(source, id),
-        title: title ?? source.name
+        source: attachPdfSourceId(sourceWithSaveAs, id),
+        title: title ?? sourceWithSaveAs.name
       };
     });
 
@@ -570,8 +565,7 @@ export const TabbedPdfShell = forwardRef<
       !skipConfirm &&
       !(await confirmDocumentClose(
         [document],
-        1,
-        'Close this PDF and discard unsaved changes?'
+        1
       ))
     ) {
       return;
@@ -623,8 +617,7 @@ export const TabbedPdfShell = forwardRef<
       dirtyClosingCount > 0 &&
       !(await confirmDocumentClose(
         closingDocuments,
-        dirtyClosingCount,
-        closeTabsConfirmation(closingDocuments.length, dirtyClosingCount)
+        dirtyClosingCount
       ))
     ) {
       return;
@@ -1339,7 +1332,6 @@ function DocumentTabContent({
       ref={onRegisterWorkspaceRef(document.id)}
       showCloseButton={false}
       source={document.source}
-      warnBeforeUnload={false}
     />
   );
 }
@@ -1354,7 +1346,11 @@ function applySessionToDocument(
     session,
     source: {
       kind: 'bytes',
-      saveTarget: document.source.saveTarget ?? null,
+      saveTarget:
+        session.readOnlyReason && session.editingEnabled
+          ? null
+          : session.saveTarget ?? document.source.saveTarget ?? null,
+      saveAsTarget: session.saveAsTarget ?? document.source.saveAsTarget ?? null,
       bytes: session.pdfBytes,
       name: session.fileName,
       sourceId: session.sourceId
@@ -1392,15 +1388,7 @@ function filenameStem(title: string) {
 }
 
 function cornellNoteStem(stem: string) {
-  const zoteroLike = /^(.+?)\s+-\s+(\d{4}[a-z]?)\s+-\s+(.+)$/i;
-  const match = stem.match(zoteroLike);
-
-  if (!match) {
-    return `${stem} - NOTE`;
-  }
-
-  const [, author, year, title] = match;
-  return `${author} - ${year} - NOTE - ${title}`;
+  return `NOTE - ${stem}`;
 }
 
 function cornellTitleAnnotation(text: string): PdfAnnotation {
@@ -1423,10 +1411,6 @@ function cornellTitleAnnotation(text: string): PdfAnnotation {
     opacity: 1,
     layoutWidth: CORNELL_CONTENT_BOUNDS.titleWidth
   };
-}
-
-function closeTabsConfirmation(tabCount: number, dirtyCount: number) {
-  return `Close ${tabCount} tab${tabCount === 1 ? '' : 's'} and discard unsaved changes in ${dirtyCount} PDF${dirtyCount === 1 ? '' : 's'}?`;
 }
 
 function clampContextMenuPosition(x: number, y: number) {

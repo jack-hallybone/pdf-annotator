@@ -344,6 +344,7 @@ type FloatingDocumentControlsProps = {
   onDownload: () => void;
   onPrint: () => void;
   onSave: () => void;
+  saveLabel: string;
   showCloseButton?: boolean;
   onToggleAnnotations: () => void;
   showAnnotations: boolean;
@@ -356,6 +357,7 @@ export function FloatingDocumentControls({
   onDownload,
   onPrint,
   onSave,
+  saveLabel,
   showCloseButton = true,
   onToggleAnnotations,
   showAnnotations
@@ -368,10 +370,14 @@ export function FloatingDocumentControls({
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}
       </IconButton>
-      <IconButton disabled={busy || !canSave} label="Save" onClick={onSave}>
+      <IconButton
+        disabled={busy || !canSave}
+        label={saveLabel}
+        onClick={onSave}
+      >
         <Save size={16} />
       </IconButton>
-      <IconButton disabled={busy} label="Download copy" onClick={onDownload}>
+      <IconButton disabled={busy} label="Download a copy" onClick={onDownload}>
         <Download size={16} />
       </IconButton>
       <IconButton disabled={busy} label="Print" onClick={onPrint}>

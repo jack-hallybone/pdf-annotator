@@ -3,8 +3,10 @@ import type { PdfSaveTarget } from '../annotator';
 import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
 import {
   canPickLocalPdfFile,
+  canSaveLocalPdfFileAs,
   localPdfFilesFromDrop,
   pickLocalPdfFiles,
+  savePdfAsLocalFile,
   savePdfToLocalFile
 } from './localFileAccess';
 import type { LocalPdfFileHandle } from './localFileAccess';
@@ -19,6 +21,7 @@ export const browserFileAdapter: PdfHostAdapter = {
     accept: 'application/pdf',
     multiple: true
   },
+  saveAsTarget: browserFileSaveAsTarget(),
   async pickPdfDocuments() {
     if (!canPickLocalPdfFile()) {
       return { documents: [], useFileInputFallback: true };
@@ -55,6 +58,7 @@ function browserFilesToHostDocuments(
         kind: 'loader',
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
+        saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
         saveTarget: handle ? browserFileSaveTarget(handle) : null
       },
       title: file.name
@@ -63,6 +67,24 @@ function browserFilesToHostDocuments(
 
 function filesToBrowserFiles(files: FileList | File[]) {
   return Array.from(files).map((file) => ({ file }));
+}
+
+function browserFileSaveAsTarget() {
+  if (!canSaveLocalPdfFileAs()) {
+    return null;
+  }
+
+  return {
+    async saveAs(bytes: Uint8Array, suggestedName: string) {
+      const handle = await savePdfAsLocalFile(bytes, suggestedName);
+      return handle
+        ? {
+            fileName: handle.name,
+            saveTarget: browserFileSaveTarget(handle)
+          }
+        : null;
+    }
+  };
 }
 
 function browserFileSaveTarget(
