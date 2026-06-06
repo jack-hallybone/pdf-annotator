@@ -4,6 +4,10 @@ export type PdfSaveTarget = {
   save: (bytes: Uint8Array) => Promise<void>;
 };
 
+export type PdfDownloadTarget = {
+  download: (bytes: Uint8Array, suggestedName: string) => Promise<void> | void;
+};
+
 export type PdfSaveAsResult = {
   fileName?: string;
   saveTarget?: PdfSaveTarget | null;
@@ -30,6 +34,7 @@ type PdfWorkspaceSourceBase = {
   initialAnnotations?: PdfAnnotation[];
   markDirty?: boolean;
   name: string;
+  downloadTarget?: PdfDownloadTarget | null;
   saveAsTarget?: PdfSaveAsTarget | null;
   saveTarget?: PdfSaveTarget | null;
   sourceId: string;

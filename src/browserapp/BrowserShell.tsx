@@ -3,7 +3,6 @@ import { FolderOpen } from 'lucide-react';
 import { browserFileAdapter } from './browserFileAdapter';
 import { TabbedPdfShell } from '../tabbedapp';
 import type {
-  TabbedPdfCloseDocumentsRequest,
   TabbedPdfDocumentSummary,
   TabbedPdfHomeRenderProps
 } from '../tabbedapp';
@@ -28,30 +27,11 @@ export function BrowserShell() {
 
   return (
     <TabbedPdfShell
-      confirmCloseDocuments={confirmCloseDocuments}
       fileAdapter={browserFileAdapter}
       onDocumentsChange={setDocuments}
       renderHome={(props) => <BrowserHome {...props} />}
-      workspaceOptions={{
-        confirmDiscardChanges: confirmDiscardWorkspaceChanges
-      }}
     />
   );
-}
-
-function confirmDiscardWorkspaceChanges() {
-  return window.confirm('Close this PDF and discard unsaved changes?');
-}
-
-function confirmCloseDocuments({
-  dirtyCount,
-  documents
-}: TabbedPdfCloseDocumentsRequest) {
-  return window.confirm(closeDocumentsMessage(documents.length, dirtyCount));
-}
-
-function closeDocumentsMessage(tabCount: number, dirtyCount: number) {
-  return `Close ${tabCount} tab${tabCount === 1 ? '' : 's'} and discard unsaved changes in ${dirtyCount} PDF${dirtyCount === 1 ? '' : 's'}?`;
 }
 
 function BrowserHome({

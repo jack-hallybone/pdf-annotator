@@ -1,5 +1,5 @@
 import { createPdfFileLoader } from '../annotator';
-import type { PdfSaveTarget } from '../annotator';
+import type { PdfDownloadTarget, PdfSaveTarget } from '../annotator';
 import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
 import {
   canPickLocalPdfFile,
@@ -17,6 +17,7 @@ type BrowserPdfFile = {
 };
 
 export const browserFileAdapter: PdfHostAdapter = {
+  downloadTarget: browserFileDownloadTarget(),
   fileInput: {
     accept: 'application/pdf',
     multiple: true
@@ -95,6 +96,25 @@ function browserFileSaveTarget(
   };
 }
 
+function browserFileDownloadTarget(): PdfDownloadTarget {
+  return {
+    download: browserDownloadPdf
+  };
+}
+
+function browserDownloadPdf(bytes: Uint8Array, suggestedName: string) {
+  const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = safeDownloadName(suggestedName);
+  link.style.display = 'none';
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
 function isPdfFile(file: File) {
   return (
     file.type === 'application/pdf' ||
@@ -109,4 +129,20 @@ function pdfFileKey(file: File) {
     String(file.size),
     String(file.lastModified)
   ].join('\u001f');
+}
+
+function toArrayBuffer(bytes: Uint8Array) {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength
+  ) as ArrayBuffer;
+}
+
+function safeDownloadName(name: string) {
+  const cleaned = name
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned || 'annotated.pdf';
 }

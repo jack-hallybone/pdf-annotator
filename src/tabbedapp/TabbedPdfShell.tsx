@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState
@@ -15,11 +16,15 @@ import type {
   RefCallback
 } from 'react';
 import {
+  Download,
   File,
   FileText,
   FolderOpen,
   Home,
   Plus,
+  Printer,
+  Save,
+  SaveAll,
   X
 } from 'lucide-react';
 import type { PdfHostAdapter, PdfHostDocument } from './fileHost';
@@ -84,9 +89,12 @@ export type TabbedPdfDocumentSummary = {
 };
 
 export type TabbedPdfCloseDocumentsRequest = {
+  canSaveChanges: boolean;
   dirtyCount: number;
   documents: TabbedPdfDocumentSummary[];
 };
+
+type CloseDocumentsDecision = 'cancel' | 'discard' | 'save';
 
 type SessionUpdate = {
   documentId: string;
@@ -110,6 +118,10 @@ type MenuPosition = {
   y: number;
 };
 
+type CloseConfirmationState = TabbedPdfCloseDocumentsRequest & {
+  requestId: number;
+};
+
 export type TabbedPdfWorkspaceOptions = Pick<
   PdfWorkspaceProps,
   | 'confirmDiscardChanges'
@@ -124,6 +136,7 @@ export type TabbedPdfHomeRenderProps = {
 };
 
 export type TabbedPdfShellHandle = {
+  closeAllDocuments: () => Promise<boolean>;
   focusHome: () => void;
   getDocuments: () => TabbedPdfDocumentSummary[];
   openDocument: (document: PdfHostDocument) => void;
@@ -175,8 +188,14 @@ export const TabbedPdfShell = forwardRef<
   const [tabDragState, setTabDragState] = useState<TabDragState | null>(null);
   const [tabContextMenu, setTabContextMenu] =
     useState<TabContextMenuState | null>(null);
+  const [closeConfirmation, setCloseConfirmation] =
+    useState<CloseConfirmationState | null>(null);
   const activeDocumentIdRef = useLatestRef(activeDocumentId);
+  const closeConfirmationResolverRef = useRef<
+    ((decision: CloseDocumentsDecision) => void) | null
+  >(null);
   const documentsRef = useLatestRef(documents);
+  const nextCloseConfirmationIdRef = useRef(0);
 
   function visibleDocumentIds() {
     return activeDocumentIdRef.current ? [activeDocumentIdRef.current] : [];
@@ -187,13 +206,15 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function documentSummariesFor(
-    sourceDocuments: TabbedPdfDocument[]
+    sourceDocuments: TabbedPdfDocument[],
+    dirtyDocumentIds?: Set<string>
   ): TabbedPdfDocumentSummary[] {
     const activeId = activeDocumentIdRef.current;
     return sourceDocuments.map((document) => ({
       active: document.id === activeId,
       fileKey: document.fileKey,
-      hasUnsavedChanges: document.hasUnsavedChanges,
+      hasUnsavedChanges:
+        dirtyDocumentIds?.has(document.id) ?? document.hasUnsavedChanges,
       id: document.id,
       title: document.title
     }));
@@ -201,28 +222,61 @@ export const TabbedPdfShell = forwardRef<
 
   async function confirmDocumentClose(
     closingDocuments: TabbedPdfDocument[],
-    dirtyCount: number
+    dirtyCount: number,
+    dirtyDocumentIds?: Set<string>,
+    canSaveChanges = false
   ) {
     if (dirtyCount === 0) {
-      return true;
+      return 'discard' as const;
     }
+
+    const request = {
+      canSaveChanges,
+      dirtyCount,
+      documents: documentSummariesFor(closingDocuments, dirtyDocumentIds)
+    };
 
     if (confirmCloseDocuments) {
       try {
-        return await confirmCloseDocuments({
-          dirtyCount,
-          documents: documentSummariesFor(closingDocuments)
-        });
+        return (await confirmCloseDocuments(request)) ? 'discard' : 'cancel';
       } catch (error) {
         console.error(error);
-        return false;
+        return 'cancel' as const;
       }
     }
 
-    return false;
+    return requestCloseConfirmation(request);
+  }
+
+  function requestCloseConfirmation(request: TabbedPdfCloseDocumentsRequest) {
+    closeConfirmationResolverRef.current?.('cancel');
+    return new Promise<CloseDocumentsDecision>((resolve) => {
+      closeConfirmationResolverRef.current = resolve;
+      nextCloseConfirmationIdRef.current += 1;
+      setCloseConfirmation({
+        ...request,
+        requestId: nextCloseConfirmationIdRef.current
+      });
+    });
+  }
+
+  function resolveCloseConfirmation(decision: CloseDocumentsDecision) {
+    closeConfirmationResolverRef.current?.(decision);
+    closeConfirmationResolverRef.current = null;
+    setCloseConfirmation(null);
+  }
+
+  function cancelCloseConfirmation() {
+    if (!closeConfirmationResolverRef.current) {
+      setCloseConfirmation(null);
+      return;
+    }
+
+    resolveCloseConfirmation('cancel');
   }
 
   useImperativeHandle(ref, () => ({
+    closeAllDocuments,
     focusHome: selectHome,
     getDocuments: documentSummaries,
     openDocument: (document) => openHostDocuments([document]),
@@ -245,6 +299,14 @@ export const TabbedPdfShell = forwardRef<
     initialDocumentsOpenedRef.current = true;
     openHostDocuments(initialDocuments);
   }, [initialDocuments]);
+
+  useEffect(
+    () => () => {
+      closeConfirmationResolverRef.current?.('cancel');
+      closeConfirmationResolverRef.current = null;
+    },
+    []
+  );
 
   useEffect(() => {
     onDocumentsChange?.(documentSummaries());
@@ -443,20 +505,22 @@ export const TabbedPdfShell = forwardRef<
 
   function openGeneratedDocument(sourceInput: PdfWorkspaceSourceInput) {
     const id = nextDocumentId(sourceInput.name, nextDocumentIdRef);
-    const sourceWithSaveAs = {
+    const sourceWithHostTargets = {
       ...sourceInput,
+      downloadTarget:
+        sourceInput.downloadTarget ?? fileAdapter.downloadTarget ?? null,
       saveAsTarget: sourceInput.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
     };
     openTabbedDocuments([
       {
         hasUnsavedChanges: Boolean(
-          sourceWithSaveAs.markDirty ||
-            sourceWithSaveAs.initialAnnotations?.length
+          sourceWithHostTargets.markDirty ||
+            sourceWithHostTargets.initialAnnotations?.length
         ),
         id,
         session: null,
-        source: attachPdfSourceId(sourceWithSaveAs, id),
-        title: sourceWithSaveAs.name
+        source: attachPdfSourceId(sourceWithHostTargets, id),
+        title: sourceWithHostTargets.name
       }
     ]);
   }
@@ -504,20 +568,21 @@ export const TabbedPdfShell = forwardRef<
 
     const openedDocuments = newDocuments.map(({ fileKey, source, title }) => {
       const id = nextDocumentId(source.name, nextDocumentIdRef);
-      const sourceWithSaveAs = {
+      const sourceWithHostTargets = {
         ...source,
+        downloadTarget: source.downloadTarget ?? fileAdapter.downloadTarget ?? null,
         saveAsTarget: source.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
       };
       return {
         fileKey,
         hasUnsavedChanges: Boolean(
-          sourceWithSaveAs.markDirty ||
-            sourceWithSaveAs.initialAnnotations?.length
+          sourceWithHostTargets.markDirty ||
+            sourceWithHostTargets.initialAnnotations?.length
         ),
         id,
         session: null,
-        source: attachPdfSourceId(sourceWithSaveAs, id),
-        title: title ?? sourceWithSaveAs.name
+        source: attachPdfSourceId(sourceWithHostTargets, id),
+        title: title ?? sourceWithHostTargets.name
       };
     });
 
@@ -555,35 +620,55 @@ export const TabbedPdfShell = forwardRef<
     );
     const document = currentDocuments[documentIndex];
     if (!document) {
-      return;
+      return true;
     }
     const hasUnsavedChanges =
       session?.hasUnsavedChanges ?? document?.hasUnsavedChanges ?? false;
 
-    if (
-      hasUnsavedChanges &&
-      !skipConfirm &&
-      !(await confirmDocumentClose(
+    if (hasUnsavedChanges && !skipConfirm) {
+      const decision = await confirmDocumentClose(
         [document],
-        1
-      ))
-    ) {
-      return;
+        1,
+        new Set([document.id]),
+        canSaveClosingDocuments([document], 1)
+      );
+      if (decision === 'cancel') {
+        return false;
+      }
+      if (
+        decision === 'save' &&
+        !(await saveDocumentBeforeClose(document.id))
+      ) {
+        return false;
+      }
     }
 
-    const remainingDocuments = currentDocuments.filter(
+    const latestDocuments = documentsRef.current;
+    const latestDocumentIndex = latestDocuments.findIndex(
+      (item) => item.id === documentId
+    );
+    if (latestDocumentIndex < 0) {
+      return true;
+    }
+
+    const remainingDocuments = latestDocuments.filter(
       (item) => item.id !== documentId
     );
+    const activeId = activeDocumentIdRef.current;
     const nextActiveId =
-      activeDocumentIdRef.current === documentId
+      activeId === documentId
         ? remainingDocuments[
-            Math.min(Math.max(documentIndex, 0), remainingDocuments.length - 1)
+            Math.min(
+              Math.max(latestDocumentIndex, 0),
+              remainingDocuments.length - 1
+            )
           ]?.id ?? null
-        : activeDocumentIdRef.current;
+        : activeId;
 
     setDocuments(remainingDocuments);
     setActiveDocumentId(nextActiveId);
     releaseWorkspaceResources(documentId);
+    return true;
   }
 
   async function closeDocumentGroup(
@@ -592,7 +677,7 @@ export const TabbedPdfShell = forwardRef<
   ) {
     const uniqueDocumentIds = new Set(documentIds);
     if (uniqueDocumentIds.size === 0) {
-      return;
+      return true;
     }
 
     const mountedSessionUpdates = captureMountedSessions();
@@ -605,25 +690,40 @@ export const TabbedPdfShell = forwardRef<
     );
 
     if (closingDocuments.length === 0) {
-      return;
+      return true;
     }
 
+    const dirtyClosingDocumentIds = new Set<string>();
     const dirtyClosingCount = closingDocuments.filter((document) => {
       const session = sessionsByDocumentId.get(document.id);
-      return session?.hasUnsavedChanges ?? document.hasUnsavedChanges;
+      const hasUnsavedChanges =
+        session?.hasUnsavedChanges ?? document.hasUnsavedChanges;
+      if (hasUnsavedChanges) {
+        dirtyClosingDocumentIds.add(document.id);
+      }
+      return hasUnsavedChanges;
     }).length;
 
-    if (
-      dirtyClosingCount > 0 &&
-      !(await confirmDocumentClose(
+    if (dirtyClosingCount > 0) {
+      const decision = await confirmDocumentClose(
         closingDocuments,
-        dirtyClosingCount
-      ))
-    ) {
-      return;
+        dirtyClosingCount,
+        dirtyClosingDocumentIds,
+        canSaveClosingDocuments(closingDocuments, dirtyClosingCount)
+      );
+      if (decision === 'cancel') {
+        return false;
+      }
+      if (
+        decision === 'save' &&
+        !(await saveDocumentBeforeClose(closingDocuments[0].id))
+      ) {
+        return false;
+      }
     }
 
-    const remainingDocuments = currentDocuments
+    const latestDocuments = documentsRef.current;
+    const remainingDocuments = latestDocuments
       .filter((document) => !uniqueDocumentIds.has(document.id))
       .map((document) => {
         const session = sessionsByDocumentId.get(document.id);
@@ -645,6 +745,44 @@ export const TabbedPdfShell = forwardRef<
     for (const documentId of uniqueDocumentIds) {
       releaseWorkspaceResources(documentId);
     }
+
+    return true;
+  }
+
+  function canSaveClosingDocuments(
+    closingDocuments: TabbedPdfDocument[],
+    dirtyCount: number
+  ) {
+    if (closingDocuments.length !== 1 || dirtyCount !== 1) {
+      return false;
+    }
+
+    const documentId = closingDocuments[0].id;
+    return (
+      activeDocumentIdRef.current === documentId &&
+      Boolean(workspaceRefs.current.get(documentId))
+    );
+  }
+
+  async function saveDocumentBeforeClose(documentId: string) {
+    const handle = workspaceRefs.current.get(documentId);
+    if (!handle) {
+      return false;
+    }
+
+    return handle.save();
+  }
+
+  async function closeAllDocuments() {
+    const documentIds = documentsRef.current.map((document) => document.id);
+    if (documentIds.length === 0) {
+      return true;
+    }
+
+    return closeDocumentGroup(
+      documentIds,
+      activeDocumentIdRef.current ?? documentIds[0]
+    );
   }
 
   function openTabContextMenu(
@@ -698,6 +836,19 @@ export const TabbedPdfShell = forwardRef<
     } finally {
       closeTabContextMenu();
     }
+  }
+
+  async function runWorkspaceCommand(
+    documentId: string,
+    command: 'downloadCopy' | 'print' | 'save' | 'saveAs'
+  ) {
+    const workspace = workspaceRefs.current.get(documentId);
+    closeTabContextMenu();
+    if (!workspace) {
+      return;
+    }
+
+    await workspace[command]();
   }
 
   async function createTemplateDocument(kind: PdfTemplateKind) {
@@ -980,6 +1131,7 @@ export const TabbedPdfShell = forwardRef<
         ) ??
         [];
       if (documents.length > 0) {
+        cancelCloseConfirmation();
         openHostDocuments(documents);
         return;
       }
@@ -1019,6 +1171,11 @@ export const TabbedPdfShell = forwardRef<
   const tabContextMenuIndex = tabContextMenuDocument
     ? documents.findIndex((document) => document.id === tabContextMenuDocument.id)
     : -1;
+  const tabContextMenuWorkspaceAvailable = Boolean(
+    tabContextMenuDocument &&
+      tabContextMenuDocument.id === activeDocumentId &&
+      workspaceRefs.current.has(tabContextMenuDocument.id)
+  );
   const tabSeparatorClass = (
     leftId: 'home' | string,
     rightId: string | null
@@ -1043,6 +1200,7 @@ export const TabbedPdfShell = forwardRef<
       .filter(Boolean)
       .join(' ');
   };
+  const showDropPanel = dragActive && (activeDocument || !renderHome);
 
   return (
     <main
@@ -1211,15 +1369,6 @@ export const TabbedPdfShell = forwardRef<
         )}
       </section>
 
-      {dragActive && (activeDocument || !renderHome) ? (
-        <div className="tabbedapp-drop-overlay">
-          <div className="tabbedapp-drop-card">
-            <FolderOpen size={22} />
-            <span>Drop PDFs to open</span>
-          </div>
-        </div>
-      ) : null}
-
       {tabContextMenu && tabContextMenuDocument ? (
         <div
           className="tabbedapp-tab-context-menu"
@@ -1247,6 +1396,54 @@ export const TabbedPdfShell = forwardRef<
           </button>
           <span className="tabbedapp-context-menu-separator" />
           <button
+            disabled={
+              !tabContextMenuWorkspaceAvailable ||
+              !tabContextMenuDocument.hasUnsavedChanges
+            }
+            onClick={() =>
+              void runWorkspaceCommand(tabContextMenuDocument.id, 'save')
+            }
+            role="menuitem"
+            type="button"
+          >
+            <Save size={15} />
+            <span>Save</span>
+          </button>
+          <button
+            disabled={!tabContextMenuWorkspaceAvailable}
+            onClick={() =>
+              void runWorkspaceCommand(tabContextMenuDocument.id, 'saveAs')
+            }
+            role="menuitem"
+            type="button"
+          >
+            <SaveAll size={15} />
+            <span>Save As...</span>
+          </button>
+          <button
+            disabled={!tabContextMenuWorkspaceAvailable}
+            onClick={() =>
+              void runWorkspaceCommand(tabContextMenuDocument.id, 'downloadCopy')
+            }
+            role="menuitem"
+            type="button"
+          >
+            <Download size={15} />
+            <span>Download a copy</span>
+          </button>
+          <button
+            disabled={!tabContextMenuWorkspaceAvailable}
+            onClick={() =>
+              void runWorkspaceCommand(tabContextMenuDocument.id, 'print')
+            }
+            role="menuitem"
+            type="button"
+          >
+            <Printer size={15} />
+            <span>Print</span>
+          </button>
+          <span className="tabbedapp-context-menu-separator" />
+          <button
             disabled={documents.length <= 1}
             onClick={() => closeOtherTabs(tabContextMenuDocument.id)}
             role="menuitem"
@@ -1264,6 +1461,34 @@ export const TabbedPdfShell = forwardRef<
             <span className="tabbedapp-menu-icon-spacer" />
             <span>Close tabs to the right</span>
           </button>
+        </div>
+      ) : null}
+
+      {closeConfirmation ? (
+        <div
+          className="tabbedapp-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && closeConfirmation) {
+              resolveCloseConfirmation('cancel');
+            }
+          }}
+        >
+          <CloseDocumentsDialog
+            key={closeConfirmation.requestId}
+            request={closeConfirmation}
+            onCancel={() => resolveCloseConfirmation('cancel')}
+            onDiscard={() => resolveCloseConfirmation('discard')}
+            onSave={() => resolveCloseConfirmation('save')}
+          />
+        </div>
+      ) : null}
+
+      {showDropPanel ? (
+        <div className="tabbedapp-modal-backdrop tabbedapp-drop-backdrop">
+          <div className="tabbedapp-modal-surface tabbedapp-drop-card">
+            <FolderOpen size={22} />
+            <span>Drop PDFs to open</span>
+          </div>
         </div>
       ) : null}
     </main>
@@ -1287,6 +1512,81 @@ function DefaultHomePanel() {
   return <div className="tabbedapp-default-home" />;
 }
 
+function CloseDocumentsDialog({
+  onCancel,
+  onDiscard,
+  onSave,
+  request
+}: {
+  onCancel: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+  request: TabbedPdfCloseDocumentsRequest;
+}) {
+  const titleId = useId();
+  const dirtyDocuments = request.documents.filter(
+    (document) => document.hasUnsavedChanges
+  );
+  const hiddenDirtyCount = Math.max(0, dirtyDocuments.length - 4);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onCancel();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
+
+  return (
+    <section
+      aria-labelledby={titleId}
+      aria-modal="true"
+      className="tabbedapp-modal-surface tabbedapp-close-dialog"
+      role="dialog"
+    >
+      <h2 id={titleId}>There are unsaved changes</h2>
+      <p>The following file(s) have unsaved changes:</p>
+      {dirtyDocuments.length > 0 ? (
+        <ul aria-label="Unsaved PDFs">
+          {dirtyDocuments.slice(0, 4).map((document) => (
+            <li key={document.id}>{document.title}</li>
+          ))}
+          {hiddenDirtyCount > 0 ? (
+            <li>
+              {hiddenDirtyCount} more PDF
+              {hiddenDirtyCount === 1 ? '' : 's'}
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      <div className="tabbedapp-close-dialog-actions">
+        {request.canSaveChanges ? (
+          <button
+            className="tabbedapp-close-dialog-primary"
+            onClick={onSave}
+            type="button"
+          >
+            Save changes
+          </button>
+        ) : null}
+        <button
+          className="tabbedapp-close-dialog-danger"
+          onClick={onDiscard}
+          type="button"
+        >
+          Discard changes
+        </button>
+        <button autoFocus onClick={onCancel} type="button">
+          Cancel
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function DocumentTabContent({
   document,
   onCloseDocument,
@@ -1299,7 +1599,7 @@ function DocumentTabContent({
   onCloseDocument: (
     documentId: string,
     options?: { skipConfirm?: boolean }
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   onDirtyChange: (documentId: string, hasUnsavedChanges: boolean) => void;
   onRegisterWorkspaceRef: (
     documentId: string
@@ -1350,6 +1650,8 @@ function applySessionToDocument(
         session.readOnlyReason && session.editingEnabled
           ? null
           : session.saveTarget ?? document.source.saveTarget ?? null,
+      downloadTarget:
+        session.downloadTarget ?? document.source.downloadTarget ?? null,
       saveAsTarget: session.saveAsTarget ?? document.source.saveAsTarget ?? null,
       bytes: session.pdfBytes,
       name: session.fileName,

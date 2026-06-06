@@ -3,13 +3,14 @@
   --tabbedapp-ui: #ffffff;
   --tabbedapp-ink: #171c1c;
   --tabbedapp-accent: #cc41bf;
+  --tabbedapp-accent-rgb: 204 65 191;
   --tabbedapp-border: rgb(23 28 28 / 0.14);
   --tabbedapp-tab-active: var(--tabbedapp-bg);
   --tabbedapp-tab-hover: rgb(23 28 28 / 0.06);
   --tabbedapp-tab-separator: rgb(23 28 28 / 0.14);
   --tabbedapp-frame-shadow: 0 8px 22px rgb(23 28 28 / 0.05);
   --tabbedapp-menu-shadow: 0 12px 30px rgb(23 28 28 / 0.14);
-  --tabbedapp-focus-ring: 0 0 0 2px rgb(204 65 191 / 0.32);
+  --tabbedapp-focus-ring: 0 0 0 2px rgb(var(--tabbedapp-accent-rgb) / 0.32);
   --tabbedapp-menu-font-size: 0.8125rem;
 
   font-family:
@@ -386,24 +387,34 @@ button {
   height: 100%;
 }
 
-.tabbedapp-drop-overlay {
+.tabbedapp-modal-backdrop {
+  align-items: center;
   background: rgb(243 243 243 / 0.76);
   backdrop-filter: blur(2px);
-  display: grid;
+  box-sizing: border-box;
+  display: flex;
   inset: 0;
-  place-items: center;
-  pointer-events: none;
+  justify-content: center;
+  padding: 1rem;
   position: absolute;
-  z-index: 80;
+  z-index: 1100;
+}
+
+.tabbedapp-modal-surface {
+  background: var(--tabbedapp-ui);
+  border: 1px solid var(--tabbedapp-border);
+  border-radius: 8px;
+  box-shadow: var(--tabbedapp-menu-shadow);
+  box-sizing: border-box;
+  color: var(--tabbedapp-ink);
+}
+
+.tabbedapp-drop-backdrop {
+  z-index: 1110;
 }
 
 .tabbedapp-drop-card {
   align-items: center;
-  background: var(--tabbedapp-ui);
-  border: 1px solid var(--tabbedapp-border);
-  border-radius: 8px;
-  box-shadow: 0 18px 44px rgb(23 28 28 / 0.16);
-  color: var(--tabbedapp-ink);
   display: flex;
   font-size: 1rem;
   font-weight: 650;
@@ -412,4 +423,87 @@ button {
   min-width: min(18rem, calc(100vw - 3rem));
   padding: 1rem 1.25rem;
   text-align: center;
+}
+
+.tabbedapp-close-dialog {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 100%;
+  padding: 1rem;
+  width: min(30rem, calc(100vw - 2rem));
+}
+
+.tabbedapp-close-dialog h2,
+.tabbedapp-close-dialog p {
+  margin: 0;
+}
+
+.tabbedapp-close-dialog h2 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.tabbedapp-close-dialog p,
+.tabbedapp-close-dialog li {
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.tabbedapp-close-dialog ul {
+  background: var(--tabbedapp-bg);
+  border: 1px solid var(--tabbedapp-border);
+  border-radius: 6px;
+  display: grid;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  max-height: 8.5rem;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+.tabbedapp-close-dialog li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tabbedapp-close-dialog-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.tabbedapp-close-dialog-actions button {
+  appearance: none;
+  background: var(--tabbedapp-ui);
+  border: 1px solid var(--tabbedapp-border);
+  border-radius: 6px;
+  color: var(--tabbedapp-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--tabbedapp-menu-font-size);
+  font-weight: 600;
+  padding: 0.4375rem 0.6875rem;
+}
+
+.tabbedapp-close-dialog-actions button:hover,
+.tabbedapp-close-dialog-actions button:focus-visible {
+  background: var(--tabbedapp-bg);
+  outline: none;
+}
+
+.tabbedapp-close-dialog-actions button:focus-visible {
+  box-shadow: var(--tabbedapp-focus-ring);
+}
+
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary {
+  background: var(--tabbedapp-ink);
+  border-color: var(--tabbedapp-ink);
+  color: var(--tabbedapp-ui);
+}
+
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:hover,
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:focus-visible {
+  background: rgb(23 28 28 / 0.88);
 }

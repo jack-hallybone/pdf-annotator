@@ -48,6 +48,7 @@ import {
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
 import { readPdfFile } from './pdfFile';
 import type {
+  PdfDownloadTarget,
   PdfExternalLinkOpener,
   PdfSaveAsTarget,
   PdfSaveTarget,
@@ -95,6 +96,7 @@ export type PdfWorkspaceDocumentHistorySnapshot = {
   activePageIndex: number;
   annotations: PdfAnnotation[];
   cleanAnnotations: PdfAnnotation[];
+  cleanPdfBytes?: Uint8Array | null;
   cleanSignatureRefreshEnabled: boolean;
   cleanWorkSignature: string;
   importedAnnotationPageIndexes: number[];
@@ -121,6 +123,7 @@ export type PdfWorkspaceSession = {
   activeToolKey: string;
   annotations: PdfAnnotation[];
   cleanAnnotations: PdfAnnotation[];
+  cleanPdfBytes?: Uint8Array | null;
   cleanSignatureRefreshEnabled?: boolean;
   cleanWorkSignature: string;
   editingEnabled?: boolean;
@@ -133,6 +136,7 @@ export type PdfWorkspaceSession = {
   redoStack: PdfWorkspaceHistoryEntry[];
   removedAnnotationSourceIds: string[];
   readOnlyReason?: PdfWorkspaceReadOnlyReason | null;
+  downloadTarget?: PdfDownloadTarget | null;
   saveAsTarget?: PdfSaveAsTarget | null;
   saveTarget?: PdfSaveTarget | null;
   scale: number;
@@ -157,7 +161,11 @@ export type PdfWorkspaceViewPosition = {
 };
 
 export type PdfWorkspaceHandle = {
+  downloadCopy: () => Promise<void>;
+  print: () => Promise<void>;
   releaseRenderResources: () => Promise<void>;
+  save: () => Promise<boolean>;
+  saveAs: () => Promise<boolean>;
   snapshot: () => PdfWorkspaceSession | null;
 };
 
@@ -241,6 +249,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const loadingTaskRef = useRef<ReturnType<typeof getDocument> | null>(null);
   const structureReloadInProgressRef = useRef(false);
   const pdfFingerprintRef = useRef('');
+  const cleanPdfBytesRef = useRef<Uint8Array | null>(null);
   const cleanAnnotationsRef = useRef<PdfAnnotation[]>([]);
   const cleanSignatureRefreshEnabledRef = useRef(true);
   const pendingZoomAnchorRef = useRef<{
@@ -258,6 +267,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const printBlobUrlRef = useRef<string | null>(null);
   const printFrameRef = useRef<HTMLIFrameElement | null>(null);
   const externalLinkOpenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const downloadTargetRef = useRef<PdfDownloadTarget | null>(null);
   const saveAsTargetRef = useRef<PdfSaveAsTarget | null>(null);
   const saveTargetRef = useRef<PdfSaveTarget | null>(null);
   const sourceLoadRef = useRef<string | null>(null);
@@ -298,7 +308,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [readOnlyReason, setReadOnlyReason] =
     useState<PdfWorkspaceReadOnlyReason | null>(null);
   const [editingEnabled, setEditingEnabled] = useState(false);
-  const [hasSaveTarget, setHasSaveTarget] = useState(false);
   const [sourceRetryKey, setSourceRetryKey] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
@@ -424,6 +433,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       activeToolKey,
       annotations,
       cleanAnnotations: cleanAnnotationsRef.current,
+      cleanPdfBytes: cleanPdfBytesRef.current,
       cleanSignatureRefreshEnabled: cleanSignatureRefreshEnabledRef.current,
       cleanWorkSignature,
       editingEnabled,
@@ -442,6 +452,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         removedAnnotationSourceIdsRef.current
       ),
       readOnlyReason,
+      downloadTarget: downloadTargetRef.current,
       saveAsTarget: saveAsTargetRef.current,
       saveTarget: saveTargetRef.current,
       scale,
@@ -512,7 +523,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   useImperativeHandle(
     ref,
     () => ({
+      downloadCopy: handleDownload,
+      print: handlePrint,
       releaseRenderResources,
+      save: handleSave,
+      saveAs: handleSaveAs,
       snapshot: createWorkspaceSession
     }),
     [
@@ -522,6 +537,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       cleanWorkSignature,
       editingEnabled,
       fileName,
+      handleDownload,
+      handlePrint,
+      handleSave,
+      handleSaveAs,
       hasUnsavedChanges,
       pdfBytes,
       pdfFingerprint,
@@ -1356,6 +1375,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       activePageIndex: activePageIndexRef.current,
       annotations: annotationsRef.current.map(normalizeAnnotationLayout),
       cleanAnnotations: cleanAnnotationsRef.current.map(normalizeAnnotationLayout),
+      cleanPdfBytes: cleanPdfBytesRef.current,
       cleanSignatureRefreshEnabled: cleanSignatureRefreshEnabledRef.current,
       cleanWorkSignature,
       importedAnnotationPageIndexes: Array.from(
@@ -1393,10 +1413,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     structureReloadInProgressRef.current = false;
     removedAnnotationSourceIdsRef.current.clear();
     pdfFingerprintRef.current = '';
+    cleanPdfBytesRef.current = null;
     cleanSignatureRefreshEnabledRef.current = true;
+    downloadTargetRef.current = null;
     saveAsTargetRef.current = null;
     saveTargetRef.current = null;
-    setHasSaveTarget(false);
     passwordProtectedLoadRef.current = false;
     setPdfBytes(null);
     setPdfFingerprint('');
@@ -1640,6 +1661,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       activePage: session.viewPosition?.pageIndex ?? session.activePageIndex,
       clearWorkingAnnotations: false,
       restoredSession: session,
+      downloadTarget: session.downloadTarget ?? source.downloadTarget ?? null,
       saveTarget: session.saveTarget ?? source.saveTarget ?? null,
       saveAsTarget: session.saveAsTarget ?? source.saveAsTarget ?? null,
       sourceId: session.sourceId
@@ -1671,6 +1693,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
       await loadPdfBytes(bytes, nextSource.name, {
         initialAnnotations: nextSource.initialAnnotations,
+        downloadTarget: nextSource.downloadTarget ?? null,
         saveAsTarget: nextSource.saveAsTarget ?? null,
         saveTarget: nextSource.saveTarget ?? null,
         sourceId: nextSource.sourceId
@@ -1711,6 +1734,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       clearWorkingAnnotations?: boolean;
       initialAnnotations?: PdfAnnotation[];
       restoredSession?: PdfWorkspaceSession | null;
+      downloadTarget?: PdfDownloadTarget | null;
       saveAsTarget?: PdfSaveAsTarget | null;
       saveTarget?: PdfSaveTarget | null;
       sourceId?: string;
@@ -1792,6 +1816,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       resetInitialVisualReadiness(activePage);
 
       pdfFingerprintRef.current = nextPdfFingerprint;
+      cleanPdfBytesRef.current = restoredSession?.cleanPdfBytes ?? bytes;
       setPdfBytes(bytes);
       setPdfFingerprint(nextPdfFingerprint);
       setPdfDoc(loadedPdf);
@@ -1801,13 +1826,13 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       });
       setPages(initialPages);
       setFileName(name);
+      downloadTargetRef.current = options.downloadTarget ?? null;
       saveAsTargetRef.current = options.saveAsTarget ?? null;
       const nextSaveTarget =
         restoredSession?.readOnlyReason && restoredSession.editingEnabled
           ? null
           : options.saveTarget ?? null;
       saveTargetRef.current = nextSaveTarget;
-      setHasSaveTarget(Boolean(nextSaveTarget));
       setReadOnlyReason(nextReadOnlyReason);
       setEditingEnabled(restoredSession?.editingEnabled ?? false);
       activePageIndexRef.current = activePage;
@@ -1973,6 +1998,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
       const activeViewport = activeLoadedPage.getViewport({ scale: 1 });
       pdfFingerprintRef.current = nextPdfFingerprint;
+      cleanPdfBytesRef.current = null;
       pagesRef.current = nextPages;
       setPdfBytes(bytes);
       setPdfFingerprint(nextPdfFingerprint);
@@ -2118,6 +2144,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       );
 
       pdfFingerprintRef.current = snapshot.pdfFingerprint;
+      cleanPdfBytesRef.current = snapshot.cleanPdfBytes ?? null;
       cleanAnnotationsRef.current = restoredCleanAnnotations;
       annotationsRef.current = restoredAnnotations;
       pagesRef.current = nextPages;
@@ -2524,7 +2551,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  function markCurrentWorkClean() {
+  function markCurrentWorkClean(cleanPdfBytes?: Uint8Array) {
+    if (cleanPdfBytes) {
+      cleanPdfBytesRef.current = cleanPdfBytes;
+    }
     cleanSignatureRefreshEnabledRef.current = true;
     cleanAnnotationsRef.current = persistedAnnotations.map(normalizeAnnotationLayout);
     setCleanWorkSignature(
@@ -2544,11 +2574,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
   async function handleSave() {
     if (!pdfBytes) {
-      return;
+      return false;
     }
 
     if (!hasUnsavedChanges) {
-      return;
+      return true;
     }
 
     setBusy(true);
@@ -2560,24 +2590,57 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       if (saveTarget) {
         try {
           await saveTarget.save(savedBytes);
-          markCurrentWorkClean();
-          return;
+          markCurrentWorkClean(savedBytes);
+          return true;
         } catch (error) {
           console.error(error);
-          const savedAs = await savePdfAs(savedBytes);
-          if (!savedAs) {
-            downloadPdf(savedBytes, annotatedName(fileName));
+          const saveAsResult = await savePdfAs(savedBytes);
+          if (saveAsResult === 'saved') {
+            return true;
           }
-          return;
+          if (saveAsResult === 'unavailable') {
+            await downloadPdfBytes(savedBytes, annotatedName(fileName));
+          }
+          return false;
         }
       }
 
-      const savedAs = await savePdfAs(savedBytes);
-      if (!savedAs) {
-        downloadPdf(savedBytes, annotatedName(fileName));
+      const saveAsResult = await savePdfAs(savedBytes);
+      if (saveAsResult === 'saved') {
+        return true;
       }
+      if (saveAsResult === 'unavailable') {
+        await downloadPdfBytes(savedBytes, annotatedName(fileName));
+      }
+      return false;
     } catch (error) {
       console.error(error);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveAs() {
+    if (!pdfBytes) {
+      return false;
+    }
+
+    setBusy(true);
+
+    try {
+      const savedBytes = await currentPdfOutputBytes();
+      const saveAsResult = await savePdfAs(savedBytes);
+      if (saveAsResult === 'saved') {
+        return true;
+      }
+      if (saveAsResult === 'unavailable') {
+        await downloadPdfBytes(savedBytes, annotatedName(fileName));
+      }
+      return false;
+    } catch (error) {
+      console.error(error);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -2586,7 +2649,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   async function savePdfAs(bytes: Uint8Array) {
     const saveAsTarget = saveAsTargetRef.current;
     if (!saveAsTarget) {
-      return false;
+      return 'unavailable' as const;
     }
 
     let result;
@@ -2594,19 +2657,18 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       result = await saveAsTarget.saveAs(bytes, safeDownloadName(fileName));
     } catch (error) {
       console.error(error);
-      return false;
+      return 'unavailable' as const;
     }
     if (!result) {
-      return true;
+      return 'cancelled' as const;
     }
 
     saveTargetRef.current = result.saveTarget ?? null;
-    setHasSaveTarget(Boolean(result.saveTarget));
     if (result.fileName) {
       setFileName(result.fileName);
     }
-    markCurrentWorkClean();
-    return true;
+    markCurrentWorkClean(bytes);
+    return 'saved' as const;
   }
 
   async function handleDownload() {
@@ -2617,14 +2679,36 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setBusy(true);
 
     try {
-      const savedBytes = await annotatedPdfBytes();
+      const savedBytes = await currentPdfOutputBytes();
       const outputName = annotatedName(fileName);
-      downloadPdf(savedBytes, outputName);
+      await downloadPdfBytes(savedBytes, outputName);
     } catch (error) {
       console.error(error);
     } finally {
       setBusy(false);
     }
+  }
+
+  async function currentPdfOutputBytes() {
+    if (!pdfBytes) {
+      throw new Error('No PDF is open.');
+    }
+
+    if (hasUnsavedChanges) {
+      return annotatedPdfBytes();
+    }
+
+    return cleanPdfBytesRef.current ?? pdfBytes;
+  }
+
+  async function downloadPdfBytes(bytes: Uint8Array, suggestedName: string) {
+    const target = downloadTargetRef.current;
+    if (target) {
+      await target.download(bytes, safeDownloadName(suggestedName));
+      return;
+    }
+
+    downloadPdf(bytes, suggestedName);
   }
 
   async function annotatedPdfBytes() {
@@ -2666,7 +2750,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     return showAnnotations
-      ? annotatedPdfBytes()
+      ? currentPdfOutputBytes()
       : writePdfAnnotations(pdfBytes, []);
   }
 
@@ -2726,7 +2810,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
         removePrintFrame();
         if (!openPrintablePdfInTab(url)) {
-          downloadPdf(bytes, outputName);
+          void downloadPdfBytes(bytes, outputName);
         }
         finish();
       }
@@ -3080,7 +3164,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
   function handleEnableEditing() {
     saveTargetRef.current = null;
-    setHasSaveTarget(false);
     setEditingEnabled(true);
     setTool('select');
     setActiveToolKey('select');
@@ -3300,7 +3383,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             onDownload={handleDownload}
             onPrint={handlePrint}
             onSave={handleSave}
-            saveLabel={hasSaveTarget ? 'Save' : 'Save As...'}
+            onSaveAs={handleSaveAs}
+            saveLabel="Save"
             onToggleAnnotations={handleToggleAnnotations}
             showCloseButton={showCloseButton}
             showAnnotations={showAnnotations}
@@ -3456,19 +3540,17 @@ function ExternalLinkDialog({
         onPointerDown={(event) => event.stopPropagation()}
         role="dialog"
       >
-        <h2>Open external link?</h2>
+        <h2>External link</h2>
+        <p>This file wants to open the following link:</p>
         <p className="external-link-url">{externalLinkDisplayUrl(link.url)}</p>
-        <p>
-          This PDF wants to open a link outside the document. Only continue if
-          you trust the destination.
-        </p>
         <div className="external-link-actions">
           <button
-            className="ui-button external-link-secondary"
-            onClick={onCancel}
+            className="ui-button external-link-primary"
+            onClick={onOpen}
+            ref={openButtonRef}
             type="button"
           >
-            No
+            Open
           </button>
           <button
             className="ui-button external-link-secondary"
@@ -3476,15 +3558,14 @@ function ExternalLinkDialog({
             title={`Always open links from ${externalLinkTrustLabel(link.trustKey)} for this document`}
             type="button"
           >
-            Always for this document
+            Always open links in this document
           </button>
           <button
-            className="ui-button ui-button-active external-link-primary"
-            onClick={onOpen}
-            ref={openButtonRef}
+            className="ui-button external-link-secondary"
+            onClick={onCancel}
             type="button"
           >
-            Open
+            Cancel
           </button>
         </div>
       </section>

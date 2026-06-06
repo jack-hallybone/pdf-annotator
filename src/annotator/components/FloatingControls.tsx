@@ -10,6 +10,7 @@ import {
   Printer,
   Redo2,
   Save,
+  SaveAll,
   Undo2,
   X
 } from 'lucide-react';
@@ -344,6 +345,7 @@ type FloatingDocumentControlsProps = {
   onDownload: () => void;
   onPrint: () => void;
   onSave: () => void;
+  onSaveAs: () => void;
   saveLabel: string;
   showCloseButton?: boolean;
   onToggleAnnotations: () => void;
@@ -357,6 +359,7 @@ export function FloatingDocumentControls({
   onDownload,
   onPrint,
   onSave,
+  onSaveAs,
   saveLabel,
   showCloseButton = true,
   onToggleAnnotations,
@@ -376,6 +379,9 @@ export function FloatingDocumentControls({
         onClick={onSave}
       >
         <Save size={16} />
+      </IconButton>
+      <IconButton disabled={busy} label="Save As..." onClick={onSaveAs}>
+        <SaveAll size={16} />
       </IconButton>
       <IconButton disabled={busy} label="Download a copy" onClick={onDownload}>
         <Download size={16} />

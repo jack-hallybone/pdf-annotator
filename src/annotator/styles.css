@@ -3,10 +3,12 @@
   --pdfa-ui: #ffffff;
   --pdfa-ink: #171c1c;
   --pdfa-accent: #cc41bf;
+  --pdfa-accent-rgb: 204 65 191;
   --pdfa-highlight: #fffe4e;
   --pdfa-frame-shadow: 0 8px 22px rgb(23 28 28 / 0.05);
   --pdfa-menu-shadow: 0 12px 30px rgb(23 28 28 / 0.14);
-  --pdfa-focus-ring: 0 0 0 2px rgb(204 65 191 / 0.32);
+  --pdfa-focus-ring: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.32);
+  --pdfa-selection-bg: rgb(var(--pdfa-accent-rgb) / 0.24);
   --pdfa-menu-font-size: 0.8125rem;
 }
 
@@ -80,7 +82,7 @@
 
 .ui-input:focus {
   border-color: rgb(23 28 28 / 0.62);
-  box-shadow: 0 0 0 2px rgb(204 65 191 / 0.18);
+  box-shadow: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.18);
 }
 
 .icon-button,
@@ -135,8 +137,7 @@
 .sidebar-toggle,
 .floating-frame,
 .document-sidebar,
-.page-menu,
-.highlight-context-menu {
+.page-menu {
   position: absolute;
 }
 
@@ -202,7 +203,7 @@
 
 .password-unlock-input:focus {
   border-color: rgb(23 28 28 / 0.42);
-  outline: 2px solid rgb(204 65 191 / 0.22);
+  outline: 2px solid rgb(var(--pdfa-accent-rgb) / 0.22);
   outline-offset: 1px;
 }
 
@@ -221,7 +222,8 @@
 }
 
 .external-link-backdrop {
-  background: rgb(23 28 28 / 0.16);
+  background: rgb(243 243 243 / 0.76);
+  backdrop-filter: blur(2px);
   display: grid;
   inset: 0;
   padding: 1rem;
@@ -234,9 +236,9 @@
   box-sizing: border-box;
   display: grid;
   gap: 0.75rem;
-  max-width: min(28rem, calc(100vw - 2rem));
+  max-width: 100%;
   padding: 1rem;
-  width: 100%;
+  width: min(30rem, calc(100vw - 2rem));
 }
 
 .external-link-dialog h2,
@@ -251,12 +253,13 @@
 
 .external-link-dialog p {
   color: rgb(23 28 28 / 0.72);
-  font-size: 0.8125rem;
-  line-height: 1.4;
+  font-size: 0.875rem;
+  line-height: 1.45;
 }
 
 .external-link-url {
   background: var(--pdfa-bg);
+  border: 1px solid rgb(23 28 28 / 0.12);
   border-radius: 4px;
   color: var(--pdfa-ink) !important;
   font-family:
@@ -274,8 +277,40 @@
 
 .external-link-primary,
 .external-link-secondary {
-  min-height: 2rem;
-  padding: 0 0.75rem;
+  appearance: none;
+  background: var(--pdfa-ui);
+  border: 1px solid rgb(23 28 28 / 0.14);
+  border-radius: 6px;
+  color: var(--pdfa-ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--pdfa-menu-font-size);
+  font-weight: 600;
+  padding: 0.4375rem 0.6875rem;
+}
+
+.external-link-actions .external-link-primary:hover,
+.external-link-actions .external-link-secondary:hover,
+.external-link-actions .external-link-primary:focus-visible,
+.external-link-actions .external-link-secondary:focus-visible {
+  background: var(--pdfa-bg);
+  outline: none;
+}
+
+.external-link-actions .external-link-primary:focus-visible,
+.external-link-actions .external-link-secondary:focus-visible {
+  box-shadow: var(--pdfa-focus-ring);
+}
+
+.external-link-primary {
+  background: var(--pdfa-ink);
+  border-color: var(--pdfa-ink);
+  color: var(--pdfa-ui);
+}
+
+.external-link-actions .external-link-primary:hover,
+.external-link-actions .external-link-primary:focus-visible {
+  background: rgb(23 28 28 / 0.88);
 }
 
 .floating-frame {
@@ -704,34 +739,6 @@
   width: 3.5rem;
 }
 
-.highlight-context-menu {
-  background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.14);
-  border-radius: 6px;
-  box-shadow: var(--pdfa-menu-shadow);
-  color: var(--pdfa-ink);
-  font-size: var(--pdfa-menu-font-size);
-  font-weight: 500;
-  min-width: 8rem;
-  padding: 0.25rem;
-  z-index: 20;
-}
-
-.highlight-context-menu-button {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  display: block;
-  font: inherit;
-  border-radius: 4px;
-  padding: 0.375rem 0.5rem;
-  text-align: left;
-  width: 100%;
-}
-
-.highlight-context-menu-button:hover { background: var(--pdfa-bg); }
-
 .free-text-editor,
 .free-text-view {
   box-sizing: border-box;
@@ -838,7 +845,7 @@
 .note-popover-editor:focus {
   box-shadow:
     var(--pdfa-menu-shadow),
-    0 0 0 2px rgb(204 65 191 / 0.2);
+    0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.2);
 }
 
 .existing-free-text {
@@ -903,7 +910,34 @@
   margin: 0;
 }
 
-.pdf-page .textLayer ::selection { background: rgb(204 65 191 / 0.28); }
+.pdf-page .textLayer::selection {
+  background: transparent;
+}
+
+.pdf-page .textLayer ::selection {
+  background: var(--pdfa-selection-bg) !important;
+}
+
+.pdf-page .textLayer br::selection,
+.pdf-page .textLayer .endOfContent::selection,
+.pdf-page .textLayer .markedContent::selection {
+  background: transparent;
+}
+
+.pdf-page .textLayer::-moz-selection {
+  background: transparent;
+}
+
+.pdf-page .textLayer ::-moz-selection {
+  background: var(--pdfa-selection-bg) !important;
+}
+
+.pdf-page .textLayer br::-moz-selection,
+.pdf-page .textLayer .endOfContent::-moz-selection,
+.pdf-page .textLayer .markedContent::-moz-selection {
+  background: transparent;
+}
+
 .pdf-page svg { user-select: none; }
 
 @media (min-width: 640px) {

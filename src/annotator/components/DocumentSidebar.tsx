@@ -494,9 +494,9 @@ function ThumbnailPageCanvas({
         if (cachedRenderMode === 'annotationAppearance') {
           const hasPageContent = await pageHasRenderableContent(page);
           await renderThumbnail(
-            hasPageContent ? AnnotationMode.ENABLE : AnnotationMode.DISABLE
+            hasPageContent ? AnnotationMode.DISABLE : AnnotationMode.ENABLE
           );
-          if (!hasPageContent) {
+          if (hasPageContent) {
             cachePageBaseRenderMode(page, 'normal');
           }
           return;
@@ -510,14 +510,16 @@ function ThumbnailPageCanvas({
         ) {
           const hasPageContent = await pageHasRenderableContent(page);
           if (!hasPageContent || cancelled) {
-            cachePageBaseRenderMode(page, 'normal');
+            if (!cancelled) {
+              await renderThumbnail(AnnotationMode.ENABLE);
+              if (!canvasLooksEmpty(renderCanvas)) {
+                cachePageBaseRenderMode(page, 'annotationAppearance');
+              }
+            }
             return;
           }
 
-          await renderThumbnail(AnnotationMode.ENABLE);
-          if (!canvasLooksEmpty(renderCanvas)) {
-            cachePageBaseRenderMode(page, 'annotationAppearance');
-          }
+          cachePageBaseRenderMode(page, 'normal');
         } else if (!cancelled) {
           cachePageBaseRenderMode(page, 'normal');
         }

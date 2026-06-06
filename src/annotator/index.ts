@@ -6,6 +6,7 @@ export { createPdfFileLoader, readPdfFile } from './pdfFile';
 export type {
   PdfExternalLinkContext,
   PdfExternalLinkOpener,
+  PdfDownloadTarget,
   PdfSaveAsResult,
   PdfSaveAsTarget,
   PdfSaveTarget,
