@@ -328,11 +328,6 @@ button {
   margin: 0.125rem 0.25rem;
 }
 
-.tabbedapp-menu-icon-spacer {
-  flex: 0 0 0.9375rem;
-  width: 0.9375rem;
-}
-
 .tabbedapp-tabbar-actions {
   align-items: end;
   display: flex;

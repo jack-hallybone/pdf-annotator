@@ -16,11 +16,14 @@ import type {
   RefCallback
 } from 'react';
 import {
+  ChevronsRight,
+  Copy,
   Download,
   File,
   FileText,
   FolderOpen,
   Home,
+  Layers,
   Plus,
   Printer,
   Save,
@@ -896,6 +899,16 @@ export const TabbedPdfShell = forwardRef<
     );
   }
 
+  function closeCurrentTab(documentId: string) {
+    closeTabContextMenu();
+    void closeDocument(documentId);
+  }
+
+  function closeEveryTab() {
+    closeTabContextMenu();
+    void closeAllDocuments();
+  }
+
   function closeTabsToRight(documentId: string) {
     closeTabContextMenu();
     const documentIndex = documentsRef.current.findIndex(
@@ -1381,7 +1394,7 @@ export const TabbedPdfShell = forwardRef<
             role="menuitem"
             type="button"
           >
-            <span className="tabbedapp-menu-icon-spacer" />
+            <Copy size={15} />
             <span>Copy filename</span>
           </button>
           <button
@@ -1396,10 +1409,7 @@ export const TabbedPdfShell = forwardRef<
           </button>
           <span className="tabbedapp-context-menu-separator" />
           <button
-            disabled={
-              !tabContextMenuWorkspaceAvailable ||
-              !tabContextMenuDocument.hasUnsavedChanges
-            }
+            disabled={!tabContextMenuWorkspaceAvailable}
             onClick={() =>
               void runWorkspaceCommand(tabContextMenuDocument.id, 'save')
             }
@@ -1444,12 +1454,20 @@ export const TabbedPdfShell = forwardRef<
           </button>
           <span className="tabbedapp-context-menu-separator" />
           <button
+            onClick={() => closeCurrentTab(tabContextMenuDocument.id)}
+            role="menuitem"
+            type="button"
+          >
+            <X size={15} />
+            <span>Close tab</span>
+          </button>
+          <button
             disabled={documents.length <= 1}
             onClick={() => closeOtherTabs(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
           >
-            <span className="tabbedapp-menu-icon-spacer" />
+            <Layers size={15} />
             <span>Close other tabs</span>
           </button>
           <button
@@ -1458,8 +1476,17 @@ export const TabbedPdfShell = forwardRef<
             role="menuitem"
             type="button"
           >
-            <span className="tabbedapp-menu-icon-spacer" />
+            <ChevronsRight size={15} />
             <span>Close tabs to the right</span>
+          </button>
+          <button
+            disabled={documents.length === 0}
+            onClick={closeEveryTab}
+            role="menuitem"
+            type="button"
+          >
+            <Layers size={15} />
+            <span>Close all tabs</span>
           </button>
         </div>
       ) : null}

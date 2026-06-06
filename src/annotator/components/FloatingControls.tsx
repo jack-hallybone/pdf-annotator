@@ -340,7 +340,6 @@ export function FloatingZoomControls({
 
 type FloatingDocumentControlsProps = {
   busy: boolean;
-  canSave: boolean;
   onClosePdf: () => void;
   onDownload: () => void;
   onPrint: () => void;
@@ -354,7 +353,6 @@ type FloatingDocumentControlsProps = {
 
 export function FloatingDocumentControls({
   busy,
-  canSave,
   onClosePdf,
   onDownload,
   onPrint,
@@ -373,11 +371,7 @@ export function FloatingDocumentControls({
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}
       </IconButton>
-      <IconButton
-        disabled={busy || !canSave}
-        label={saveLabel}
-        onClick={onSave}
-      >
+      <IconButton disabled={busy} label={saveLabel} onClick={onSave}>
         <Save size={16} />
       </IconButton>
       <IconButton disabled={busy} label="Save As..." onClick={onSaveAs}>

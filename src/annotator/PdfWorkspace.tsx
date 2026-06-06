@@ -2577,14 +2577,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return false;
     }
 
-    if (!hasUnsavedChanges) {
-      return true;
-    }
-
     setBusy(true);
 
     try {
-      const savedBytes = await annotatedPdfBytes();
+      const savedBytes = await currentPdfOutputBytes();
       const saveTarget = saveTargetRef.current;
 
       if (saveTarget) {
@@ -3378,7 +3374,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
           <FloatingDocumentControls
             busy={busy}
-            canSave={hasUnsavedChanges}
             onClosePdf={handleClosePdf}
             onDownload={handleDownload}
             onPrint={handlePrint}
