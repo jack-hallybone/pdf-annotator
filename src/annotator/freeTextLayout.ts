@@ -3,9 +3,9 @@ import { clamp } from './viewerConfig';
 
 export const FREE_TEXT_LINE_HEIGHT = 1.25;
 
-const FREE_TEXT_MAX_WIDTH = 512;
+export const FREE_TEXT_MAX_WIDTH = 512;
 const FREE_TEXT_EMPTY_WIDTH = 96;
-const FREE_TEXT_MIN_WIDTH = 28;
+export const FREE_TEXT_MIN_WIDTH = 28;
 const FREE_TEXT_WIDTH_BUFFER = 10;
 const FREE_TEXT_HEIGHT_BUFFER = 4;
 const AVERAGE_CHARACTER_WIDTH = 0.54;

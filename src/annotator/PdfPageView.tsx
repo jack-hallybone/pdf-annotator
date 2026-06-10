@@ -1,4 +1,4 @@
-import { Copy, Trash2 } from 'lucide-react';
+import { Copy, Highlighter, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import {
@@ -15,6 +15,7 @@ import type {
   PdfAnnotation,
   PageRenderPriority,
   PdfPoint,
+  PdfRect,
   Tool,
   ToolSettings
 } from './types';
@@ -34,10 +35,11 @@ import {
   annotationHitTest,
   annotationWhollyInsidePolygon,
   appendInkPoint,
+  boundsForPoints,
   boundsForRects,
   dotPath,
+  inkPathCommands,
   isLassoSelectableAnnotation,
-  moveAnnotation,
   nearestRectIndex,
   pathHitTest,
   pathLength,
@@ -83,7 +85,11 @@ import {
   SELECTION_ACCENT,
   TEXT_HIGHLIGHT_STYLE
 } from './components/AnnotationPrimitives';
-import { FREE_TEXT_LINE_HEIGHT } from './freeTextLayout';
+import {
+  FREE_TEXT_LINE_HEIGHT,
+  FREE_TEXT_MAX_WIDTH,
+  FREE_TEXT_MIN_WIDTH
+} from './freeTextLayout';
 
 type PageViewport = ReturnType<PDFPageProxy['getViewport']>;
 type EraserScope = 'all' | 'draw' | 'highlight';
@@ -96,16 +102,62 @@ type ActiveTextGeometry = {
 type DragSelection = {
   annotationIds: string[];
   lastPoint: PdfPoint;
+  pageIndex: number;
   pointerId: number;
+};
+type FreeTextResizeHandle = {
+  annotationId: string;
+  handle: 'left' | 'right';
+  pointerId: number;
+};
+type DraftInkPath = {
+  kind: 'draw' | 'freehandHighlight';
+  path: PdfPoint[];
 };
 type EraserGesture = {
   pendingUntilDrag: boolean;
+};
+type EraserAnnotationIndexEntry = {
+  annotation: PdfAnnotation;
+  bounds: PdfRect;
+};
+type EraserAnnotationIndex = {
+  cellSize: number;
+  grid: Map<string, EraserAnnotationIndexEntry[]>;
+  queryPadding: number;
+};
+type AnnotationPathUpdate = {
+  annotationId: string;
+  paths: PdfPoint[][];
+};
+type PendingEraseChanges = {
+  deleteIds: Set<string>;
+  pathUpdates: Map<string, PdfPoint[][]>;
+};
+type InkCanvasRenderState = {
+  annotations: PdfAnnotation[];
+  displaySize: PageDisplaySize;
+  pixelRatio: number;
+  scale: number;
+  viewportHeight: number;
+  viewportWidth: number;
+};
+type TextSelectionHighlightAction = {
+  contents: string;
+  quadPoints: number[][];
+  rects: PdfRect[];
+  x: number;
+  y: number;
 };
 type VisiblePageBounds = {
   bottom: number;
   left: number;
   right: number;
   top: number;
+};
+type PageDisplaySize = {
+  height: number;
+  width: number;
 };
 
 type PdfPageViewProps = {
@@ -126,12 +178,24 @@ type PdfPageViewProps = {
   onAddAnnotation: (annotation: PdfAnnotation) => void;
   onBeginAnnotationEdit: (options?: { finishOnPointerUp?: boolean }) => void;
   onDeleteAnnotations: (annotationIds: string[]) => void;
+  onEraseAnnotations: (changes: {
+    deleteIds: string[];
+    pathUpdates: AnnotationPathUpdate[];
+  }) => void;
   onFocusAnnotationConsumed: (annotationId: string) => void;
   onEnsureAnnotationsVisible: () => void;
   onExternalLinkRequest: (url: string) => void;
+  onMoveAnnotationsToPage: (options: {
+    annotationIds: string[];
+    clientX: number;
+    clientY: number;
+    sourcePageIndex: number;
+    sourcePoint: PdfPoint;
+  }) => { pageIndex: number; point: PdfPoint } | null;
   onNavigateDestination: (destination: string | unknown[]) => void;
   onNavigatePage: (pageIndex: number) => void;
   onPageReady?: (pageIndex: number) => void;
+  onPruneOffPageAnnotations: (annotationIds: string[]) => void;
   onSelectAnnotations: (annotationIds: string[]) => void;
   onToolChange: (tool: Tool) => void;
   onUpdateAnnotation: (
@@ -159,12 +223,15 @@ export function PdfPageView({
   onAddAnnotation,
   onBeginAnnotationEdit,
   onDeleteAnnotations,
+  onEraseAnnotations,
   onFocusAnnotationConsumed,
   onEnsureAnnotationsVisible,
   onExternalLinkRequest,
+  onMoveAnnotationsToPage,
   onNavigateDestination,
   onNavigatePage,
   onPageReady,
+  onPruneOffPageAnnotations,
   onSelectAnnotations,
   onToolChange,
   onUpdateAnnotation
@@ -173,6 +240,11 @@ export function PdfPageView({
   const pageRef = useRef<HTMLDivElement>(null);
   const textLayerRef = useRef<HTMLDivElement>(null);
   const appearanceLayerRef = useRef<HTMLCanvasElement>(null);
+  const inkCanvasRef = useRef<HTMLCanvasElement>(null);
+  const highlightInkCanvasRef = useRef<HTMLCanvasElement>(null);
+  const draftInkCanvasRef = useRef<HTMLCanvasElement>(null);
+  const draftHighlightInkCanvasRef = useRef<HTMLCanvasElement>(null);
+  const eraserCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationLayerRef = useRef<HTMLDivElement>(null);
   const existingAnnotationsPageRef = useRef<PDFPageProxy | null>(null);
   const renderRequestRef = useRef<{
@@ -184,8 +256,22 @@ export function PdfPageView({
   const dismissedSelectionPointerIdRef = useRef<number | null>(null);
   const eraserScopeRef = useRef<EraserScope>('all');
   const eraserGestureRef = useRef<EraserGesture | null>(null);
+  const eraserAnnotationIndexRef = useRef<EraserAnnotationIndex | null>(null);
   const eraserPathRef = useRef<PdfPoint[] | null>(null);
-  const [draftPath, setDraftPath] = useState<PdfPoint[] | null>(null);
+  const pendingEraseCommitFrameRef = useRef<number | null>(null);
+  const pendingEraseCommitTimeoutRef = useRef<number | null>(null);
+  const eraserPreviewFrameRef = useRef<number | null>(null);
+  const eraserRemainingPathsRef = useRef<Map<string, PdfPoint[][]>>(new Map());
+  const eraserDeletedIdsRef = useRef<Set<string>>(new Set());
+  const pendingEraseChangesRef = useRef<PendingEraseChanges>({
+    deleteIds: new Set(),
+    pathUpdates: new Map()
+  });
+  const pathBoundsCacheRef = useRef<WeakMap<PdfPoint[], PdfRect>>(new WeakMap());
+  const inkCanvasRenderStateRef = useRef<InkCanvasRenderState | null>(null);
+  const prepaintedInkAnnotationIdsRef = useRef<Set<string>>(new Set());
+  const draftInkPathRef = useRef<DraftInkPath | null>(null);
+  const draftInkFrameRef = useRef<number | null>(null);
   const [draftTextHighlight, setDraftTextHighlight] = useState<{
     startIndex: number;
     currentIndex: number;
@@ -199,15 +285,17 @@ export function PdfPageView({
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(
     null
   );
+  const [freeTextResizeHandle, setFreeTextResizeHandle] =
+    useState<FreeTextResizeHandle | null>(null);
   const [dragHandle, setDragHandle] = useState<{
     anchorIndex: number | null;
     annotationId: string;
     handle: 'start' | 'end';
     pointerId: number;
   } | null>(null);
-  const [dragSelection, setDragSelection] = useState<DragSelection | null>(null);
-  const [eraserPath, setEraserPath] = useState<PdfPoint[] | null>(null);
   const [lassoPath, setLassoPath] = useState<PdfPoint[] | null>(null);
+  const [textSelectionHighlightAction, setTextSelectionHighlightAction] =
+    useState<TextSelectionHighlightAction | null>(null);
   const navigateDestinationRef = useRef(onNavigateDestination);
   const externalLinkRequestRef = useRef(onExternalLinkRequest);
   const navigatePageRef = useRef(onNavigatePage);
@@ -216,6 +304,9 @@ export function PdfPageView({
   navigatePageRef.current = onNavigatePage;
   const viewport = useMemo(() => page.getViewport({ scale }), [page, scale]);
   const renderKey = `${page.pageNumber}:${scale}`;
+  const [displaySize, setDisplaySize] = useState(() =>
+    viewportDisplaySize(viewport)
+  );
   const linkService = useMemo(
     () =>
       createPdfLinkService({
@@ -230,16 +321,44 @@ export function PdfPageView({
       }),
     [pageCount, pageIndex]
   );
+  const selectedAnnotationIdSet = useMemo(
+    () => new Set(selectedAnnotationIds),
+    [selectedAnnotationIds]
+  );
   const selectedPageAnnotations = useMemo(
     () => {
       if (readOnly) {
         return [];
       }
 
-      const selectedIds = new Set(selectedAnnotationIds);
-      return annotations.filter((annotation) => selectedIds.has(annotation.id));
+      return annotations.filter((annotation) =>
+        selectedAnnotationIdSet.has(annotation.id)
+      );
     },
-    [annotations, readOnly, selectedAnnotationIds]
+    [annotations, readOnly, selectedAnnotationIdSet]
+  );
+  const displayAnnotations = useMemo(
+    () =>
+      [...annotations].sort(
+        (left, right) =>
+          annotationRenderRank(left) - annotationRenderRank(right)
+      ),
+    [annotations]
+  );
+  const canvasInkAnnotations = useMemo(
+    () =>
+      displayAnnotations.filter((annotation) =>
+        isCanvasBackedInkAnnotation(annotation, selectedAnnotationIdSet)
+      ),
+    [displayAnnotations, selectedAnnotationIdSet]
+  );
+  const vectorDisplayAnnotations = useMemo(
+    () =>
+      displayAnnotations.filter(
+        (annotation) =>
+          !isCanvasBackedInkAnnotation(annotation, selectedAnnotationIdSet)
+      ),
+    [displayAnnotations, selectedAnnotationIdSet]
   );
   const overlayCapturesPointer =
     !readOnly &&
@@ -252,8 +371,8 @@ export function PdfPageView({
   const shouldMountInteractionOverlay = showAnnotations || overlayCapturesPointer;
   const showSynchronizedAnnotations = showAnnotations && baseLayerReady;
   const pageStyle = {
-    width: viewport.width,
-    height: viewport.height,
+    width: displaySize.width,
+    height: displaySize.height,
     '--pdf-page-width': String(viewport.width / scale),
     '--pdf-page-height': String(viewport.height / scale),
     '--scale-factor': String(scale),
@@ -263,11 +382,37 @@ export function PdfPageView({
     '--scale-round-y': '1px'
   } as React.CSSProperties;
 
+  function setPageDisplaySize(nextSize: PageDisplaySize) {
+    setDisplaySize((currentSize) =>
+      displaySizesMatch(currentSize, nextSize) ? currentSize : nextSize
+    );
+  }
+
   useEffect(() => {
     if (baseLayerReady) {
       onPageReady?.(pageIndex);
     }
   }, [baseLayerReady, onPageReady, pageIndex]);
+
+  useEffect(
+    () => () => {
+      const frame = draftInkFrameRef.current;
+      if (frame !== null) {
+        window.cancelAnimationFrame(frame);
+        draftInkFrameRef.current = null;
+      }
+      const eraserFrame = eraserPreviewFrameRef.current;
+      if (eraserFrame !== null) {
+        window.cancelAnimationFrame(eraserFrame);
+        eraserPreviewFrameRef.current = null;
+      }
+      cancelPendingEraseCommit();
+      flushPendingEraseChanges();
+      clearDraftInkCanvases();
+      clearDisplayCanvas(eraserCanvasRef.current);
+    },
+    []
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -298,7 +443,16 @@ export function PdfPageView({
       textLayerRef.current = null;
       activeTextGeometryRef.current = null;
       setBaseLayerReady(false);
+      setPageDisplaySize(viewportDisplaySize(viewport));
       const cachedRenderMode = cachedPageBaseRenderMode(page);
+
+      function syncDisplaySizeFromRenderedPage() {
+        setPageDisplaySize(
+          displaySizeFromElement(
+            renderContainer.querySelector<HTMLDivElement>('.page')
+          ) ?? viewportDisplaySize(viewport)
+        );
+      }
 
       function revealCanvasIfReady() {
         if (cancelled || canvasRevealed) {
@@ -316,6 +470,7 @@ export function PdfPageView({
         if (cachedRenderMode !== 'annotationAppearance') {
           cachePageBaseRenderMode(page, 'normal');
         }
+        syncDisplaySizeFromRenderedPage();
         setBaseLayerReady(true);
       }
 
@@ -378,7 +533,7 @@ export function PdfPageView({
             annotationMode: AnnotationMode.DISABLE,
             container,
             defaultViewport: page.getViewport({ scale }),
-            enableSelectionRendering: false,
+            enableSelectionRendering: true,
             eventBus,
             id: pageIndex + 1,
             maxCanvasPixels: PDFJS_MAX_CANVAS_PIXELS,
@@ -426,6 +581,7 @@ export function PdfPageView({
         container.querySelector<HTMLDivElement>('.textLayer');
       activeTextGeometryRef.current = null;
       if (!canvasRevealed) {
+        syncDisplaySizeFromRenderedPage();
         setBaseLayerReady(true);
       }
     }
@@ -552,10 +708,15 @@ export function PdfPageView({
         return;
       }
 
+      const baseCanvasBounds = baseCanvas.getBoundingClientRect();
       overlayCanvas.width = width;
       overlayCanvas.height = height;
-      overlayCanvas.style.width = `${viewport.width}px`;
-      overlayCanvas.style.height = `${viewport.height}px`;
+      overlayCanvas.style.width = `${
+        baseCanvasBounds.width || viewport.width
+      }px`;
+      overlayCanvas.style.height = `${
+        baseCanvasBounds.height || viewport.height
+      }px`;
 
       const scaleX = width / Math.max(1, viewport.width);
       const scaleY = height / Math.max(1, viewport.height);
@@ -732,6 +893,118 @@ export function PdfPageView({
     return () => window.removeEventListener('copy', handleCopy);
   }, [selectedPageAnnotations, viewport]);
 
+  useLayoutEffect(() => {
+    const canvases = [highlightInkCanvasRef.current, inkCanvasRef.current];
+    if (!showSynchronizedAnnotations) {
+      canvases.forEach(clearDisplayCanvas);
+      inkCanvasRenderStateRef.current = null;
+      return;
+    }
+
+    const previousRender = inkCanvasRenderStateRef.current;
+    const addedAnnotation =
+      previousRender &&
+      sameInkCanvasRenderFrame(previousRender, displaySize, scale, viewport)
+        ? findSingleAddedInkAnnotation(
+            previousRender.annotations,
+            canvasInkAnnotations
+          )
+        : null;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (addedAnnotation) {
+        if (prepaintedInkAnnotationIdsRef.current.has(addedAnnotation.id)) {
+          prepaintedInkAnnotationIdsRef.current.delete(addedAnnotation.id);
+        } else {
+          drawInkCanvasAnnotation({
+            annotation: addedAnnotation,
+            canvas:
+              addedAnnotation.kind === 'draw'
+                ? inkCanvasRef.current
+                : highlightInkCanvasRef.current,
+            clear: false,
+            displaySize,
+            scale,
+            viewport
+          });
+        }
+      } else {
+        prepaintedInkAnnotationIdsRef.current.clear();
+        renderInkCanvasLayer({
+          annotations: canvasInkAnnotations,
+          canvas: highlightInkCanvasRef.current,
+          displaySize,
+          kind: 'freehandHighlight',
+          scale,
+          viewport
+        });
+        renderInkCanvasLayer({
+          annotations: canvasInkAnnotations,
+          canvas: inkCanvasRef.current,
+          displaySize,
+          kind: 'draw',
+          scale,
+          viewport
+        });
+      }
+
+      inkCanvasRenderStateRef.current = {
+        annotations: canvasInkAnnotations,
+        displaySize,
+        pixelRatio: inkCanvasPixelRatio(displaySize),
+        scale,
+        viewportHeight: viewport.height,
+        viewportWidth: viewport.width
+      };
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    canvasInkAnnotations,
+    displaySize,
+    scale,
+    showSynchronizedAnnotations,
+    viewport
+  ]);
+
+  useEffect(() => {
+    if (readOnly || tool !== 'select') {
+      setTextSelectionHighlightAction(null);
+      return;
+    }
+
+    let animationFrame = 0;
+
+    function updateSelectionAction() {
+      cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        setTextSelectionHighlightAction(
+          getTextSelectionHighlightAction(
+            window.getSelection(),
+            pageRef.current,
+            textLayerRef.current,
+            viewport
+          )
+        );
+      });
+    }
+
+    document.addEventListener('selectionchange', updateSelectionAction);
+    window.addEventListener('keyup', updateSelectionAction);
+    window.addEventListener('mouseup', updateSelectionAction);
+    updateSelectionAction();
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+      document.removeEventListener(
+        'selectionchange',
+        updateSelectionAction
+      );
+      window.removeEventListener('keyup', updateSelectionAction);
+      window.removeEventListener('mouseup', updateSelectionAction);
+    };
+  }, [readOnly, tool, viewport]);
+
   function handlePointerDown(event: React.PointerEvent<SVGSVGElement>) {
     onActivate(pageIndex);
     if (readOnly) {
@@ -797,7 +1070,10 @@ export function PdfPageView({
     }
 
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDraftPath([eventToPdfPoint(event, viewport)]);
+    beginDraftInkPath(
+      tool === 'draw' ? 'draw' : 'freehandHighlight',
+      eventToPdfPoint(event, viewport)
+    );
   }
 
   function handlePagePointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -825,6 +1101,31 @@ export function PdfPageView({
     const isPrimaryButton = event.button === 0;
     if (isPrimaryButton && tool === 'select' && isTextLayerTarget(event.target)) {
       return;
+    }
+
+    if (
+      isPrimaryButton &&
+      (tool === 'select' || tool === 'highlight') &&
+      !isTextLayerTarget(event.target)
+    ) {
+      const point = eventToPdfPointFromElement(event, viewport);
+      const hitAnnotation = findCanvasBackedInkAnnotationAtPoint(point);
+      if (hitAnnotation) {
+        event.preventDefault();
+        onActivate(pageIndex);
+        if (!selectedAnnotationIdSet.has(hitAnnotation.id)) {
+          onSelectAnnotations([hitAnnotation.id]);
+        }
+        if (tool === 'select') {
+          beginMoveAnnotationAtPoint({
+            annotationId: hitAnnotation.id,
+            captureTarget: event.currentTarget,
+            point,
+            pointerId: event.pointerId
+          });
+        }
+        return;
+      }
     }
 
     if (
@@ -871,7 +1172,7 @@ export function PdfPageView({
       window.getSelection()?.removeAllRanges();
       const point = eventToPdfPointFromElement(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
-      setDraftPath([point]);
+      beginDraftInkPath('freehandHighlight', point);
     }
   }
 
@@ -880,7 +1181,11 @@ export function PdfPageView({
       return;
     }
 
-    if (eraserPath) {
+    if (moveActiveDragSelection(event.clientX, event.clientY)) {
+      return;
+    }
+
+    if (eraserPathRef.current) {
       const points = eventToPdfPointsFromElement(event, viewport);
       appendEraserPoints(points);
       return;
@@ -902,14 +1207,12 @@ export function PdfPageView({
       return;
     }
 
-    if (tool !== 'highlight' || !draftPath) {
+    if (tool !== 'highlight' || !draftInkPathRef.current) {
       return;
     }
 
     const points = eventToPdfPointsFromElement(event, viewport);
-    setDraftPath((current) =>
-      current ? appendDraftInkPoints(current, points, viewport) : current
-    );
+    appendDraftInkPath(points);
   }
 
   function getActiveTextGeometry() {
@@ -931,6 +1234,43 @@ export function PdfPageView({
     return activeTextGeometryRef.current;
   }
 
+  function moveActiveDragSelection(clientX: number, clientY: number) {
+    const activeDragSelection = dragSelectionRef.current;
+    if (!activeDragSelection) {
+      return false;
+    }
+
+    const nextPosition = onMoveAnnotationsToPage({
+      annotationIds: activeDragSelection.annotationIds,
+      clientX,
+      clientY,
+      sourcePageIndex: activeDragSelection.pageIndex,
+      sourcePoint: activeDragSelection.lastPoint
+    });
+
+    if (nextPosition) {
+      dragSelectionRef.current = {
+        ...activeDragSelection,
+        lastPoint: nextPosition.point,
+        pageIndex: nextPosition.pageIndex
+      };
+    }
+
+    return true;
+  }
+
+  function endActiveDragSelection(event: React.PointerEvent<Element>) {
+    const activeDragSelection = dragSelectionRef.current;
+    if (!activeDragSelection) {
+      return false;
+    }
+
+    releasePointer(event, activeDragSelection.pointerId);
+    onPruneOffPageAnnotations(activeDragSelection.annotationIds);
+    dragSelectionRef.current = null;
+    return true;
+  }
+
   function nearestTextSegmentFromPointerEventWithGeometry(
     event: React.PointerEvent<Element>,
     geometry: ActiveTextGeometry,
@@ -941,9 +1281,14 @@ export function PdfPageView({
       return null;
     }
 
-    const bounds = pageElement.getBoundingClientRect();
+    const origin = clientPointToViewportPoint(
+      event.clientX,
+      event.clientY,
+      pageElement.getBoundingClientRect(),
+      viewport
+    );
     return nearestTextHitRect(
-      { x: event.clientX - bounds.left, y: event.clientY - bounds.top },
+      origin,
       geometry.hitRects,
       tolerance
     );
@@ -959,7 +1304,11 @@ export function PdfPageView({
       return;
     }
 
-    if (eraserPath) {
+    if (endActiveDragSelection(event)) {
+      return;
+    }
+
+    if (eraserPathRef.current) {
       releasePointer(event, event.pointerId);
       endEraserGesture();
       return;
@@ -1002,18 +1351,16 @@ export function PdfPageView({
       return;
     }
 
-    if (tool !== 'highlight' || !draftPath) {
+    if (tool !== 'highlight' || !draftInkPathRef.current) {
       return;
     }
 
     releasePointer(event, event.pointerId);
-    const path = appendDraftInkPoints(
-      draftPath,
-      eventToPdfPointsFromElement(event, viewport),
-      viewport
+    const path = appendDraftInkPath(
+      eventToPdfPointsFromElement(event, viewport)
     );
     const normalizedPath = normalizeDraftInkPath(path, viewport);
-    setDraftPath(null);
+    endDraftInkPath();
 
     if (
       path.length > 2 &&
@@ -1037,26 +1384,7 @@ export function PdfPageView({
       return;
     }
 
-    const activeDragSelection = dragSelectionRef.current;
-    if (activeDragSelection) {
-      const point = eventToPdfPoint(event, viewport);
-      const delta = {
-        x: point.x - activeDragSelection.lastPoint.x,
-        y: point.y - activeDragSelection.lastPoint.y
-      };
-
-      for (const annotationId of activeDragSelection.annotationIds) {
-        onUpdateAnnotation(
-          annotationId,
-          (annotation) => moveAnnotation(annotation, delta),
-          { recordUndo: false }
-        );
-      }
-
-      dragSelectionRef.current = {
-        ...activeDragSelection,
-        lastPoint: point
-      };
+    if (moveActiveDragSelection(event.clientX, event.clientY)) {
       return;
     }
 
@@ -1080,7 +1408,24 @@ export function PdfPageView({
       return;
     }
 
-    if (eraserPath) {
+    if (freeTextResizeHandle) {
+      const point = eventToPdfPoint(event, viewport);
+      onUpdateAnnotation(
+        freeTextResizeHandle.annotationId,
+        (annotation) =>
+          annotation.kind === 'freeText'
+            ? resizeFreeTextWidth(
+                annotation,
+                point,
+                freeTextResizeHandle.handle
+              )
+            : annotation,
+        { recordUndo: false }
+      );
+      return;
+    }
+
+    if (eraserPathRef.current) {
       const points = eventToPdfPoints(event, viewport);
       appendEraserPoints(points);
       return;
@@ -1094,14 +1439,15 @@ export function PdfPageView({
       return;
     }
 
-    if (!draftPath || (tool !== 'draw' && tool !== 'freehandHighlight')) {
+    if (
+      !draftInkPathRef.current ||
+      (tool !== 'draw' && tool !== 'freehandHighlight')
+    ) {
       return;
     }
 
     const points = eventToPdfPoints(event, viewport);
-    setDraftPath((current) =>
-      current ? appendDraftInkPoints(current, points, viewport) : current
-    );
+    appendDraftInkPath(points);
   }
 
   function handlePointerUp(event: React.PointerEvent<SVGSVGElement>) {
@@ -1114,10 +1460,13 @@ export function PdfPageView({
       return;
     }
 
-    if (dragSelection) {
-      releasePointer(event, dragSelection.pointerId);
-      dragSelectionRef.current = null;
-      setDragSelection(null);
+    if (endActiveDragSelection(event)) {
+      return;
+    }
+
+    if (freeTextResizeHandle) {
+      releasePointer(event, freeTextResizeHandle.pointerId);
+      setFreeTextResizeHandle(null);
       return;
     }
 
@@ -1128,7 +1477,7 @@ export function PdfPageView({
       return;
     }
 
-    if (eraserPath) {
+    if (eraserPathRef.current) {
       releasePointer(event, event.pointerId);
       endEraserGesture();
       return;
@@ -1149,18 +1498,17 @@ export function PdfPageView({
       return;
     }
 
-    if (draftPath && (tool === 'draw' || tool === 'freehandHighlight')) {
+    if (
+      draftInkPathRef.current &&
+      (tool === 'draw' || tool === 'freehandHighlight')
+    ) {
       event.currentTarget.releasePointerCapture(event.pointerId);
-      const path = appendDraftInkPoints(
-        draftPath,
-        eventToPdfPoints(event, viewport),
-        viewport
-      );
+      const path = appendDraftInkPath(eventToPdfPoints(event, viewport));
       const normalizedPath =
         tool === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
           ? dotPath(path[0], toolSettings.drawWidth)
           : normalizeDraftInkPath(path, viewport);
-      setDraftPath(null);
+      endDraftInkPath();
 
       if (
         (tool === 'draw'
@@ -1169,7 +1517,7 @@ export function PdfPageView({
         (tool !== 'freehandHighlight' ||
           pathLength(path) > freehandHighlightMinLength(viewport))
       ) {
-        onAddAnnotation({
+        const annotation: PdfAnnotation = {
           id: crypto.randomUUID(),
           kind: tool,
           pageIndex,
@@ -1188,7 +1536,9 @@ export function PdfPageView({
               : toolSettings.highlightWidth,
           contents:
             tool === 'draw' ? 'Freehand drawing' : 'Freehand highlight'
-        });
+        };
+        prepaintCommittedInkAnnotation(annotation);
+        onAddAnnotation(annotation);
       }
 
       return;
@@ -1199,7 +1549,7 @@ export function PdfPageView({
     }
 
     if (tool === 'freeText' || tool === 'stickyNote') {
-      const origin = eventToViewportPoint(event);
+      const origin = eventToViewportPoint(event, viewport);
       const textHeight = Math.max(84, toolSettings.textFontSize * scale * 4);
       const textLineHeight =
         toolSettings.textFontSize * scale * FREE_TEXT_LINE_HEIGHT;
@@ -1255,6 +1605,26 @@ export function PdfPageView({
       return;
     }
 
+    const captureTarget = event.currentTarget.ownerSVGElement ?? event.currentTarget;
+    beginMoveAnnotationAtPoint({
+      annotationId,
+      captureTarget,
+      point: eventToPdfPointFromElement(event, viewport),
+      pointerId: event.pointerId
+    });
+  }
+
+  function beginMoveAnnotationAtPoint({
+    annotationId,
+    captureTarget,
+    point,
+    pointerId
+  }: {
+    annotationId: string;
+    captureTarget: Element;
+    point: PdfPoint;
+    pointerId: number;
+  }) {
     const targetAnnotation = annotations.find(
       (annotation) => annotation.id === annotationId
     );
@@ -1269,14 +1639,28 @@ export function PdfPageView({
       ? selectedOnPage
       : [annotationId];
     onBeginAnnotationEdit({ finishOnPointerUp: true });
-    event.currentTarget.setPointerCapture(event.pointerId);
+    captureTarget.setPointerCapture?.(pointerId);
     const nextDragSelection = {
       annotationIds,
-      lastPoint: eventToPdfPointFromElement(event, viewport),
-      pointerId: event.pointerId
+      lastPoint: point,
+      pageIndex,
+      pointerId
     };
     dragSelectionRef.current = nextDragSelection;
-    setDragSelection(nextDragSelection);
+  }
+
+  function findCanvasBackedInkAnnotationAtPoint(point: PdfPoint) {
+    for (let index = displayAnnotations.length - 1; index >= 0; index -= 1) {
+      const annotation = displayAnnotations[index];
+      if (
+        isCanvasBackedInkAnnotation(annotation, selectedAnnotationIdSet) &&
+        annotationHitTest(annotation, point, scale)
+      ) {
+        return annotation;
+      }
+    }
+
+    return null;
   }
 
   function eraseAtPoint(point: PdfPoint) {
@@ -1284,10 +1668,24 @@ export function PdfPageView({
       return;
     }
 
+    const eraserAnnotationIndex = eraserAnnotationIndexRef.current;
+    if (!eraserAnnotationIndex) {
+      return;
+    }
+
     const scope = eraserScopeRef.current;
     const deleteIds: string[] = [];
 
-    for (const annotation of annotations) {
+    const pathUpdates: AnnotationPathUpdate[] = [];
+
+    for (const { annotation, bounds } of queryEraserAnnotationIndex(
+      eraserAnnotationIndex,
+      point
+    )) {
+      if (eraserDeletedIdsRef.current.has(annotation.id)) {
+        continue;
+      }
+
       if (!annotationMatchesEraserScope(annotation, scope)) {
         continue;
       }
@@ -1298,32 +1696,183 @@ export function PdfPageView({
           1 / scale
         );
         const threshold = Math.max(annotation.width * 1.4, eraserRadius);
-        const remainingPaths = annotation.paths.filter(
-          (path) => !pathHitTest(path, point, threshold)
-        );
+        if (!expandedRectContainsPoint(bounds, point, threshold)) {
+          continue;
+        }
 
-        if (remainingPaths.length === 0 && annotation.paths.length > 0) {
+        const currentPaths =
+          eraserRemainingPathsRef.current.get(annotation.id) ??
+          annotation.paths;
+        let changed = false;
+        const remainingPaths = currentPaths.filter((path) => {
+          const pathBounds = cachedPathBounds(path, pathBoundsCacheRef.current);
+          if (!expandedRectContainsPoint(pathBounds, point, threshold)) {
+            return true;
+          }
+
+          const hit = pathHitTest(path, point, threshold);
+          changed ||= hit;
+          return !hit;
+        });
+
+        if (!changed) {
+          continue;
+        }
+
+        eraserRemainingPathsRef.current.set(annotation.id, remainingPaths);
+
+        if (remainingPaths.length === 0 && currentPaths.length > 0) {
+          eraseCommittedInkPaths(annotation, currentPaths);
           deleteIds.push(annotation.id);
-        } else if (remainingPaths.length !== annotation.paths.length) {
-          onUpdateAnnotation(
-            annotation.id,
-            (current) =>
-              current.kind === 'draw' || current.kind === 'freehandHighlight'
-                ? { ...current, paths: remainingPaths }
-                : current,
-            { recordUndo: false }
+          eraserDeletedIdsRef.current.add(annotation.id);
+        } else {
+          const remainingPathSet = new Set(remainingPaths);
+          eraseCommittedInkPaths(
+            annotation,
+            currentPaths.filter((path) => !remainingPathSet.has(path))
           );
+          pathUpdates.push({
+            annotationId: annotation.id,
+            paths: remainingPaths
+          });
         }
 
         continue;
       }
 
-      if (annotationHitTest(annotation, point, scale)) {
+      const padding = 6 / scale;
+      if (
+        expandedRectContainsPoint(bounds, point, padding) &&
+        annotationHitTest(annotation, point, scale)
+      ) {
         deleteIds.push(annotation.id);
+        eraserDeletedIdsRef.current.add(annotation.id);
       }
     }
 
-    onDeleteAnnotations(deleteIds);
+    queueEraseAnnotationChanges(deleteIds, pathUpdates);
+  }
+
+  function queueEraseAnnotationChanges(
+    deleteIds: string[],
+    pathUpdates: AnnotationPathUpdate[]
+  ) {
+    if (deleteIds.length === 0 && pathUpdates.length === 0) {
+      return;
+    }
+
+    const pending = pendingEraseChangesRef.current;
+    for (const id of deleteIds) {
+      pending.deleteIds.add(id);
+      pending.pathUpdates.delete(id);
+    }
+    for (const update of pathUpdates) {
+      if (!pending.deleteIds.has(update.annotationId)) {
+        pending.pathUpdates.set(update.annotationId, update.paths);
+      }
+    }
+
+    // Commit once at the end of the gesture. Updating React state on every
+    // eraser sample forces expensive annotation and canvas redraws on dense ink.
+  }
+
+  function cancelPendingEraseCommit() {
+    const frame = pendingEraseCommitFrameRef.current;
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+      pendingEraseCommitFrameRef.current = null;
+    }
+
+    const timeout = pendingEraseCommitTimeoutRef.current;
+    if (timeout !== null) {
+      window.clearTimeout(timeout);
+      pendingEraseCommitTimeoutRef.current = null;
+    }
+  }
+
+  function schedulePendingEraseCommit() {
+    const pending = pendingEraseChangesRef.current;
+    if (pending.deleteIds.size === 0 && pending.pathUpdates.size === 0) {
+      return;
+    }
+
+    if (
+      pendingEraseCommitFrameRef.current !== null ||
+      pendingEraseCommitTimeoutRef.current !== null
+    ) {
+      return;
+    }
+
+    pendingEraseCommitFrameRef.current = window.requestAnimationFrame(() => {
+      pendingEraseCommitFrameRef.current = null;
+      pendingEraseCommitTimeoutRef.current = window.setTimeout(() => {
+        pendingEraseCommitTimeoutRef.current = null;
+        flushPendingEraseChanges();
+      }, 0);
+    });
+  }
+
+  function flushPendingEraseChanges() {
+    cancelPendingEraseCommit();
+    const pending = pendingEraseChangesRef.current;
+    if (pending.deleteIds.size === 0 && pending.pathUpdates.size === 0) {
+      return;
+    }
+
+    pendingEraseChangesRef.current = {
+      deleteIds: new Set(),
+      pathUpdates: new Map()
+    };
+    onEraseAnnotations({
+      deleteIds: Array.from(pending.deleteIds),
+      pathUpdates: Array.from(pending.pathUpdates, ([annotationId, paths]) => ({
+        annotationId,
+        paths
+      }))
+    });
+  }
+
+  function eraseCommittedInkPaths(
+    annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>,
+    paths: PdfPoint[][]
+  ) {
+    if (!showSynchronizedAnnotations || paths.length === 0) {
+      return;
+    }
+
+    eraseInkCanvasPaths({
+      annotation,
+      canvas:
+        annotation.kind === 'draw'
+          ? inkCanvasRef.current
+          : highlightInkCanvasRef.current,
+      displaySize,
+      paths,
+      scale,
+      viewport
+    });
+  }
+
+  function prepaintCommittedInkAnnotation(annotation: PdfAnnotation) {
+    if (
+      !showSynchronizedAnnotations ||
+      (annotation.kind !== 'draw' && annotation.kind !== 'freehandHighlight')
+    ) {
+      return;
+    }
+
+    drawInkCanvasAnnotation({
+      annotation,
+      canvas:
+        annotation.kind === 'draw'
+          ? inkCanvasRef.current
+          : highlightInkCanvasRef.current,
+      clear: false,
+      displaySize,
+      scale,
+      viewport
+    });
+    prepaintedInkAnnotationIdsRef.current.add(annotation.id);
   }
 
   function beginEraserGesture(
@@ -1336,12 +1885,20 @@ export function PdfPageView({
       scope: EraserScope;
     }
   ) {
+    flushPendingEraseChanges();
     eraserScopeRef.current = scope;
+    eraserAnnotationIndexRef.current = buildEraserAnnotationIndex(
+      annotations,
+      scale,
+      toolSettings.eraserWidth
+    );
     eraserPathRef.current = [point];
+    eraserRemainingPathsRef.current = new Map();
+    eraserDeletedIdsRef.current = new Set();
     eraserGestureRef.current = {
       pendingUntilDrag: requireMovement
     };
-    setEraserPath([point]);
+    scheduleEraserPreviewRender();
 
     if (!requireMovement) {
       eraseAtPoint(point);
@@ -1360,7 +1917,7 @@ export function PdfPageView({
 
     const nextPath = appendPdfPoints(currentPath, points);
     eraserPathRef.current = nextPath;
-    setEraserPath(nextPath);
+    scheduleEraserPreviewRender();
 
     const gesture = eraserGestureRef.current;
     if (!gesture) {
@@ -1382,10 +1939,19 @@ export function PdfPageView({
   }
 
   function endEraserGesture() {
+    schedulePendingEraseCommit();
     eraserPathRef.current = null;
     eraserGestureRef.current = null;
+    eraserAnnotationIndexRef.current = null;
     eraserScopeRef.current = 'all';
-    setEraserPath(null);
+    eraserRemainingPathsRef.current = new Map();
+    eraserDeletedIdsRef.current = new Set();
+    const frame = eraserPreviewFrameRef.current;
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+      eraserPreviewFrameRef.current = null;
+    }
+    clearDisplayCanvas(eraserCanvasRef.current);
   }
 
   function handleMouseUp() {
@@ -1446,10 +2012,6 @@ export function PdfPageView({
         : [],
     [draftTextHighlight]
   );
-  const previewDraftPath = useMemo(
-    () => (draftPath ? normalizeDraftInkPath(draftPath, viewport) : null),
-    [draftPath, viewport]
-  );
   function copySelectedHighlightText() {
     const text = getTextForHighlights(
       selectedPageAnnotations,
@@ -1462,6 +2024,149 @@ export function PdfPageView({
     }
 
     void navigator.clipboard.writeText(text).catch(console.error);
+  }
+
+  function createHighlightFromTextSelection(
+    event: React.MouseEvent<HTMLButtonElement>
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!textSelectionHighlightAction) {
+      return;
+    }
+
+    onEnsureAnnotationsVisible();
+    onAddAnnotation({
+      id: crypto.randomUUID(),
+      kind: 'textHighlight',
+      pageIndex,
+      rects: textSelectionHighlightAction.rects,
+      quadPoints: textSelectionHighlightAction.quadPoints,
+      color: toolSettings.highlightColor,
+      opacity: toolSettings.highlightOpacity,
+      contents: textSelectionHighlightAction.contents
+    });
+    window.getSelection()?.removeAllRanges();
+    setTextSelectionHighlightAction(null);
+  }
+
+  function beginDraftInkPath(
+    kind: 'draw' | 'freehandHighlight',
+    point: PdfPoint
+  ) {
+    draftInkPathRef.current = { kind, path: [point] };
+    scheduleDraftInkRender();
+  }
+
+  function appendDraftInkPath(points: PdfPoint[]) {
+    const draft = draftInkPathRef.current;
+    if (!draft || points.length === 0) {
+      return draft?.path ?? [];
+    }
+
+    draft.path = appendDraftInkPoints(draft.path, points, viewport);
+    scheduleDraftInkRender();
+    return draft.path;
+  }
+
+  function endDraftInkPath() {
+    draftInkPathRef.current = null;
+    const frame = draftInkFrameRef.current;
+    if (frame !== null) {
+      window.cancelAnimationFrame(frame);
+      draftInkFrameRef.current = null;
+    }
+    clearDraftInkCanvases();
+  }
+
+  function clearDraftInkCanvases() {
+    clearDisplayCanvas(draftInkCanvasRef.current);
+    clearDisplayCanvas(draftHighlightInkCanvasRef.current);
+  }
+
+  function scheduleEraserPreviewRender() {
+    if (eraserPreviewFrameRef.current !== null) {
+      return;
+    }
+
+    eraserPreviewFrameRef.current = window.requestAnimationFrame(() => {
+      eraserPreviewFrameRef.current = null;
+      renderEraserPreviewPath();
+    });
+  }
+
+  function renderEraserPreviewPath() {
+    const path = eraserPathRef.current;
+    if (!path) {
+      clearDisplayCanvas(eraserCanvasRef.current);
+      return;
+    }
+
+    renderPdfPathCanvas({
+      canvas: eraserCanvasRef.current,
+      color: SELECTION_ACCENT,
+      displaySize,
+      opacity: 0.35,
+      path,
+      viewport,
+      width: toolSettings.eraserWidth
+    });
+  }
+
+  function scheduleDraftInkRender() {
+    if (draftInkFrameRef.current !== null) {
+      return;
+    }
+
+    draftInkFrameRef.current = window.requestAnimationFrame(() => {
+      draftInkFrameRef.current = null;
+      renderDraftInkPath();
+    });
+  }
+
+  function renderDraftInkPath() {
+    clearDraftInkCanvases();
+    const draft = draftInkPathRef.current;
+    if (!draft) {
+      return;
+    }
+
+    const previewPath = draft.path;
+    const annotation: PdfAnnotation =
+      draft.kind === 'draw'
+        ? {
+            id: 'draft-ink',
+            kind: 'draw',
+            pageIndex,
+            paths: [previewPath],
+            color: toolSettings.drawColor,
+            opacity: toolSettings.drawOpacity,
+            width: toolSettings.drawWidth,
+            contents: ''
+          }
+        : {
+            id: 'draft-highlight',
+            kind: 'freehandHighlight',
+            pageIndex,
+            paths: [previewPath],
+            color: toolSettings.highlightColor,
+            opacity: toolSettings.highlightOpacity,
+            width: toolSettings.highlightWidth,
+            contents: ''
+          };
+
+    renderInkCanvasLayer({
+      annotations: [annotation],
+      canvas:
+        draft.kind === 'draw'
+          ? draftInkCanvasRef.current
+          : draftHighlightInkCanvasRef.current,
+      displaySize,
+      kind: draft.kind,
+      scale,
+      viewport
+    });
   }
 
   return (
@@ -1504,10 +2209,30 @@ export function PdfPageView({
             ref={annotationLayerRef}
             style={{ pointerEvents: 'none' }}
           />
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-highlight-canvas-layer pdfa-fill"
+            ref={highlightInkCanvasRef}
+          />
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-fill"
+            ref={inkCanvasRef}
+          />
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-highlight-canvas-layer pdfa-fill"
+            ref={draftHighlightInkCanvasRef}
+          />
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-fill"
+            ref={draftInkCanvasRef}
+          />
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-fill"
+            ref={eraserCanvasRef}
+          />
           {shouldMountInteractionOverlay ? (
             <svg
               className="pdfa-fill"
-              height={viewport.height}
+              height={displaySize.height}
               style={{
                 pointerEvents:
                   overlayCapturesPointer ||
@@ -1516,12 +2241,27 @@ export function PdfPageView({
                     : 'none'
               }}
               viewBox={`0 0 ${viewport.width} ${viewport.height}`}
-              width={viewport.width}
+              width={displaySize.width}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
             >
-            {showSynchronizedAnnotations ? annotations.map((annotation) => (
+            {draftTextHighlightRects.map((rect, index) => {
+              const bounds = pdfRectToViewportRect(rect, viewport);
+              return (
+                <rect
+                  fill={rgbToCss(toolSettings.highlightColor)}
+                  height={bounds.height}
+                  key={`draft-text-highlight-${index}`}
+                  opacity={toolSettings.highlightOpacity}
+                  style={TEXT_HIGHLIGHT_STYLE}
+                  width={bounds.width}
+                  x={bounds.x}
+                  y={bounds.y}
+                />
+              );
+            })}
+            {showSynchronizedAnnotations ? vectorDisplayAnnotations.map((annotation) => (
               <AnnotationShape
                 annotation={annotation}
                 focused={focusedAnnotationId === annotation.id}
@@ -1540,6 +2280,16 @@ export function PdfPageView({
                             geometry.textRects
                           )
                         : null,
+                    annotationId: annotation.id,
+                    handle,
+                    pointerId: event.pointerId
+                  });
+                }}
+                onBeginFreeTextResizeHandleDrag={(event, handle) => {
+                  event.stopPropagation();
+                  onBeginAnnotationEdit({ finishOnPointerUp: true });
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setFreeTextResizeHandle({
                     annotationId: annotation.id,
                     handle,
                     pointerId: event.pointerId
@@ -1598,55 +2348,25 @@ export function PdfPageView({
                 viewport={viewport}
               />
             ) : null}
-            {previewDraftPath ? (
-              <PathShape
-                color={
-                  tool === 'draw'
-                    ? rgbToCss(toolSettings.drawColor)
-                    : rgbToCss(toolSettings.highlightColor)
-                }
-                opacity={
-                  tool === 'draw'
-                    ? toolSettings.drawOpacity
-                    : toolSettings.highlightOpacity
-                }
-                points={previewDraftPath}
-                viewport={viewport}
-                width={
-                  (tool === 'draw'
-                    ? toolSettings.drawWidth
-                    : toolSettings.highlightWidth) * scale
-                }
-              />
-            ) : null}
-            {draftTextHighlightRects.map((rect, index) => {
-              const bounds = pdfRectToViewportRect(rect, viewport);
-              return (
-                <rect
-                  fill={rgbToCss(toolSettings.highlightColor)}
-                  height={bounds.height}
-                  key={`draft-text-highlight-${index}`}
-                  opacity={toolSettings.highlightOpacity}
-                  style={TEXT_HIGHLIGHT_STYLE}
-                  width={bounds.width}
-                  x={bounds.x}
-                  y={bounds.y}
-                />
-              );
-            })}
-            {eraserPath ? (
-              <PathShape
-                color={SELECTION_ACCENT}
-                opacity={0.35}
-                points={eraserPath}
-                viewport={viewport}
-                width={toolSettings.eraserWidth}
-              />
-            ) : null}
             {lassoPath ? (
               <LassoShape points={lassoPath} viewport={viewport} />
             ) : null}
             </svg>
+          ) : null}
+          {!readOnly && textSelectionHighlightAction ? (
+            <button
+              className="text-selection-highlight-button"
+              onClick={createHighlightFromTextSelection}
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                left: textSelectionHighlightAction.x,
+                top: textSelectionHighlightAction.y
+              }}
+              title="Highlight selection"
+              type="button"
+            >
+              <Highlighter size={15} />
+            </button>
           ) : null}
         </div>
       </div>
@@ -1658,6 +2378,7 @@ function AnnotationShape({
   annotation,
   focused,
   onBeginEdit,
+  onBeginFreeTextResizeHandleDrag,
   onBeginHighlightHandleDrag,
   onBeginMoveDrag,
   onFocusEnd,
@@ -1674,6 +2395,10 @@ function AnnotationShape({
   annotation: PdfAnnotation;
   focused: boolean;
   onBeginEdit: () => void;
+  onBeginFreeTextResizeHandleDrag: (
+    event: React.PointerEvent<SVGCircleElement>,
+    handle: 'left' | 'right'
+  ) => void;
   onBeginHighlightHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
     handle: 'start' | 'end'
@@ -1826,6 +2551,11 @@ function AnnotationShape({
                     color={rgbToCss(annotation.color)}
                     opacity={annotation.opacity}
                     points={path}
+                    style={
+                      annotation.kind === 'freehandHighlight'
+                        ? TEXT_HIGHLIGHT_STYLE
+                        : undefined
+                    }
                     viewport={viewport}
                     width={annotation.width * scale}
                   />
@@ -1887,6 +2617,13 @@ function AnnotationShape({
               </div>
             )}
           </foreignObject>
+          {selected ? (
+            <FreeTextWidthHandles
+              annotation={annotation}
+              onBeginDrag={onBeginFreeTextResizeHandleDrag}
+              viewport={viewport}
+            />
+          ) : null}
         </g>
       );
     }
@@ -1985,6 +2722,47 @@ function TextHighlightHandles({
   );
 }
 
+function FreeTextWidthHandles({
+  annotation,
+  onBeginDrag,
+  viewport
+}: {
+  annotation: Extract<PdfAnnotation, { kind: 'freeText' }>;
+  onBeginDrag: (
+    event: React.PointerEvent<SVGCircleElement>,
+    handle: 'left' | 'right'
+  ) => void;
+  viewport: PageViewport;
+}) {
+  const bounds = pdfRectToViewportRect(annotation.rect, viewport);
+  const centerY = bounds.y + bounds.height / 2;
+
+  return (
+    <g style={{ pointerEvents: 'auto' }}>
+      <circle
+        className="free-text-width-handle"
+        cx={bounds.x}
+        cy={centerY}
+        fill={SELECTION_ACCENT}
+        onPointerDown={(event) => onBeginDrag(event, 'left')}
+        r="5"
+        stroke="white"
+        strokeWidth="2"
+      />
+      <circle
+        className="free-text-width-handle"
+        cx={bounds.x + bounds.width}
+        cy={centerY}
+        fill={SELECTION_ACCENT}
+        onPointerDown={(event) => onBeginDrag(event, 'right')}
+        r="5"
+        stroke="white"
+        strokeWidth="2"
+      />
+    </g>
+  );
+}
+
 function SelectionToolbar({
   annotations,
   onClose,
@@ -2030,15 +2808,19 @@ function SelectionToolbar({
     Math.max(0, rowHeights.length - 1) * 8;
   const [measuredToolbarHeight, setMeasuredToolbarHeight] =
     useState(toolbarHeight);
+  const [measuredToolbarWidth, setMeasuredToolbarWidth] = useState(260);
   const activeToolbarHeight = measuredToolbarHeight || toolbarHeight;
-  const toolbarWidth = 216;
+  const activeToolbarWidth = Math.min(
+    Math.max(120, visibleBounds.right - visibleBounds.left),
+    measuredToolbarWidth || 260
+  );
   const minToolbarX = visibleBounds.left;
   const maxToolbarX = Math.max(
     minToolbarX,
-    visibleBounds.right - toolbarWidth
+    visibleBounds.right - activeToolbarWidth
   );
   const toolbarX = clamp(
-    bounds.x + bounds.width / 2 - toolbarWidth / 2,
+    bounds.x + bounds.width / 2 - activeToolbarWidth / 2,
     minToolbarX,
     maxToolbarX
   );
@@ -2063,14 +2845,14 @@ function SelectionToolbar({
       return;
     }
 
-    const updateHeight = () => {
-      setMeasuredToolbarHeight(
-        Math.ceil(toolbar.getBoundingClientRect().height)
-      );
+    const updateSize = () => {
+      const bounds = toolbar.getBoundingClientRect();
+      setMeasuredToolbarHeight(Math.ceil(bounds.height));
+      setMeasuredToolbarWidth(Math.ceil(bounds.width));
     };
 
-    updateHeight();
-    const observer = new ResizeObserver(updateHeight);
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     observer.observe(toolbar);
     return () => observer.disconnect();
   }, []);
@@ -2079,7 +2861,7 @@ function SelectionToolbar({
     <foreignObject
       height={activeToolbarHeight}
       style={{ pointerEvents: 'auto' }}
-      width={toolbarWidth}
+      width={activeToolbarWidth}
       x={toolbarX}
       y={toolbarY}
       onPointerDown={(event) => event.stopPropagation()}
@@ -2088,7 +2870,6 @@ function SelectionToolbar({
       <div
         className="selection-toolbar"
         ref={toolbarRef}
-        style={{ width: toolbarWidth }}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
@@ -2187,6 +2968,533 @@ function SelectionToolbar({
   );
 }
 
+function annotationRenderRank(annotation: PdfAnnotation) {
+  switch (annotation.kind) {
+    case 'textHighlight':
+    case 'freehandHighlight':
+      return 0;
+    case 'draw':
+      return 1;
+    case 'freeText':
+      return 2;
+    case 'stickyNote':
+      return 3;
+  }
+}
+
+function sameInkCanvasRenderFrame(
+  previous: InkCanvasRenderState,
+  displaySize: PageDisplaySize,
+  scale: number,
+  viewport: PageViewport
+) {
+  return (
+    displaySizesMatch(previous.displaySize, displaySize) &&
+    previous.pixelRatio === inkCanvasPixelRatio(displaySize) &&
+    previous.scale === scale &&
+    previous.viewportWidth === viewport.width &&
+    previous.viewportHeight === viewport.height
+  );
+}
+
+function findSingleAddedInkAnnotation(
+  previousAnnotations: PdfAnnotation[],
+  nextAnnotations: PdfAnnotation[]
+) {
+  if (nextAnnotations.length !== previousAnnotations.length + 1) {
+    return null;
+  }
+
+  const previousById = new Map(
+    previousAnnotations.map((annotation) => [annotation.id, annotation])
+  );
+  let addedAnnotation: PdfAnnotation | null = null;
+
+  for (const annotation of nextAnnotations) {
+    const previousAnnotation = previousById.get(annotation.id);
+    if (!previousAnnotation) {
+      if (addedAnnotation) {
+        return null;
+      }
+      addedAnnotation = annotation;
+      continue;
+    }
+
+    if (previousAnnotation !== annotation) {
+      return null;
+    }
+  }
+
+  return addedAnnotation?.kind === 'draw' ||
+    addedAnnotation?.kind === 'freehandHighlight'
+    ? addedAnnotation
+    : null;
+}
+
+function buildEraserAnnotationIndex(
+  annotations: PdfAnnotation[],
+  scale: number,
+  eraserWidth: number
+): EraserAnnotationIndex {
+  const entries = annotations.map((annotation) => ({
+    annotation,
+    bounds: annotationBounds(annotation)
+  }));
+  const eraserRadius = Math.max(eraserWidth / 2 / scale, 1 / scale);
+  const maxInkPadding = entries.reduce((maxPadding, { annotation }) => {
+    if (annotation.kind !== 'draw' && annotation.kind !== 'freehandHighlight') {
+      return maxPadding;
+    }
+
+    return Math.max(maxPadding, annotation.width * 1.4);
+  }, 0);
+  const queryPadding = Math.max(eraserRadius, maxInkPadding, 6 / scale);
+  const cellSize = Math.max(32 / scale, queryPadding * 2, 16);
+  const grid = new Map<string, EraserAnnotationIndexEntry[]>();
+
+  for (const entry of entries) {
+    if (!isFiniteRect(entry.bounds)) {
+      continue;
+    }
+
+    forEachGridCell(entry.bounds, cellSize, queryPadding, (key) => {
+      const bucket = grid.get(key);
+      if (bucket) {
+        bucket.push(entry);
+      } else {
+        grid.set(key, [entry]);
+      }
+    });
+  }
+
+  return { cellSize, grid, queryPadding };
+}
+
+function queryEraserAnnotationIndex(
+  index: EraserAnnotationIndex,
+  point: PdfPoint
+) {
+  const candidates = new Map<string, EraserAnnotationIndexEntry>();
+  const queryBounds = {
+    x1: point.x,
+    y1: point.y,
+    x2: point.x,
+    y2: point.y
+  };
+
+  forEachGridCell(queryBounds, index.cellSize, index.queryPadding, (key) => {
+    for (const entry of index.grid.get(key) ?? []) {
+      candidates.set(entry.annotation.id, entry);
+    }
+  });
+
+  return candidates.values();
+}
+
+function forEachGridCell(
+  bounds: PdfRect,
+  cellSize: number,
+  padding: number,
+  callback: (key: string) => void
+) {
+  const minX = Math.floor((Math.min(bounds.x1, bounds.x2) - padding) / cellSize);
+  const maxX = Math.floor((Math.max(bounds.x1, bounds.x2) + padding) / cellSize);
+  const minY = Math.floor((Math.min(bounds.y1, bounds.y2) - padding) / cellSize);
+  const maxY = Math.floor((Math.max(bounds.y1, bounds.y2) + padding) / cellSize);
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      callback(`${x}:${y}`);
+    }
+  }
+}
+
+function isFiniteRect(rect: PdfRect) {
+  return (
+    Number.isFinite(rect.x1) &&
+    Number.isFinite(rect.y1) &&
+    Number.isFinite(rect.x2) &&
+    Number.isFinite(rect.y2)
+  );
+}
+
+function isCanvasBackedInkAnnotation(
+  annotation: PdfAnnotation,
+  selectedAnnotationIds: Set<string>
+) {
+  return (
+    !selectedAnnotationIds.has(annotation.id) &&
+    (annotation.kind === 'draw' || annotation.kind === 'freehandHighlight')
+  );
+}
+
+function clearDisplayCanvas(canvas: HTMLCanvasElement | null) {
+  if (!canvas) {
+    return;
+  }
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return;
+  }
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function renderInkCanvasLayer({
+  annotations,
+  canvas,
+  displaySize,
+  kind,
+  scale,
+  viewport
+}: {
+  annotations: PdfAnnotation[];
+  canvas: HTMLCanvasElement | null;
+  displaySize: PageDisplaySize;
+  kind: 'draw' | 'freehandHighlight';
+  scale: number;
+  viewport: PageViewport;
+}) {
+  const context = prepareInkCanvasContext({
+    canvas,
+    clear: true,
+    displaySize,
+    viewport
+  });
+  if (!context) {
+    return;
+  }
+
+  for (const annotation of annotations) {
+    if (annotation.kind === kind) {
+      drawInkAnnotationOnContext(context, annotation, scale, viewport);
+    }
+  }
+
+  context.globalAlpha = 1;
+}
+
+function drawInkCanvasAnnotation({
+  annotation,
+  canvas,
+  clear,
+  displaySize,
+  scale,
+  viewport
+}: {
+  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>;
+  canvas: HTMLCanvasElement | null;
+  clear: boolean;
+  displaySize: PageDisplaySize;
+  scale: number;
+  viewport: PageViewport;
+}) {
+  const context = prepareInkCanvasContext({
+    canvas,
+    clear,
+    displaySize,
+    viewport
+  });
+  if (!context) {
+    return;
+  }
+
+  drawInkAnnotationOnContext(context, annotation, scale, viewport);
+  context.globalAlpha = 1;
+}
+
+function renderPdfPathCanvas({
+  canvas,
+  color,
+  displaySize,
+  opacity,
+  path,
+  viewport,
+  width
+}: {
+  canvas: HTMLCanvasElement | null;
+  color: string;
+  displaySize: PageDisplaySize;
+  opacity: number;
+  path: PdfPoint[];
+  viewport: PageViewport;
+  width: number;
+}) {
+  const context = prepareInkCanvasContext({
+    canvas,
+    clear: true,
+    displaySize,
+    viewport
+  });
+  if (!context) {
+    return;
+  }
+
+  context.globalAlpha = clamp(opacity, 0, 1);
+  context.fillStyle = color;
+  context.strokeStyle = color;
+  context.lineWidth = Math.max(0.25, width);
+  drawInkCanvasPath(context, path, viewport, false, width);
+  context.globalAlpha = 1;
+}
+
+function eraseInkCanvasPaths({
+  annotation,
+  canvas,
+  displaySize,
+  paths,
+  scale,
+  viewport
+}: {
+  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>;
+  canvas: HTMLCanvasElement | null;
+  displaySize: PageDisplaySize;
+  paths: PdfPoint[][];
+  scale: number;
+  viewport: PageViewport;
+}) {
+  const context = prepareInkCanvasContext({
+    canvas,
+    clear: false,
+    displaySize,
+    viewport
+  });
+  if (!context) {
+    return;
+  }
+
+  const previousComposite = context.globalCompositeOperation;
+  context.globalCompositeOperation = 'destination-out';
+  context.globalAlpha = 1;
+  context.fillStyle = '#000';
+  context.strokeStyle = '#000';
+  context.lineWidth = Math.max(0.25, annotation.width * scale + 2);
+
+  for (const path of paths) {
+    drawInkCanvasPath(
+      context,
+      path,
+      viewport,
+      annotation.kind === 'freehandHighlight' && annotation.filled === true,
+      annotation.width * scale + 2
+    );
+  }
+
+  context.globalCompositeOperation = previousComposite;
+  context.globalAlpha = 1;
+}
+
+function prepareInkCanvasContext({
+  canvas,
+  clear,
+  displaySize,
+  viewport
+}: {
+  canvas: HTMLCanvasElement | null;
+  clear: boolean;
+  displaySize: PageDisplaySize;
+  viewport: PageViewport;
+}) {
+  if (!canvas) {
+    return null;
+  }
+
+  const context = canvas.getContext('2d');
+  if (!context) {
+    return null;
+  }
+
+  const pixelRatio = inkCanvasPixelRatio(displaySize);
+  const pixelWidth = Math.max(1, Math.ceil(displaySize.width * pixelRatio));
+  const pixelHeight = Math.max(1, Math.ceil(displaySize.height * pixelRatio));
+
+  if (canvas.width !== pixelWidth) {
+    canvas.width = pixelWidth;
+  }
+  if (canvas.height !== pixelHeight) {
+    canvas.height = pixelHeight;
+  }
+
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  if (clear) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+  context.imageSmoothingEnabled = true;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+  context.setTransform(
+    (displaySize.width / Math.max(1, viewport.width)) * pixelRatio,
+    0,
+    0,
+    (displaySize.height / Math.max(1, viewport.height)) * pixelRatio,
+    0,
+    0
+  );
+
+  return context;
+}
+
+function inkCanvasPixelRatio(displaySize: PageDisplaySize) {
+  return safeCanvasPixelRatio(
+    displaySize.width,
+    displaySize.height,
+    Math.min(window.devicePixelRatio || 1, 2)
+  );
+}
+
+function drawInkAnnotationOnContext(
+  context: CanvasRenderingContext2D,
+  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>,
+  scale: number,
+  viewport: PageViewport
+) {
+  context.globalAlpha = clamp(annotation.opacity, 0, 1);
+  context.fillStyle = rgbToCss(annotation.color);
+  context.strokeStyle = rgbToCss(annotation.color);
+  context.lineWidth = Math.max(0.25, annotation.width * scale);
+
+  for (const path of annotation.paths) {
+    drawInkCanvasPath(
+      context,
+      path,
+      viewport,
+      annotation.kind === 'freehandHighlight' && annotation.filled === true,
+      annotation.width * scale
+    );
+  }
+}
+
+function drawInkCanvasPath(
+  context: CanvasRenderingContext2D,
+  path: PdfPoint[],
+  viewport: PageViewport,
+  filled: boolean,
+  width: number
+) {
+  const commands = inkPathCommands(path);
+  if (commands.length === 0) {
+    return;
+  }
+
+  if (commands.length === 1) {
+    const [x, y] = viewport.convertToViewportPoint(
+      commands[0].point.x,
+      commands[0].point.y
+    );
+    context.beginPath();
+    context.arc(x, y, Math.max(0.25, width / 2), 0, Math.PI * 2);
+    context.fill();
+    return;
+  }
+
+  context.beginPath();
+  for (const command of commands) {
+    const [x, y] = viewport.convertToViewportPoint(
+      command.point.x,
+      command.point.y
+    );
+    if (command.type === 'move') {
+      context.moveTo(x, y);
+      continue;
+    }
+
+    if (command.type === 'line') {
+      context.lineTo(x, y);
+      continue;
+    }
+
+    const [control1X, control1Y] = viewport.convertToViewportPoint(
+      command.control1.x,
+      command.control1.y
+    );
+    const [control2X, control2Y] = viewport.convertToViewportPoint(
+      command.control2.x,
+      command.control2.y
+    );
+    context.bezierCurveTo(control1X, control1Y, control2X, control2Y, x, y);
+  }
+
+  if (filled) {
+    context.closePath();
+    context.fill();
+  } else {
+    context.stroke();
+  }
+}
+
+function getTextSelectionHighlightAction(
+  selection: Selection | null,
+  pageElement: HTMLDivElement | null,
+  textLayerElement: HTMLDivElement | null,
+  viewport: PageViewport
+): TextSelectionHighlightAction | null {
+  if (
+    !selection ||
+    selection.isCollapsed ||
+    selection.rangeCount === 0 ||
+    !pageElement ||
+    !textLayerElement ||
+    !selectionIntersectsElement(selection, textLayerElement)
+  ) {
+    return null;
+  }
+
+  const contents = selection.toString();
+  if (contents.trim().length === 0) {
+    return null;
+  }
+
+  const { rects, quadPoints } = getSelectedTextRects(
+    selection,
+    pageElement,
+    textLayerElement,
+    viewport
+  );
+  const firstRect = rects[0];
+  if (!firstRect) {
+    return null;
+  }
+
+  const pageBounds = pageElement.getBoundingClientRect();
+  const viewportBounds = pdfRectToViewportRect(firstRect, viewport);
+  const xScale = pageBounds.width / Math.max(1, viewport.width);
+  const yScale = pageBounds.height / Math.max(1, viewport.height);
+  const buttonSize = 30;
+  const pagePadding = 4;
+
+  return {
+    contents,
+    quadPoints,
+    rects,
+    x: clamp(
+      viewportBounds.x * xScale - buttonSize - pagePadding,
+      pagePadding,
+      Math.max(pagePadding, pageBounds.width - buttonSize - pagePadding)
+    ),
+    y: clamp(
+      viewportBounds.y * yScale - buttonSize - pagePadding,
+      pagePadding,
+      Math.max(pagePadding, pageBounds.height - buttonSize - pagePadding)
+    )
+  };
+}
+
+function selectionIntersectsElement(selection: Selection, element: Element) {
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    try {
+      if (selection.getRangeAt(index).intersectsNode(element)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 function useVisiblePageBounds(
   pageRef: RefObject<HTMLDivElement | null>,
   viewport: PageViewport
@@ -2250,6 +3558,8 @@ function visiblePageBounds(
 
   const margin = 4;
   const pageRect = pageElement.getBoundingClientRect();
+  const scaleX = viewport.width / Math.max(1, pageRect.width);
+  const scaleY = viewport.height / Math.max(1, pageRect.height);
   const maxRight = Math.max(margin, viewport.width - margin);
   const maxBottom = Math.max(margin, viewport.height - margin);
   const hostRect =
@@ -2259,10 +3569,26 @@ function visiblePageBounds(
       right: window.innerWidth,
       top: 0
     };
-  let left = clamp(hostRect.left - pageRect.left + margin, margin, maxRight);
-  let right = clamp(hostRect.right - pageRect.left - margin, margin, maxRight);
-  let top = clamp(hostRect.top - pageRect.top + margin, margin, maxBottom);
-  let bottom = clamp(hostRect.bottom - pageRect.top - margin, margin, maxBottom);
+  let left = clamp(
+    (hostRect.left - pageRect.left) * scaleX + margin,
+    margin,
+    maxRight
+  );
+  let right = clamp(
+    (hostRect.right - pageRect.left) * scaleX - margin,
+    margin,
+    maxRight
+  );
+  let top = clamp(
+    (hostRect.top - pageRect.top) * scaleY + margin,
+    margin,
+    maxBottom
+  );
+  let bottom = clamp(
+    (hostRect.bottom - pageRect.top) * scaleY - margin,
+    margin,
+    maxBottom
+  );
 
   if (right <= left) {
     left = margin;
@@ -2299,6 +3625,38 @@ function sameVisiblePageBounds(
   );
 }
 
+function viewportDisplaySize(viewport: PageViewport): PageDisplaySize {
+  return {
+    height: viewport.height,
+    width: viewport.width
+  };
+}
+
+function displaySizeFromElement(
+  element: HTMLElement | null
+): PageDisplaySize | null {
+  if (!element) {
+    return null;
+  }
+
+  const bounds = element.getBoundingClientRect();
+  if (bounds.width < 1 || bounds.height < 1) {
+    return null;
+  }
+
+  return {
+    height: bounds.height,
+    width: bounds.width
+  };
+}
+
+function displaySizesMatch(left: PageDisplaySize, right: PageDisplaySize) {
+  return (
+    Math.abs(left.height - right.height) < 0.5 &&
+    Math.abs(left.width - right.width) < 0.5
+  );
+}
+
 function eventToPdfPoint(
   event: React.PointerEvent<SVGSVGElement>,
   viewport: PageViewport
@@ -2313,8 +3671,12 @@ function eventToPdfPoints(
   const bounds = event.currentTarget.getBoundingClientRect();
   return pointerSamples(event).map((sample) =>
     viewportPointToPdfPoint(
-      sample.clientX - bounds.left,
-      sample.clientY - bounds.top,
+      ...clientPointToViewportTuple(
+        sample.clientX,
+        sample.clientY,
+        bounds,
+        viewport
+      ),
       viewport
     )
   );
@@ -2340,19 +3702,52 @@ function eventToPdfPointsFromElement(
 
   return pointerSamples(event).map((sample) =>
     viewportPointToPdfPoint(
-      sample.clientX - bounds.left,
-      sample.clientY - bounds.top,
+      ...clientPointToViewportTuple(
+        sample.clientX,
+        sample.clientY,
+        bounds,
+        viewport
+      ),
       viewport
     )
   );
 }
 
-function eventToViewportPoint(event: React.PointerEvent<SVGSVGElement>) {
+function eventToViewportPoint(
+  event: React.PointerEvent<SVGSVGElement>,
+  viewport: PageViewport
+) {
   const bounds = event.currentTarget.getBoundingClientRect();
   const sample = pointerSamples(event).at(-1) ?? event.nativeEvent;
+  return clientPointToViewportPoint(
+    sample.clientX,
+    sample.clientY,
+    bounds,
+    viewport
+  );
+}
+
+function clientPointToViewportTuple(
+  clientX: number,
+  clientY: number,
+  bounds: DOMRect,
+  viewport: PageViewport
+): [number, number] {
+  const point = clientPointToViewportPoint(clientX, clientY, bounds, viewport);
+  return [point.x, point.y];
+}
+
+function clientPointToViewportPoint(
+  clientX: number,
+  clientY: number,
+  bounds: DOMRect,
+  viewport: PageViewport
+) {
+  const scaleX = viewport.width / Math.max(1, bounds.width);
+  const scaleY = viewport.height / Math.max(1, bounds.height);
   return {
-    x: sample.clientX - bounds.left,
-    y: sample.clientY - bounds.top
+    x: clamp((clientX - bounds.left) * scaleX, 0, viewport.width),
+    y: clamp((clientY - bounds.top) * scaleY, 0, viewport.height)
   };
 }
 
@@ -2409,6 +3804,51 @@ function nearestTextHitRect(
   }
 
   return best;
+}
+
+function resizeFreeTextWidth(
+  annotation: Extract<PdfAnnotation, { kind: 'freeText' }>,
+  point: PdfPoint,
+  handle: 'left' | 'right'
+) {
+  const left = Math.min(annotation.rect.x1, annotation.rect.x2);
+  const right = Math.max(annotation.rect.x1, annotation.rect.x2);
+  const top = Math.max(annotation.rect.y1, annotation.rect.y2);
+  const bottom = Math.min(annotation.rect.y1, annotation.rect.y2);
+
+  if (handle === 'left') {
+    const nextLeft = clamp(
+      point.x,
+      right - FREE_TEXT_MAX_WIDTH,
+      right - FREE_TEXT_MIN_WIDTH
+    );
+    return {
+      ...annotation,
+      layoutWidth: right - nextLeft,
+      rect: {
+        x1: nextLeft,
+        y1: bottom,
+        x2: right,
+        y2: top
+      }
+    };
+  }
+
+  const nextRight = clamp(
+    point.x,
+    left + FREE_TEXT_MIN_WIDTH,
+    left + FREE_TEXT_MAX_WIDTH
+  );
+  return {
+    ...annotation,
+    layoutWidth: nextRight - left,
+    rect: {
+      x1: left,
+      y1: bottom,
+      x2: nextRight,
+      y2: top
+    }
+  };
 }
 
 function oppositeHighlightHandleAnchor(
@@ -2974,23 +4414,36 @@ const INK_DOT_MAX_LENGTH_MM = 0.35;
 const FREEHAND_HIGHLIGHT_MIN_LENGTH_MM = 1;
 const TYPE_ERASER_MIN_DISTANCE_PX = 5;
 
-function appendDraftInkPoint(
-  path: PdfPoint[],
-  point: PdfPoint,
-  viewport: PageViewport
-) {
-  return appendInkPoint(path, point, inkCaptureSpacing(viewport));
-}
-
 function appendDraftInkPoints(
   path: PdfPoint[],
   points: PdfPoint[],
   viewport: PageViewport
 ) {
-  return points.reduce(
-    (currentPath, point) => appendDraftInkPoint(currentPath, point, viewport),
-    path
-  );
+  const minDistance = inkCaptureSpacing(viewport);
+  for (const point of points) {
+    appendMutableInkPoint(path, point, minDistance);
+  }
+  return path;
+}
+
+function appendMutableInkPoint(
+  path: PdfPoint[],
+  point: PdfPoint,
+  minDistance: number
+) {
+  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+    return;
+  }
+
+  const previous = path[path.length - 1];
+  if (
+    previous &&
+    Math.hypot(point.x - previous.x, point.y - previous.y) < minDistance
+  ) {
+    return;
+  }
+
+  path.push(point);
 }
 
 function appendPdfPoints(path: PdfPoint[], points: PdfPoint[]) {
@@ -2998,6 +4451,33 @@ function appendPdfPoints(path: PdfPoint[], points: PdfPoint[]) {
     (currentPath, point) =>
       appendInkPoint(currentPath, point, Number.EPSILON),
     path
+  );
+}
+
+function cachedPathBounds(
+  path: PdfPoint[],
+  cache: WeakMap<PdfPoint[], PdfRect>
+) {
+  const cached = cache.get(path);
+  if (cached) {
+    return cached;
+  }
+
+  const bounds = boundsForPoints(path);
+  cache.set(path, bounds);
+  return bounds;
+}
+
+function expandedRectContainsPoint(
+  rect: PdfRect,
+  point: PdfPoint,
+  padding: number
+) {
+  return (
+    point.x >= Math.min(rect.x1, rect.x2) - padding &&
+    point.x <= Math.max(rect.x1, rect.x2) + padding &&
+    point.y >= Math.min(rect.y1, rect.y2) - padding &&
+    point.y <= Math.max(rect.y1, rect.y2) + padding
   );
 }
 

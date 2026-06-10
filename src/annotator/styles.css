@@ -26,7 +26,12 @@
 
 .pdf-annotator--fullscreen { height: 100vh; }
 .pdfa-hidden-input { display: none; }
-.pdfa-fill { inset: 0; position: absolute; }
+.pdfa-fill {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
 
 .ui-frame,
 .ui-panel {
@@ -113,6 +118,7 @@
   background: white;
   box-shadow: 0 10px 15px -3px rgb(15 23 42 / 0.15);
   margin: 0 auto 1rem;
+  outline: none;
   width: fit-content;
 }
 
@@ -635,6 +641,40 @@
   opacity: 0.86;
 }
 
+.page-menu-separator {
+  background: rgb(23 28 28 / 0.1);
+  height: 1px;
+  margin: 0.125rem 0.25rem;
+}
+
+.page-menu-insert-icon {
+  display: grid;
+  height: 0.875rem;
+  place-items: center;
+  position: relative;
+  width: 0.875rem;
+}
+
+.page-menu-insert-icon > svg {
+  grid-area: 1 / 1;
+}
+
+.page-menu-insert-lines {
+  display: grid;
+  gap: 0.125rem;
+  grid-area: 1 / 1;
+  margin-left: -0.25rem;
+  margin-top: 0.125rem;
+  pointer-events: none;
+  width: 0.375rem;
+}
+
+.page-menu-insert-lines > span {
+  background: currentColor;
+  border-radius: 999px;
+  height: 1px;
+}
+
 .thumbnail-canvas,
 .thumbnail-annotations {
   height: 100%;
@@ -649,6 +689,7 @@
   font-size: 0.875rem;
   gap: 0.5rem;
   min-width: 12rem;
+  width: max-content;
 }
 
 .settings-field {
@@ -663,7 +704,8 @@
   align-items: center;
   display: grid;
   gap: 0.375rem;
-  grid-template-columns: repeat(7, 1.375rem);
+  grid-template-columns: repeat(8, 1.375rem);
+  width: max-content;
 }
 
 .color-swatch,
@@ -712,6 +754,35 @@
   opacity: 0;
   position: absolute;
   width: 100%;
+}
+
+.text-selection-highlight-button {
+  align-items: center;
+  background: var(--pdfa-ui);
+  border: 1px solid rgb(23 28 28 / 0.14);
+  border-radius: 999px;
+  box-shadow: var(--pdfa-menu-shadow);
+  box-sizing: border-box;
+  color: var(--pdfa-ink);
+  cursor: pointer;
+  display: grid;
+  height: 1.875rem;
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  width: 1.875rem;
+  z-index: 12;
+}
+
+.text-selection-highlight-button:hover,
+.text-selection-highlight-button:focus-visible {
+  background: var(--pdfa-bg);
+  outline: none;
+}
+
+.text-selection-highlight-button:focus-visible {
+  box-shadow: var(--pdfa-focus-ring);
 }
 
 .number-setting {
@@ -778,7 +849,10 @@
   opacity: 0.5;
 }
 
-.highlight-handle { cursor: ew-resize; }
+.highlight-handle,
+.free-text-width-handle {
+  cursor: ew-resize;
+}
 
 .selection-toolbar {
   background: var(--pdfa-ui);
@@ -787,6 +861,7 @@
   box-shadow: var(--pdfa-menu-shadow);
   box-sizing: border-box;
   padding: 0.625rem;
+  width: max-content;
 }
 
 .selection-toolbar-actions {
@@ -863,6 +938,8 @@
 
 .pdf-page .textLayer { pointer-events: auto; }
 .pdf-page .pdfa-annotation-appearance-layer { pointer-events: none; }
+.pdf-page .pdfa-ink-canvas-layer { pointer-events: none; }
+.pdf-page .pdfa-highlight-canvas-layer { mix-blend-mode: multiply; }
 .pdf-page .annotationLayer { pointer-events: none; }
 
 .pdf-page .annotationLayer .linkAnnotation,
@@ -890,18 +967,9 @@
 .pdf-page .pdfViewer .page {
   background: transparent;
   border: 0;
-  height: 100% !important;
   margin: 0;
+  outline: none;
   overflow: hidden;
-  width: 100% !important;
-}
-
-.pdf-page .pdfViewer .canvasWrapper,
-.pdf-page .pdfViewer .canvasWrapper canvas {
-  height: 100%;
-  inset: 0;
-  position: absolute;
-  width: 100%;
 }
 
 .pdf-page .pdfViewer .canvasWrapper { overflow: hidden; }
@@ -910,12 +978,16 @@
   margin: 0;
 }
 
+.pdf-page .pdfViewer .canvasWrapper .selection {
+  background: var(--pdfa-selection-bg);
+}
+
 .pdf-page .textLayer::selection {
   background: transparent;
 }
 
 .pdf-page .textLayer ::selection {
-  background: var(--pdfa-selection-bg) !important;
+  background: transparent !important;
 }
 
 .pdf-page .textLayer br::selection,
@@ -929,7 +1001,7 @@
 }
 
 .pdf-page .textLayer ::-moz-selection {
-  background: var(--pdfa-selection-bg) !important;
+  background: transparent !important;
 }
 
 .pdf-page .textLayer br::-moz-selection,

@@ -21,7 +21,11 @@ export function getTextLayerRects(
     return [];
   }
 
-  const pageBounds = pageElement.getBoundingClientRect();
+  const pageBounds = elementBoundsToViewportTransform(
+    textLayerElement,
+    pageElement,
+    viewport
+  );
   const textRects: TextLayerRect[] = [];
 
   for (const span of Array.from(textLayerElement.querySelectorAll('span'))) {
@@ -83,13 +87,13 @@ function appendTextLayerRect(
   textRects: TextLayerRect[],
   text: string,
   clientRect: DOMRect,
-  pageBounds: DOMRect,
+  pageBounds: ViewportBoundsTransform,
   viewport: PageViewport
 ) {
-  const left = clamp(clientRect.left - pageBounds.left, 0, viewport.width);
-  const right = clamp(clientRect.right - pageBounds.left, 0, viewport.width);
-  const top = clamp(clientRect.top - pageBounds.top, 0, viewport.height);
-  const bottom = clamp(clientRect.bottom - pageBounds.top, 0, viewport.height);
+  const left = clientXToViewportX(clientRect.left, pageBounds, viewport);
+  const right = clientXToViewportX(clientRect.right, pageBounds, viewport);
+  const top = clientYToViewportY(clientRect.top, pageBounds, viewport);
+  const bottom = clientYToViewportY(clientRect.bottom, pageBounds, viewport);
 
   if (right - left < 1 || bottom - top < 1 || !text) {
     return;
@@ -258,7 +262,11 @@ export function getSelectedTextRects(
   textLayerElement: HTMLElement | null,
   viewport: PageViewport
 ) {
-  const pageBounds = pageElement.getBoundingClientRect();
+  const pageBounds = elementBoundsToViewportTransform(
+    textLayerElement,
+    pageElement,
+    viewport
+  );
   const selectedRanges = Array.from({ length: selection.rangeCount }, (_, i) =>
     selection.getRangeAt(i)
   );
@@ -281,14 +289,10 @@ export function getSelectedTextRects(
   const quadPoints: number[][] = [];
 
   for (const clientRect of dedupeClientRects(sourceRects)) {
-    const left = clamp(clientRect.left - pageBounds.left, 0, viewport.width);
-    const right = clamp(clientRect.right - pageBounds.left, 0, viewport.width);
-    const top = clamp(clientRect.top - pageBounds.top, 0, viewport.height);
-    const bottom = clamp(
-      clientRect.bottom - pageBounds.top,
-      0,
-      viewport.height
-    );
+    const left = clientXToViewportX(clientRect.left, pageBounds, viewport);
+    const right = clientXToViewportX(clientRect.right, pageBounds, viewport);
+    const top = clientYToViewportY(clientRect.top, pageBounds, viewport);
+    const bottom = clientYToViewportY(clientRect.bottom, pageBounds, viewport);
 
     if (right - left < 2 || bottom - top < 2) {
       continue;
@@ -318,6 +322,55 @@ export function getSelectedTextRects(
   }
 
   return { rects, quadPoints };
+}
+
+type ViewportBoundsTransform = {
+  left: number;
+  scaleX: number;
+  scaleY: number;
+  top: number;
+};
+
+function boundsToViewportTransform(
+  bounds: DOMRect,
+  viewport: PageViewport
+): ViewportBoundsTransform {
+  return {
+    left: bounds.left,
+    scaleX: viewport.width / Math.max(1, bounds.width),
+    scaleY: viewport.height / Math.max(1, bounds.height),
+    top: bounds.top
+  };
+}
+
+function elementBoundsToViewportTransform(
+  primaryElement: HTMLElement | null,
+  fallbackElement: HTMLElement,
+  viewport: PageViewport
+) {
+  const primaryBounds = primaryElement?.getBoundingClientRect();
+  return boundsToViewportTransform(
+    primaryBounds && primaryBounds.width >= 1 && primaryBounds.height >= 1
+      ? primaryBounds
+      : fallbackElement.getBoundingClientRect(),
+    viewport
+  );
+}
+
+function clientXToViewportX(
+  clientX: number,
+  bounds: ViewportBoundsTransform,
+  viewport: PageViewport
+) {
+  return clamp((clientX - bounds.left) * bounds.scaleX, 0, viewport.width);
+}
+
+function clientYToViewportY(
+  clientY: number,
+  bounds: ViewportBoundsTransform,
+  viewport: PageViewport
+) {
+  return clamp((clientY - bounds.top) * bounds.scaleY, 0, viewport.height);
 }
 
 function rangeIntersectsNode(range: Range, node: Node) {

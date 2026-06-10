@@ -24,6 +24,7 @@ import {
   FolderOpen,
   Home,
   Layers,
+  Pencil,
   Plus,
   Printer,
   Save,
@@ -125,6 +126,11 @@ type CloseConfirmationState = TabbedPdfCloseDocumentsRequest & {
   requestId: number;
 };
 
+type RenameDialogState = {
+  documentId: string;
+  value: string;
+};
+
 export type TabbedPdfWorkspaceOptions = Pick<
   PdfWorkspaceProps,
   | 'confirmDiscardChanges'
@@ -193,6 +199,9 @@ export const TabbedPdfShell = forwardRef<
     useState<TabContextMenuState | null>(null);
   const [closeConfirmation, setCloseConfirmation] =
     useState<CloseConfirmationState | null>(null);
+  const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(
+    null
+  );
   const activeDocumentIdRef = useLatestRef(activeDocumentId);
   const closeConfirmationResolverRef = useRef<
     ((decision: CloseDocumentsDecision) => void) | null
@@ -316,16 +325,10 @@ export const TabbedPdfShell = forwardRef<
   }, [activeDocumentId, documents, onDocumentsChange]);
 
   useEffect(() => {
-    const activeDocument = documents.find(
-      (document) => document.id === activeDocumentId
-    );
-    const dirtyPrefix = documents.some((document) => document.hasUnsavedChanges)
-      ? '*'
-      : '';
-    document.title = activeDocument
-      ? `${dirtyPrefix}${activeDocument.title}`
-      : `${dirtyPrefix}PDF Annotator`;
-  }, [activeDocumentId, documents]);
+    document.title = documents.some((document) => document.hasUnsavedChanges)
+      ? '*PDF Annotator'
+      : 'PDF Annotator';
+  }, [documents]);
 
   useEffect(() => {
     if (
@@ -335,6 +338,15 @@ export const TabbedPdfShell = forwardRef<
       setTabContextMenu(null);
     }
   }, [documents, tabContextMenu]);
+
+  useEffect(() => {
+    if (
+      renameDialog &&
+      !documents.some((document) => document.id === renameDialog.documentId)
+    ) {
+      setRenameDialog(null);
+    }
+  }, [documents, renameDialog]);
 
   useEffect(() => {
     if (!tabContextMenu) {
@@ -841,6 +853,41 @@ export const TabbedPdfShell = forwardRef<
     }
   }
 
+  function openRenameDialog(documentId: string) {
+    const document = documentsRef.current.find((item) => item.id === documentId);
+    if (!document) {
+      return;
+    }
+
+    closeTabContextMenu();
+    setRenameDialog({
+      documentId,
+      value: filenameStem(document.title)
+    });
+  }
+
+  async function submitRenameDialog() {
+    if (!renameDialog) {
+      return;
+    }
+
+    const workspace = workspaceRefs.current.get(renameDialog.documentId);
+    if (!workspace) {
+      setRenameDialog(null);
+      return;
+    }
+
+    const nextName = pdfFileNameFromStem(renameDialog.value);
+    if (!nextName) {
+      return;
+    }
+
+    const saved = await workspace.saveAs(nextName);
+    if (saved) {
+      setRenameDialog(null);
+    }
+  }
+
   async function runWorkspaceCommand(
     documentId: string,
     command: 'downloadCopy' | 'print' | 'save' | 'saveAs'
@@ -857,11 +904,11 @@ export const TabbedPdfShell = forwardRef<
   async function createTemplateDocument(kind: PdfTemplateKind) {
     closeNewTabMenu();
     try {
-      const { bytes, name } = await createPdfTemplate(kind);
+      const { bytes } = await createPdfTemplate(kind);
       openGeneratedDocument({
         bytes,
         markDirty: true,
-        name
+        name: 'Untitled.pdf'
       });
     } catch (error) {
       console.error(error);
@@ -1294,16 +1341,20 @@ export const TabbedPdfShell = forwardRef<
                   title={document.title}
                   type="button"
                 >
-                  {document.hasUnsavedChanges ? '*' : ''}
                   <span className="tabbedapp-tab-title">{document.title}</span>
                 </button>
                 <button
                   aria-label={`Close ${document.title}`}
-                  className="tabbedapp-tab-close"
+                  className={`tabbedapp-tab-close ${
+                    document.hasUnsavedChanges
+                      ? 'tabbedapp-tab-close-dirty'
+                      : ''
+                  }`}
                   onClick={() => void closeDocument(document.id)}
                   type="button"
                 >
-                  <X size={14} />
+                  <span className="tabbedapp-tab-dirty-dot" />
+                  <X className="tabbedapp-tab-close-icon" size={14} />
                 </button>
               </div>
             </Fragment>
@@ -1396,6 +1447,15 @@ export const TabbedPdfShell = forwardRef<
           >
             <Copy size={15} />
             <span>Copy filename</span>
+          </button>
+          <button
+            disabled={!tabContextMenuWorkspaceAvailable}
+            onClick={() => openRenameDialog(tabContextMenuDocument.id)}
+            role="menuitem"
+            type="button"
+          >
+            <Pencil size={15} />
+            <span>Rename file...</span>
           </button>
           <button
             onClick={() =>
@@ -1507,6 +1567,49 @@ export const TabbedPdfShell = forwardRef<
             onDiscard={() => resolveCloseConfirmation('discard')}
             onSave={() => resolveCloseConfirmation('save')}
           />
+        </div>
+      ) : null}
+
+      {renameDialog ? (
+        <div
+          className="tabbedapp-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setRenameDialog(null);
+            }
+          }}
+        >
+          <form
+            className="tabbedapp-modal-surface tabbedapp-rename-dialog"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitRenameDialog();
+            }}
+          >
+            <h2>Rename file</h2>
+            <label>
+              <span>Filename</span>
+              <input
+                autoFocus
+                value={renameDialog.value}
+                onChange={(event) =>
+                  setRenameDialog((current) =>
+                    current
+                      ? { ...current, value: event.target.value }
+                      : current
+                  )
+                }
+              />
+            </label>
+            <div className="tabbedapp-close-dialog-actions">
+              <button type="button" onClick={() => setRenameDialog(null)}>
+                Cancel
+              </button>
+              <button className="tabbedapp-close-dialog-primary" type="submit">
+                Save
+              </button>
+            </div>
+          </form>
         </div>
       ) : null}
 
@@ -1714,6 +1817,16 @@ function filenameStem(title: string) {
   const filename = cleanWorkspaceTitle(title).split(/[\\/]/).pop() ?? title;
   const extensionStart = filename.lastIndexOf('.');
   return extensionStart > 0 ? filename.slice(0, extensionStart) : filename;
+}
+
+function pdfFileNameFromStem(stem: string) {
+  const cleaned = stem
+    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\.pdf$/i, '');
+
+  return cleaned ? `${cleaned}.pdf` : null;
 }
 
 function cornellNoteStem(stem: string) {

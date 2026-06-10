@@ -231,9 +231,15 @@ function pathsWhollyInsidePolygon(paths: PdfPoint[][], polygon: PdfPoint[]) {
 export function pathHitTest(path: PdfPoint[], point: PdfPoint, threshold: number) {
   return path.some((pathPoint, index) => {
     const next = path[index + 1];
-    return next
-      ? distanceToSegment(point, pathPoint, next) <= threshold
-      : Math.hypot(point.x - pathPoint.x, point.y - pathPoint.y) <= threshold;
+    if (!next) {
+      return Math.hypot(point.x - pathPoint.x, point.y - pathPoint.y) <= threshold;
+    }
+
+    if (!pointNearSegmentBounds(point, pathPoint, next, threshold)) {
+      return false;
+    }
+
+    return distanceToSegment(point, pathPoint, next) <= threshold;
   });
 }
 
@@ -397,6 +403,20 @@ function distanceToSegment(point: PdfPoint, start: PdfPoint, end: PdfPoint) {
     1
   );
   return Math.hypot(point.x - (start.x + t * dx), point.y - (start.y + t * dy));
+}
+
+function pointNearSegmentBounds(
+  point: PdfPoint,
+  start: PdfPoint,
+  end: PdfPoint,
+  threshold: number
+) {
+  return (
+    point.x >= Math.min(start.x, end.x) - threshold &&
+    point.x <= Math.max(start.x, end.x) + threshold &&
+    point.y >= Math.min(start.y, end.y) - threshold &&
+    point.y <= Math.max(start.y, end.y) + threshold
+  );
 }
 
 function midpoint(first: PdfPoint, second: PdfPoint): PdfPoint {

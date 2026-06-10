@@ -195,12 +195,14 @@ export function PathShape({
   color,
   opacity,
   points,
+  style,
   viewport,
   width
 }: {
   color: string;
   opacity: number;
   points: PdfPoint[];
+  style?: CSSProperties;
   viewport: PageViewport;
   width: number;
 }) {
@@ -216,6 +218,7 @@ export function PathShape({
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth={width}
+      style={style}
     />
   );
 }

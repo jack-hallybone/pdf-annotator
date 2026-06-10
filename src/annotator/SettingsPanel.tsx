@@ -7,6 +7,7 @@ export const inkColors = {
   blue: [0.26, 0.58, 0.83],
   green: [0.36, 0.7, 0.22],
   red: [0.9, 0.18, 0.16],
+  orange: [0.94, 0.51, 0.17],
   purple: [0.8, 0.25, 0.75],
   yellow: [1, 254 / 255, 78 / 255]
 } satisfies Record<string, RgbColor>;
@@ -16,6 +17,7 @@ export const annotationColorSwatches: RgbColor[] = [
   inkColors.blue,
   inkColors.green,
   inkColors.red,
+  inkColors.orange,
   inkColors.purple,
   inkColors.yellow
 ];

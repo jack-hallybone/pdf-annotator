@@ -4,6 +4,7 @@ import {
   type RefObject,
   forwardRef,
   useCallback,
+  useDeferredValue,
   useEffect,
   useImperativeHandle,
   useId,
@@ -30,6 +31,7 @@ import {
   remapPageSetAfterDelete,
   remapPageSetAfterInsert
 } from './annotationState';
+import { annotationBounds, moveAnnotation } from './annotationGeometry';
 import { DocumentSidebar } from './components/DocumentSidebar';
 import {
   FloatingDocumentControls,
@@ -40,11 +42,13 @@ import {
 import { PdfPageView } from './PdfPageView';
 import {
   addBlankPageAt,
+  addLinedPageAt,
   mergePdfAfterPage,
   removePage,
   rotatePageClockwise,
   writePdfAnnotations
 } from './pdfWriter';
+import { viewportPointToPdfPoint } from './pdfGeometry';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
 import { readPdfFile } from './pdfFile';
 import type {
@@ -65,8 +69,10 @@ import {
 import type {
   LoadedPage,
   PageRenderPriority,
+  PageViewport,
   PageSize,
   PdfAnnotation,
+  PdfPoint,
   Tool,
   ToolPresetMap,
   ToolSettings
@@ -165,7 +171,7 @@ export type PdfWorkspaceHandle = {
   print: () => Promise<void>;
   releaseRenderResources: () => Promise<void>;
   save: () => Promise<boolean>;
-  saveAs: () => Promise<boolean>;
+  saveAs: (suggestedName?: string) => Promise<boolean>;
   snapshot: () => PdfWorkspaceSession | null;
 };
 
@@ -326,13 +332,14 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     () => annotations.filter(hasAnnotationContent),
     [annotations]
   );
+  const deferredPersistedAnnotations = useDeferredValue(persistedAnnotations);
   const annotationsByPage = useMemo(
     () => groupAnnotationsByPage(annotations),
     [annotations]
   );
   const currentWorkSignature = useMemo(
-    () => createWorkSignature(pdfFingerprint, persistedAnnotations),
-    [persistedAnnotations, pdfFingerprint]
+    () => createWorkSignature(pdfFingerprint, deferredPersistedAnnotations),
+    [deferredPersistedAnnotations, pdfFingerprint]
   );
   const [cleanWorkSignature, setCleanWorkSignature] = useState('');
   const hasUnsavedChanges =
@@ -831,8 +838,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return;
     }
 
-    const availableWidth =
-      container.clientWidth - 32 - (sidebarOpen ? sidebarWidth + 24 : 0);
+    const availableWidth = container.clientWidth - 32;
     setZoom(Math.max(120, availableWidth) / page.width);
   }
 
@@ -1145,20 +1151,28 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
   function commitAnnotations(
     updater: (current: PdfAnnotation[]) => PdfAnnotation[],
-    options: { coalesce?: boolean; recordUndo?: boolean } = {}
+    options: {
+      assumeChanged?: boolean;
+      coalesce?: boolean;
+      recordUndo?: boolean;
+    } = {}
   ) {
     const current = annotationsRef.current;
     const next = updater(current);
-    const currentSignature = annotationHistorySignature(current);
-    const nextSignature = annotationHistorySignature(next);
-    if (currentSignature === nextSignature) {
-      return;
+    let currentSignature: string | null = null;
+    if (!options.assumeChanged) {
+      currentSignature = annotationHistorySignature(current);
+      const nextSignature = annotationHistorySignature(next);
+      if (currentSignature === nextSignature) {
+        return;
+      }
     }
 
     if (
       options.recordUndo === false &&
       pendingUndoSnapshotRef.current === null
     ) {
+      currentSignature ??= annotationHistorySignature(current);
       pendingUndoSnapshotRef.current = {
         annotations: current,
         signature: currentSignature
@@ -2483,7 +2497,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function handleAddBlankPage(pageIndex = activePageIndex, position: 'before' | 'after' = 'after') {
+  async function handleAddPage(
+    pageIndex = activePageIndex,
+    position: 'before' | 'after' = 'after',
+    kind: 'blank' | 'lined' = 'blank'
+  ) {
     if (readOnly || !pdfBytes) {
       return;
     }
@@ -2493,7 +2511,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setBusy(true);
     try {
       const insertIndex = position === 'before' ? pageIndex : pageIndex + 1;
-      const nextBytes = await addBlankPageAt(pdfBytes, insertIndex, pageIndex);
+      const nextBytes =
+        kind === 'lined'
+          ? await addLinedPageAt(pdfBytes, insertIndex, pageIndex)
+          : await addBlankPageAt(pdfBytes, insertIndex, pageIndex);
       managedAnnotationPagesRef.current = remapPageSetAfterInsert(
         managedAnnotationPagesRef.current,
         insertIndex
@@ -2617,7 +2638,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function handleSaveAs() {
+  async function handleSaveAs(suggestedName = fileName) {
     if (!pdfBytes) {
       return false;
     }
@@ -2626,7 +2647,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     try {
       const savedBytes = await currentPdfOutputBytes();
-      const saveAsResult = await savePdfAs(savedBytes);
+      const saveAsResult = await savePdfAs(savedBytes, suggestedName);
       if (saveAsResult === 'saved') {
         return true;
       }
@@ -2642,7 +2663,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function savePdfAs(bytes: Uint8Array) {
+  async function savePdfAs(bytes: Uint8Array, suggestedName = fileName) {
     const saveAsTarget = saveAsTargetRef.current;
     if (!saveAsTarget) {
       return 'unavailable' as const;
@@ -2650,7 +2671,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     let result;
     try {
-      result = await saveAsTarget.saveAs(bytes, safeDownloadName(fileName));
+      result = await saveAsTarget.saveAs(bytes, safeDownloadName(suggestedName));
     } catch (error) {
       console.error(error);
       return 'unavailable' as const;
@@ -2907,7 +2928,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
     commitAnnotations(
       (current) => [...current, normalizeAnnotationLayout(annotation)],
-      shouldKeepOpenForInitialText ? { recordUndo: false } : undefined
+      shouldKeepOpenForInitialText
+        ? { assumeChanged: true, recordUndo: false }
+        : { assumeChanged: true }
     );
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(
@@ -2992,6 +3015,104 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     if (pendingUndoSnapshotRef.current && !liveEditActiveRef.current) {
       finishAnnotationEdit();
     }
+  }
+
+  function eraseAnnotations({
+    deleteIds,
+    pathUpdates
+  }: {
+    deleteIds: string[];
+    pathUpdates: Array<{ annotationId: string; paths: PdfPoint[][] }>;
+  }) {
+    if (readOnly || (deleteIds.length === 0 && pathUpdates.length === 0)) {
+      return;
+    }
+
+    const deleteIdSet = new Set(deleteIds);
+    const pathUpdateMap = new Map(
+      pathUpdates.map((update) => [update.annotationId, update.paths])
+    );
+
+    for (const annotation of annotationsRef.current) {
+      if (deleteIdSet.has(annotation.id)) {
+        managedAnnotationPagesRef.current.add(annotation.pageIndex);
+        rememberRemovedAnnotationSource(annotation);
+      } else if (pathUpdateMap.has(annotation.id)) {
+        managedAnnotationPagesRef.current.add(annotation.pageIndex);
+      }
+    }
+
+    commitAnnotations(
+      (current) =>
+        current.flatMap((annotation) => {
+          if (deleteIdSet.has(annotation.id)) {
+            return [];
+          }
+
+          const paths = pathUpdateMap.get(annotation.id);
+          if (
+            paths &&
+            (annotation.kind === 'draw' ||
+              annotation.kind === 'freehandHighlight')
+          ) {
+            return [{ ...annotation, paths }];
+          }
+
+          return [annotation];
+        }),
+      { assumeChanged: true, recordUndo: false }
+    );
+    setSelectedAnnotationIds((current) =>
+      current.filter((id) => !deleteIdSet.has(id))
+    );
+    setFocusedAnnotationId((current) =>
+      current && deleteIdSet.has(current) ? null : current
+    );
+  }
+
+  function pruneOffPageAnnotations(annotationIds: string[]) {
+    if (readOnly || annotationIds.length === 0) {
+      return;
+    }
+
+    const candidateIds = new Set(annotationIds);
+    const removedIds = new Set<string>();
+
+    commitAnnotations(
+      (current) =>
+        current.filter((annotation) => {
+          if (!candidateIds.has(annotation.id)) {
+            return true;
+          }
+
+          const page = pagesRef.current[annotation.pageIndex];
+          if (!page) {
+            return true;
+          }
+
+          const pageBounds = pagePdfBounds(page.getViewport({ scale }));
+          if (annotationIntersectsPage(annotation, pageBounds)) {
+            return true;
+          }
+
+          removedIds.add(annotation.id);
+          managedAnnotationPagesRef.current.add(annotation.pageIndex);
+          rememberRemovedAnnotationSource(annotation);
+          return false;
+        }),
+      { recordUndo: false }
+    );
+
+    if (removedIds.size === 0) {
+      return;
+    }
+
+    setSelectedAnnotationIds((current) =>
+      current.filter((id) => !removedIds.has(id))
+    );
+    setFocusedAnnotationId((current) =>
+      current && removedIds.has(current) ? null : current
+    );
   }
 
   function handleSelectAnnotations(annotationIds: string[]) {
@@ -3114,6 +3235,109 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   function handleActivatePage(pageIndex: number) {
     activePageIndexRef.current = pageIndex;
     setActivePageIndex(pageIndex);
+  }
+
+  function pageIndexFromClientPoint(clientX: number, clientY: number) {
+    for (const element of document.elementsFromPoint(clientX, clientY)) {
+      const pageIndex = pageIndexFromElement(element);
+      if (pageIndex !== null) {
+        return pageIndex;
+      }
+    }
+
+    return null;
+  }
+
+  function pageVisualElementForIndex(pageIndex: number) {
+    return scrollContainerRef.current?.querySelector<HTMLElement>(
+      `[data-page-index="${pageIndex}"] .pdf-page`
+    ) ?? null;
+  }
+
+  function handleMoveAnnotationsToPage({
+    annotationIds,
+    clientX,
+    clientY,
+    sourcePageIndex,
+    sourcePoint
+  }: {
+    annotationIds: string[];
+    clientX: number;
+    clientY: number;
+    sourcePageIndex: number;
+    sourcePoint: PdfPoint;
+  }) {
+    if (readOnly || annotationIds.length === 0) {
+      return null;
+    }
+
+    const targetPageIndex = pageIndexFromClientPoint(clientX, clientY);
+    if (
+      targetPageIndex === null ||
+      targetPageIndex < 0 ||
+      targetPageIndex >= pagesRef.current.length
+    ) {
+      return null;
+    }
+
+    const targetPage = pagesRef.current[targetPageIndex];
+    const targetPageElement = pageVisualElementForIndex(targetPageIndex);
+    if (!targetPage || !targetPageElement) {
+      return null;
+    }
+
+    const targetBounds = targetPageElement.getBoundingClientRect();
+    const targetViewport = targetPage.getViewport({ scale });
+    const targetPoint = viewportPointToPdfPoint(
+      clamp(
+        ((clientX - targetBounds.left) * targetViewport.width) /
+          Math.max(1, targetBounds.width),
+        0,
+        targetViewport.width
+      ),
+      clamp(
+        ((clientY - targetBounds.top) * targetViewport.height) /
+          Math.max(1, targetBounds.height),
+        0,
+        targetViewport.height
+      ),
+      targetViewport
+    );
+    const delta = {
+      x: targetPoint.x - sourcePoint.x,
+      y: targetPoint.y - sourcePoint.y
+    };
+    const movedIds = new Set(annotationIds);
+    let moved = false;
+    const movedBetweenPages = targetPageIndex !== sourcePageIndex;
+
+    commitAnnotations(
+      (current) =>
+        current.map((annotation) => {
+          if (
+            !movedIds.has(annotation.id) ||
+            annotation.pageIndex !== sourcePageIndex
+          ) {
+            return annotation;
+          }
+
+          moved = true;
+          managedAnnotationPagesRef.current.add(sourcePageIndex);
+          managedAnnotationPagesRef.current.add(targetPageIndex);
+          return normalizeAnnotationLayout(
+            moveAnnotation({ ...annotation, pageIndex: targetPageIndex }, delta)
+          );
+        }),
+      { recordUndo: false }
+    );
+
+    if (moved && movedBetweenPages) {
+      handleActivatePage(targetPageIndex);
+    }
+
+    return moved
+      ? { pageIndex: targetPageIndex, point: targetPoint }
+      : null;
   }
 
   async function handlePdfDestination(destination: string | unknown[]) {
@@ -3254,7 +3478,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           activePageIndex={activePageIndex}
           annotationsByPage={annotationsByPage}
           busy={busy}
-          onAddPage={handleAddBlankPage}
+          onAddPage={handleAddPage}
           onClose={() => setSidebarOpen(false)}
           onDeletePage={handleDeletePage}
           onMergePdf={() => mergeFileInputRef.current?.click()}
@@ -3317,9 +3541,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
                     onDeleteAnnotations={deleteAnnotations}
                     focusedAnnotationId={focusedAnnotationId}
                     onFocusAnnotationConsumed={handleFocusAnnotationConsumed}
+                    onEraseAnnotations={eraseAnnotations}
                     onEnsureAnnotationsVisible={() => setShowAnnotations(true)}
                     onExternalLinkRequest={handleExternalLinkRequest}
                     onBeginAnnotationEdit={beginAnnotationEdit}
+                    onMoveAnnotationsToPage={handleMoveAnnotationsToPage}
                     onSelectAnnotations={handleSelectAnnotations}
                     onToolChange={handleToolChange}
                     onUpdateAnnotation={updateAnnotation}
@@ -3334,6 +3560,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
                     }
                     onNavigatePage={handlePdfPageNavigation}
                     onPageReady={handlePageReady}
+                    onPruneOffPageAnnotations={pruneOffPageAnnotations}
                     selectedAnnotationIds={selectedAnnotationIds}
                     showAnnotations={showAnnotations}
                     tool={tool}
@@ -4000,6 +4227,49 @@ function scheduleAfterVisiblePaint(callback: () => void) {
 
 function pageElementForIndex(container: HTMLElement, pageIndex: number) {
   return container.querySelector<HTMLElement>(`[data-page-index="${pageIndex}"]`);
+}
+
+function pageIndexFromElement(element: Element | null) {
+  const pageSlot = element?.closest<HTMLElement>('[data-page-index]');
+  if (!pageSlot) {
+    return null;
+  }
+
+  const pageIndex = Number(pageSlot.dataset.pageIndex);
+  return Number.isInteger(pageIndex) ? pageIndex : null;
+}
+
+function pagePdfBounds(viewport: PageViewport) {
+  const topLeft = viewportPointToPdfPoint(0, 0, viewport);
+  const bottomRight = viewportPointToPdfPoint(
+    viewport.width,
+    viewport.height,
+    viewport
+  );
+
+  return {
+    x1: Math.min(topLeft.x, bottomRight.x),
+    y1: Math.min(topLeft.y, bottomRight.y),
+    x2: Math.max(topLeft.x, bottomRight.x),
+    y2: Math.max(topLeft.y, bottomRight.y)
+  };
+}
+
+function annotationIntersectsPage(
+  annotation: PdfAnnotation,
+  pageBounds: ReturnType<typeof pagePdfBounds>
+) {
+  const bounds = annotationBounds(annotation);
+  return (
+    Number.isFinite(bounds.x1) &&
+    Number.isFinite(bounds.y1) &&
+    Number.isFinite(bounds.x2) &&
+    Number.isFinite(bounds.y2) &&
+    bounds.x2 > pageBounds.x1 &&
+    bounds.x1 < pageBounds.x2 &&
+    bounds.y2 > pageBounds.y1 &&
+    bounds.y1 < pageBounds.y2
+  );
 }
 
 function pageTopInContainer(container: HTMLElement, pageElement: HTMLElement) {

@@ -10,7 +10,8 @@ import {
   PDFString,
   PDFFont,
   StandardFonts,
-  degrees
+  degrees,
+  rgb
 } from 'pdf-lib';
 import {
   dotPath,
@@ -28,6 +29,9 @@ import type { InkAnnotation, PdfAnnotation, PdfPoint, PdfRect } from './types';
 const printFlag = 4;
 const PDF_COORDINATE_PRECISION = 0.01;
 const PDF_RATIO_PRECISION = 0.001;
+const linedPageLineColor = rgb(0.58, 0.66, 0.7);
+const linedPageMarginColor = rgb(0.68, 0.72, 0.74);
+const linedPageLineSpacing = 24;
 const supportedAnnotationSubtypes = new Set([
   'Highlight',
   'Ink',
@@ -44,6 +48,19 @@ export async function addBlankPageAt(
   const sourcePage = pdfDoc.getPage(templatePageIndex);
   const { width, height } = sourcePage.getSize();
   pdfDoc.insertPage(pageIndex, [width, height]);
+  return pdfDoc.save();
+}
+
+export async function addLinedPageAt(
+  bytes: Uint8Array,
+  pageIndex: number,
+  templatePageIndex: number
+) {
+  const pdfDoc = await PDFDocument.load(bytes);
+  const sourcePage = pdfDoc.getPage(templatePageIndex);
+  const { width, height } = sourcePage.getSize();
+  const page = pdfDoc.insertPage(pageIndex, [width, height]);
+  drawLinedPage(page, width, height);
   return pdfDoc.save();
 }
 
@@ -87,6 +104,33 @@ export async function mergePdfAfterPage(
     bytes: await pdfDoc.save(),
     insertedPageCount: copiedPages.length
   };
+}
+
+function drawLinedPage(page: PDFPage, width: number, height: number) {
+  const marginX = Math.min(42, width * 0.09);
+  const top = height - Math.min(60, height * 0.08);
+  const bottom = Math.min(60, height * 0.08);
+  const left = marginX;
+  const right = width - marginX;
+  const guideX = left + Math.min(30, width * 0.05);
+
+  page.drawLine({
+    start: { x: guideX, y: bottom },
+    end: { x: guideX, y: top },
+    color: linedPageMarginColor,
+    opacity: 0.34,
+    thickness: 0.6
+  });
+
+  for (let y = top; y >= bottom; y -= linedPageLineSpacing) {
+    page.drawLine({
+      start: { x: left, y },
+      end: { x: right, y },
+      color: linedPageLineColor,
+      opacity: 0.58,
+      thickness: 0.6
+    });
+  }
 }
 
 export async function writePdfAnnotations(

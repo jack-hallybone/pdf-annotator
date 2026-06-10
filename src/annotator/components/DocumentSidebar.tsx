@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import {
-  ChevronLeft,
-  FilePlus2,
-  MoreVertical,
-  RotateCw,
-  Trash2
-} from 'lucide-react';
+import { ChevronLeft, FilePlus2, MoreVertical, RotateCw, Trash2 } from 'lucide-react';
 import { rgbToHex } from '../SettingsPanel';
 import { pathToViewportD, pdfRectToViewportRect } from '../pdfGeometry';
 import {
@@ -27,12 +21,17 @@ import {
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const SIDEBAR_ICON_BUTTON_CLASS = 'icon-button ui-button';
 const PAGE_MENU_ITEM_CLASS = 'page-menu-item ui-button';
+type SidebarPageInsertKind = 'blank' | 'lined';
 
 type DocumentSidebarProps = {
   activePageIndex: number;
   annotationsByPage: Map<number, PdfAnnotation[]>;
   busy: boolean;
-  onAddPage: (pageIndex?: number, position?: 'before' | 'after') => void;
+  onAddPage: (
+    pageIndex?: number,
+    position?: 'before' | 'after',
+    kind?: SidebarPageInsertKind
+  ) => void;
   onClose: () => void;
   onDeletePage: (pageIndex?: number) => void;
   onMergePdf: () => void;
@@ -137,8 +136,10 @@ export function DocumentSidebar({
             annotations={annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS}
             key={index}
             menuOpen={pageMenuIndex === index}
-            onAddAfter={() => onAddPage(index, 'after')}
-            onAddBefore={() => onAddPage(index, 'before')}
+            onAddBlankAfter={() => onAddPage(index, 'after', 'blank')}
+            onAddBlankBefore={() => onAddPage(index, 'before', 'blank')}
+            onAddLinedAfter={() => onAddPage(index, 'after', 'lined')}
+            onAddLinedBefore={() => onAddPage(index, 'before', 'lined')}
             onDelete={() => onDeletePage(index)}
             onMenuToggle={() =>
               setPageMenuIndex(pageMenuIndex === index ? null : index)
@@ -206,8 +207,10 @@ type PageThumbnailProps = {
   active: boolean;
   annotations: PdfAnnotation[];
   menuOpen: boolean;
-  onAddAfter: () => void;
-  onAddBefore: () => void;
+  onAddBlankAfter: () => void;
+  onAddBlankBefore: () => void;
+  onAddLinedAfter: () => void;
+  onAddLinedBefore: () => void;
   onDelete: () => void;
   onMenuToggle: () => void;
   onRotate: () => void;
@@ -227,8 +230,10 @@ function PageThumbnail({
   active,
   annotations,
   menuOpen,
-  onAddAfter,
-  onAddBefore,
+  onAddBlankAfter,
+  onAddBlankBefore,
+  onAddLinedAfter,
+  onAddLinedBefore,
   onDelete,
   onMenuToggle,
   onRotate,
@@ -352,30 +357,50 @@ function PageThumbnail({
           <button
             className={PAGE_MENU_ITEM_CLASS}
             disabled={readOnly}
-            onClick={onAddBefore}
-            type="button"
-          >
-            <FilePlus2 className="page-menu-item-icon" size={14} />
-            <span>Add before</span>
-          </button>
-          <button
-            className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
-            onClick={onAddAfter}
-            type="button"
-          >
-            <FilePlus2 className="page-menu-item-icon" size={14} />
-            <span>Add after</span>
-          </button>
-          <button
-            className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
             onClick={onRotate}
             type="button"
           >
             <RotateCw className="page-menu-item-icon" size={14} />
             <span>Rotate</span>
           </button>
+          <div className="page-menu-separator" role="separator" />
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
+            onClick={onAddBlankBefore}
+            type="button"
+          >
+            <PageInsertIcon lined={false} />
+            <span>Add blank before</span>
+          </button>
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
+            onClick={onAddLinedBefore}
+            type="button"
+          >
+            <PageInsertIcon lined />
+            <span>Add lined before</span>
+          </button>
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
+            onClick={onAddBlankAfter}
+            type="button"
+          >
+            <PageInsertIcon lined={false} />
+            <span>Add blank after</span>
+          </button>
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={readOnly}
+            onClick={onAddLinedAfter}
+            type="button"
+          >
+            <PageInsertIcon lined />
+            <span>Add lined after</span>
+          </button>
+          <div className="page-menu-separator" role="separator" />
           <button
             className={PAGE_MENU_ITEM_CLASS}
             disabled={readOnly || pageCount <= 1}
@@ -388,6 +413,20 @@ function PageThumbnail({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function PageInsertIcon({ lined }: { lined: boolean }) {
+  return (
+    <span className="page-menu-insert-icon page-menu-item-icon">
+      <FilePlus2 size={14} />
+      {lined ? (
+        <span className="page-menu-insert-lines" aria-hidden="true">
+          <span />
+          <span />
+        </span>
+      ) : null}
+    </span>
   );
 }
 
