@@ -615,14 +615,21 @@ function existingAnnotationSourceId(
   pageIndex: number,
   annotationIndex: number
 ) {
-  return uniqueSourceIdCandidates([
+  const preciseCandidates = uniqueSourceIdCandidates([
     annotation.id,
     annotation.refName,
     annotation.annotationId,
     annotation.nm,
     annotation.NM,
     annotation.nameObj?.str,
-    annotation.nameObj?.text,
+    annotation.nameObj?.text
+  ]);
+
+  if (preciseCandidates.length > 0) {
+    return preciseCandidates.join('|');
+  }
+
+  return uniqueSourceIdCandidates([
     annotationGeometrySourceKey(annotation),
     `page:${pageIndex}:annotation-${annotationIndex}`
   ]).join('|');

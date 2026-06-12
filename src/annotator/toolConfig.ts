@@ -33,25 +33,11 @@ export const tools: ToolDefinition[] = [
     preset: { drawColor: inkColors.blue }
   },
   {
-    key: 'draw-green',
+    key: 'draw-purple',
     tool: 'draw',
-    label: 'Green ink',
+    label: 'Purple ink',
     icon: PenLine,
-    preset: { drawColor: inkColors.green }
-  },
-  {
-    key: 'draw-red',
-    tool: 'draw',
-    label: 'Red ink',
-    icon: PenLine,
-    preset: { drawColor: inkColors.red }
-  },
-  {
-    key: 'draw-black',
-    tool: 'draw',
-    label: 'Black ink',
-    icon: PenLine,
-    preset: { drawColor: inkColors.black }
+    preset: { drawColor: inkColors.purple }
   },
   { key: 'highlight', tool: 'highlight', label: 'Highlight', icon: Highlighter },
   { key: 'freeText', tool: 'freeText', label: 'Text', icon: TextCursor },

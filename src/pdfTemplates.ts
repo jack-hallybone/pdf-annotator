@@ -4,14 +4,20 @@ import type { PDFPage } from 'pdf-lib';
 export type PdfTemplateKind = 'a4Blank' | 'a4Lined' | 'a4Cornell';
 
 const A4_SIZE: [number, number] = [595.28, 841.89];
-const templateMarginX = 42;
+const templateMarginX = 36;
 const cornellTitleTopMargin = 35;
 const cornellTop = A4_SIZE[1] - 48;
 const cornellHeaderDividerY = cornellTop - 54;
 const templateLineColor = rgb(0.58, 0.66, 0.7);
 const templateDividerColor = rgb(0.5, 0.56, 0.58);
 const templateMarginColor = rgb(0.68, 0.72, 0.74);
-const lineSpacing = 24;
+const millimetresPerInch = 25.4;
+const pdfPointsPerInch = 72;
+const lineSpacing = (8 / millimetresPerInch) * pdfPointsPerInch;
+const ruledTop = A4_SIZE[1] - 60;
+const ruledBottom = 60 - lineSpacing;
+const ruledLineEpsilon = 0.01;
+const cornellSummaryDividerY = ruledLineNear(168);
 
 export const CORNELL_CONTENT_BOUNDS = {
   left: templateMarginX,
@@ -40,32 +46,37 @@ export async function createPdfTemplate(kind: PdfTemplateKind) {
 
 function drawLinedPage(page: PDFPage) {
   const left = templateMarginX;
-  const right = A4_SIZE[0] - templateMarginX;
-  const top = A4_SIZE[1] - 60;
-  const bottom = 60;
 
   drawVerticalGuide(page, {
-    bottom,
-    top,
-    x: left + 30
+    bottom: 0,
+    top: A4_SIZE[1],
+    x: left + 24
   });
-  drawHorizontalLines(page, {
-    left,
-    right,
-    top,
-    bottom,
-    step: lineSpacing
+  drawRuledLines(page, {
+    bottom: ruledBottom,
+    left: 0,
+    right: A4_SIZE[0],
+    top: ruledTop
   });
 }
 
 function drawCornellPage(page: PDFPage) {
-  const left = CORNELL_CONTENT_BOUNDS.left;
-  const right = CORNELL_CONTENT_BOUNDS.right;
-  const bottom = 48;
   const cueColumnRight = 184;
-  const summaryTop = 168;
+  const summaryTop = cornellSummaryDividerY;
   const headerDividerY = cornellHeaderDividerY;
-  const firstNoteLineY = headerDividerY - lineSpacing;
+
+  drawRuledLines(page, {
+    bottom: summaryTop + ruledLineEpsilon,
+    left: 0,
+    right: A4_SIZE[0],
+    top: headerDividerY
+  });
+  drawRuledLines(page, {
+    bottom: ruledBottom,
+    left: 0,
+    right: A4_SIZE[0],
+    top: summaryTop - ruledLineEpsilon
+  });
 
   page.drawLine({
     start: { x: cueColumnRight, y: summaryTop },
@@ -74,59 +85,35 @@ function drawCornellPage(page: PDFPage) {
     thickness: 1
   });
   page.drawLine({
-    start: { x: left, y: summaryTop },
-    end: { x: right, y: summaryTop },
+    start: { x: 0, y: summaryTop },
+    end: { x: A4_SIZE[0], y: summaryTop },
     color: templateDividerColor,
     thickness: 1
   });
   page.drawLine({
-    start: { x: left, y: headerDividerY },
-    end: { x: right, y: headerDividerY },
+    start: { x: 0, y: headerDividerY },
+    end: { x: A4_SIZE[0], y: headerDividerY },
     color: templateDividerColor,
     opacity: 0.82,
     thickness: 0.8
   });
-
-  drawHorizontalLines(page, {
-    left: cueColumnRight + 18,
-    right,
-    top: firstNoteLineY,
-    bottom: summaryTop + 18,
-    step: lineSpacing
-  });
-  drawHorizontalLines(page, {
-    left,
-    right: cueColumnRight - 18,
-    top: firstNoteLineY,
-    bottom: summaryTop + 18,
-    step: lineSpacing
-  });
-  drawHorizontalLines(page, {
-    left,
-    right,
-    top: summaryTop - lineSpacing,
-    bottom,
-    step: lineSpacing
-  });
 }
 
-function drawHorizontalLines(
+function drawRuledLines(
   page: PDFPage,
   {
     bottom,
     left,
     right,
-    step,
     top
   }: {
     bottom: number;
     left: number;
     right: number;
-    step: number;
     top: number;
   }
 ) {
-  for (let y = top; y >= bottom; y -= step) {
+  for (const y of ruledLineYs(top, bottom)) {
     page.drawLine({
       start: { x: left, y },
       end: { x: right, y },
@@ -135,6 +122,25 @@ function drawHorizontalLines(
       thickness: 0.6
     });
   }
+}
+
+function ruledLineYs(top: number, bottom: number) {
+  const lines: number[] = [];
+  for (let y = ruledBottom; y <= ruledTop; y += lineSpacing) {
+    if (y <= top && y >= bottom) {
+      lines.push(y);
+    }
+  }
+  return lines.reverse();
+}
+
+function ruledLineNear(targetY: number) {
+  const maxIndex = Math.floor((ruledTop - ruledBottom) / lineSpacing);
+  const index = Math.min(
+    Math.max(Math.round((targetY - ruledBottom) / lineSpacing), 0),
+    maxIndex
+  );
+  return ruledBottom + index * lineSpacing;
 }
 
 function drawVerticalGuide(

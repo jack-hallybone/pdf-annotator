@@ -75,6 +75,12 @@ export function DocumentSidebar({
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (busy && pageMenuIndex !== null) {
+      setPageMenuIndex(null);
+    }
+  }, [busy, pageMenuIndex, setPageMenuIndex]);
+
+  useEffect(() => {
     if (!open) {
       return;
     }
@@ -152,6 +158,7 @@ export function DocumentSidebar({
             pageSize={pageSize}
             pdfDoc={pdfDoc}
             readOnly={readOnly}
+            busy={busy}
             showAnnotations={showAnnotations}
             onThumbnailPageLoad={onThumbnailPageLoad}
             thumbnailWidth={thumbnailWidth}
@@ -206,6 +213,7 @@ export function DocumentSidebar({
 type PageThumbnailProps = {
   active: boolean;
   annotations: PdfAnnotation[];
+  busy: boolean;
   menuOpen: boolean;
   onAddBlankAfter: () => void;
   onAddBlankBefore: () => void;
@@ -229,6 +237,7 @@ type PageThumbnailProps = {
 function PageThumbnail({
   active,
   annotations,
+  busy,
   menuOpen,
   onAddBlankAfter,
   onAddBlankBefore,
@@ -308,6 +317,7 @@ function PageThumbnail({
         className={`page-thumbnail-button ui-button ${
           active ? 'ui-button-active' : 'page-thumbnail-button-inactive'
         }`}
+        disabled={busy}
         onClick={onSelect}
         type="button"
       >
@@ -342,7 +352,7 @@ function PageThumbnail({
       </button>
       <button
         className="page-thumbnail-menu-toggle ui-button"
-        disabled={readOnly}
+        disabled={busy || readOnly}
         onClick={(event) => {
           event.stopPropagation();
           onMenuToggle();
@@ -356,7 +366,7 @@ function PageThumbnail({
         <div className="page-menu ui-panel">
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
+            disabled={busy || readOnly}
             onClick={onRotate}
             type="button"
           >
@@ -366,7 +376,7 @@ function PageThumbnail({
           <div className="page-menu-separator" role="separator" />
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
+            disabled={busy || readOnly}
             onClick={onAddBlankBefore}
             type="button"
           >
@@ -375,7 +385,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
+            disabled={busy || readOnly}
             onClick={onAddLinedBefore}
             type="button"
           >
@@ -384,7 +394,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
+            disabled={busy || readOnly}
             onClick={onAddBlankAfter}
             type="button"
           >
@@ -393,7 +403,7 @@ function PageThumbnail({
           </button>
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly}
+            disabled={busy || readOnly}
             onClick={onAddLinedAfter}
             type="button"
           >
@@ -403,7 +413,7 @@ function PageThumbnail({
           <div className="page-menu-separator" role="separator" />
           <button
             className={PAGE_MENU_ITEM_CLASS}
-            disabled={readOnly || pageCount <= 1}
+            disabled={busy || readOnly || pageCount <= 1}
             onClick={onDelete}
             type="button"
           >

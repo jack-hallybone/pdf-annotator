@@ -252,26 +252,6 @@ export function pathLength(path: PdfPoint[]) {
   }, 0);
 }
 
-export function appendInkPoint(
-  path: PdfPoint[],
-  point: PdfPoint,
-  minDistance: number
-) {
-  if (!isFinitePoint(point)) {
-    return path;
-  }
-
-  const previous = path[path.length - 1];
-  if (
-    previous &&
-    Math.hypot(point.x - previous.x, point.y - previous.y) < minDistance
-  ) {
-    return path;
-  }
-
-  return [...path, point];
-}
-
 export function simplifyInkPath(path: PdfPoint[], tolerance: number) {
   const points = path.filter(isFinitePoint);
   if (points.length < 3 || tolerance <= 0) {

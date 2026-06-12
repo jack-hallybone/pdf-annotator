@@ -15,11 +15,11 @@ export const inkColors = {
 export const annotationColorSwatches: RgbColor[] = [
   inkColors.black,
   inkColors.blue,
-  inkColors.green,
-  inkColors.red,
-  inkColors.orange,
   inkColors.purple,
-  inkColors.yellow
+  inkColors.yellow,
+  inkColors.green,
+  inkColors.orange,
+  inkColors.red
 ];
 
 export function SettingsPanelShell({

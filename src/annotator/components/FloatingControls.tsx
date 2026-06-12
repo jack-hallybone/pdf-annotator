@@ -36,6 +36,7 @@ const POPOVER_CLASS = 'floating-popover ui-panel';
 type FloatingToolDockProps = {
   activeTool: Tool;
   activeToolKey: string;
+  disabled?: boolean;
   onChangeSettings: (update: Partial<ToolSettings>) => void;
   onCloseSettings: () => void;
   onSelectTool: (toolKey: string) => void;
@@ -48,6 +49,7 @@ type FloatingToolDockProps = {
 export function FloatingToolDock({
   activeTool,
   activeToolKey,
+  disabled = false,
   onChangeSettings,
   onCloseSettings,
   onSelectTool,
@@ -78,6 +80,7 @@ export function FloatingToolDock({
               className={`tool-button ui-button ${
                 active ? 'ui-button-active' : ''
               }`}
+              disabled={disabled}
               onClick={() => onSelectTool(key)}
               title={label}
               type="button"
@@ -93,6 +96,7 @@ export function FloatingToolDock({
               <button
                 aria-label={`${label} settings`}
                 className="tool-settings-button ui-button"
+                disabled={disabled}
                 onClick={() => {
                   if (!active) {
                     onSelectTool(key);
@@ -105,7 +109,7 @@ export function FloatingToolDock({
                 <MoreVertical size={15} />
               </button>
             ) : null}
-            {hasSettings && settingsToolKey === key ? (
+            {!disabled && hasSettings && settingsToolKey === key ? (
               <div className={`${POPOVER_CLASS} tool-settings-popover`}>
                 <ToolSettingsEditor
                   settings={settings}
@@ -165,6 +169,7 @@ function ToolIndicator({
 
 type FloatingZoomControlsProps = {
   activePageIndex: number;
+  disabled?: boolean;
   onDefaultZoom: () => void;
   onFitHeight: () => void;
   onFitWidth: () => void;
@@ -178,6 +183,7 @@ type FloatingZoomControlsProps = {
 
 export function FloatingZoomControls({
   activePageIndex,
+  disabled = false,
   onDefaultZoom,
   onFitHeight,
   onFitWidth,
@@ -240,7 +246,7 @@ export function FloatingZoomControls({
     >
       <button
         className={ICON_BUTTON_CLASS}
-        disabled={scale <= MIN_ZOOM}
+        disabled={disabled || scale <= MIN_ZOOM}
         onClick={onZoomOut}
         title="Zoom out"
         type="button"
@@ -249,6 +255,7 @@ export function FloatingZoomControls({
       </button>
       <button
         className="zoom-button ui-button"
+        disabled={disabled}
         onClick={() => setZoomPanelOpen((open) => !open)}
         title="Zoom settings"
         type="button"
@@ -257,7 +264,7 @@ export function FloatingZoomControls({
       </button>
       <button
         className={ICON_BUTTON_CLASS}
-        disabled={scale >= MAX_ZOOM}
+        disabled={disabled || scale >= MAX_ZOOM}
         onClick={onZoomIn}
         title="Zoom in"
         type="button"
@@ -269,6 +276,7 @@ export function FloatingZoomControls({
         <input
           aria-label="Page number"
           className="page-number-input ui-input"
+          disabled={disabled}
           inputMode="numeric"
           max={pageCount}
           min={1}
@@ -283,7 +291,7 @@ export function FloatingZoomControls({
         />
         <span>of {pageCount}</span>
       </div>
-      {zoomPanelOpen ? (
+      {!disabled && zoomPanelOpen ? (
         <div className={`${POPOVER_CLASS} zoom-popover`}>
           <label className="zoom-percent-field ui-input">
             <input
@@ -366,6 +374,7 @@ export function FloatingDocumentControls({
   return (
     <div className={`${FLOATING_FRAME_CLASS} document-controls`}>
       <IconButton
+        disabled={busy}
         label={showAnnotations ? 'Hide annotations' : 'Show annotations'}
         onClick={onToggleAnnotations}
       >
@@ -395,6 +404,7 @@ export function FloatingDocumentControls({
 type FloatingHistoryControlsProps = {
   canRedo: boolean;
   canUndo: boolean;
+  disabled?: boolean;
   onRedo: () => void;
   onUndo: () => void;
   sidebarOpen: boolean;
@@ -404,6 +414,7 @@ type FloatingHistoryControlsProps = {
 export function FloatingHistoryControls({
   canRedo,
   canUndo,
+  disabled = false,
   onRedo,
   onUndo,
   sidebarOpen,
@@ -416,7 +427,7 @@ export function FloatingHistoryControls({
     >
       <button
         className={ICON_BUTTON_CLASS}
-        disabled={!canUndo}
+        disabled={disabled || !canUndo}
         onClick={onUndo}
         title="Undo"
         type="button"
@@ -425,7 +436,7 @@ export function FloatingHistoryControls({
       </button>
       <button
         className={ICON_BUTTON_CLASS}
-        disabled={!canRedo}
+        disabled={disabled || !canRedo}
         onClick={onRedo}
         title="Redo"
         type="button"

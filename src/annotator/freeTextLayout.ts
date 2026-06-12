@@ -90,7 +90,11 @@ function freeTextContentSize(
     layoutWidth === undefined
       ? measuredWidth
       : clamp(layoutWidth, FREE_TEXT_MIN_WIDTH, FREE_TEXT_MAX_WIDTH);
-  const visualLineCount = freeTextVisualLines(text, fontSize, width).length;
+  const shouldWrap =
+    layoutWidth !== undefined || measuredWidth >= FREE_TEXT_MAX_WIDTH;
+  const visualLineCount = shouldWrap
+    ? freeTextVisualLines(text, fontSize, width).length
+    : lines.length;
   const lineHeight = fontSize * FREE_TEXT_LINE_HEIGHT;
   const height = Math.max(
     lineHeight + FREE_TEXT_HEIGHT_BUFFER,

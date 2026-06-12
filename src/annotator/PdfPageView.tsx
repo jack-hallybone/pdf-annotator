@@ -1,5 +1,12 @@
 import { Copy, Highlighter, Trash2 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  memo,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import type { RefObject } from 'react';
 import {
   AnnotationLayer,
@@ -34,7 +41,6 @@ import {
   annotationBounds,
   annotationHitTest,
   annotationWhollyInsidePolygon,
-  appendInkPoint,
   boundsForPoints,
   boundsForRects,
   dotPath,
@@ -113,6 +119,7 @@ type FreeTextResizeHandle = {
 type DraftInkPath = {
   kind: 'draw' | 'freehandHighlight';
   path: PdfPoint[];
+  renderedPointCount: number;
 };
 type EraserGesture = {
   pendingUntilDrag: boolean;
@@ -203,9 +210,14 @@ type PdfPageViewProps = {
     updater: (annotation: PdfAnnotation) => PdfAnnotation,
     options?: { recordUndo?: boolean }
   ) => void;
+  onUpdateAnnotations: (
+    annotationIds: string[],
+    updater: (annotation: PdfAnnotation) => PdfAnnotation,
+    options?: { recordUndo?: boolean }
+  ) => void;
 };
 
-export function PdfPageView({
+function PdfPageViewComponent({
   page,
   pageIndex,
   pageCount,
@@ -234,7 +246,8 @@ export function PdfPageView({
   onPruneOffPageAnnotations,
   onSelectAnnotations,
   onToolChange,
-  onUpdateAnnotation
+  onUpdateAnnotation,
+  onUpdateAnnotations
 }: PdfPageViewProps) {
   const baseLayerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -258,8 +271,6 @@ export function PdfPageView({
   const eraserGestureRef = useRef<EraserGesture | null>(null);
   const eraserAnnotationIndexRef = useRef<EraserAnnotationIndex | null>(null);
   const eraserPathRef = useRef<PdfPoint[] | null>(null);
-  const pendingEraseCommitFrameRef = useRef<number | null>(null);
-  const pendingEraseCommitTimeoutRef = useRef<number | null>(null);
   const eraserPreviewFrameRef = useRef<number | null>(null);
   const eraserRemainingPathsRef = useRef<Map<string, PdfPoint[][]>>(new Map());
   const eraserDeletedIdsRef = useRef<Set<string>>(new Set());
@@ -406,7 +417,6 @@ export function PdfPageView({
         window.cancelAnimationFrame(eraserFrame);
         eraserPreviewFrameRef.current = null;
       }
-      cancelPendingEraseCommit();
       flushPendingEraseChanges();
       clearDraftInkCanvases();
       clearDisplayCanvas(eraserCanvasRef.current);
@@ -1508,8 +1518,7 @@ export function PdfPageView({
         tool === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
           ? dotPath(path[0], toolSettings.drawWidth)
           : normalizeDraftInkPath(path, viewport);
-      endDraftInkPath();
-
+      let annotation: PdfAnnotation | null = null;
       if (
         (tool === 'draw'
           ? normalizedPath.length > 0
@@ -1517,7 +1526,7 @@ export function PdfPageView({
         (tool !== 'freehandHighlight' ||
           pathLength(path) > freehandHighlightMinLength(viewport))
       ) {
-        const annotation: PdfAnnotation = {
+        annotation = {
           id: crypto.randomUUID(),
           kind: tool,
           pageIndex,
@@ -1537,7 +1546,14 @@ export function PdfPageView({
           contents:
             tool === 'draw' ? 'Freehand drawing' : 'Freehand highlight'
         };
+        // Paint the finalized, smoothed stroke before clearing the raw draft
+        // layer so pen-up does not leave a visible gap on dense pages.
         prepaintCommittedInkAnnotation(annotation);
+      }
+
+      endDraftInkPath();
+
+      if (annotation) {
         onAddAnnotation(annotation);
       }
 
@@ -1776,44 +1792,7 @@ export function PdfPageView({
     // eraser sample forces expensive annotation and canvas redraws on dense ink.
   }
 
-  function cancelPendingEraseCommit() {
-    const frame = pendingEraseCommitFrameRef.current;
-    if (frame !== null) {
-      window.cancelAnimationFrame(frame);
-      pendingEraseCommitFrameRef.current = null;
-    }
-
-    const timeout = pendingEraseCommitTimeoutRef.current;
-    if (timeout !== null) {
-      window.clearTimeout(timeout);
-      pendingEraseCommitTimeoutRef.current = null;
-    }
-  }
-
-  function schedulePendingEraseCommit() {
-    const pending = pendingEraseChangesRef.current;
-    if (pending.deleteIds.size === 0 && pending.pathUpdates.size === 0) {
-      return;
-    }
-
-    if (
-      pendingEraseCommitFrameRef.current !== null ||
-      pendingEraseCommitTimeoutRef.current !== null
-    ) {
-      return;
-    }
-
-    pendingEraseCommitFrameRef.current = window.requestAnimationFrame(() => {
-      pendingEraseCommitFrameRef.current = null;
-      pendingEraseCommitTimeoutRef.current = window.setTimeout(() => {
-        pendingEraseCommitTimeoutRef.current = null;
-        flushPendingEraseChanges();
-      }, 0);
-    });
-  }
-
   function flushPendingEraseChanges() {
-    cancelPendingEraseCommit();
     const pending = pendingEraseChangesRef.current;
     if (pending.deleteIds.size === 0 && pending.pathUpdates.size === 0) {
       return;
@@ -1915,7 +1894,7 @@ export function PdfPageView({
       return;
     }
 
-    const nextPath = appendPdfPoints(currentPath, points);
+    const nextPath = appendMutablePdfPoints(currentPath, points);
     eraserPathRef.current = nextPath;
     scheduleEraserPreviewRender();
 
@@ -1939,7 +1918,7 @@ export function PdfPageView({
   }
 
   function endEraserGesture() {
-    schedulePendingEraseCommit();
+    flushPendingEraseChanges();
     eraserPathRef.current = null;
     eraserGestureRef.current = null;
     eraserAnnotationIndexRef.current = null;
@@ -2055,7 +2034,8 @@ export function PdfPageView({
     kind: 'draw' | 'freehandHighlight',
     point: PdfPoint
   ) {
-    draftInkPathRef.current = { kind, path: [point] };
+    clearDraftInkCanvases();
+    draftInkPathRef.current = { kind, path: [point], renderedPointCount: 1 };
     scheduleDraftInkRender();
   }
 
@@ -2126,47 +2106,57 @@ export function PdfPageView({
   }
 
   function renderDraftInkPath() {
-    clearDraftInkCanvases();
     const draft = draftInkPathRef.current;
     if (!draft) {
+      clearDraftInkCanvases();
       return;
     }
 
-    const previewPath = draft.path;
-    const annotation: PdfAnnotation =
-      draft.kind === 'draw'
-        ? {
-            id: 'draft-ink',
-            kind: 'draw',
-            pageIndex,
-            paths: [previewPath],
-            color: toolSettings.drawColor,
-            opacity: toolSettings.drawOpacity,
-            width: toolSettings.drawWidth,
-            contents: ''
-          }
-        : {
-            id: 'draft-highlight',
-            kind: 'freehandHighlight',
-            pageIndex,
-            paths: [previewPath],
-            color: toolSettings.highlightColor,
-            opacity: toolSettings.highlightOpacity,
-            width: toolSettings.highlightWidth,
-            contents: ''
-          };
-
-    renderInkCanvasLayer({
-      annotations: [annotation],
+    const prepared = prepareInkCanvasContextState({
       canvas:
         draft.kind === 'draw'
           ? draftInkCanvasRef.current
           : draftHighlightInkCanvasRef.current,
+      clear: false,
       displaySize,
-      kind: draft.kind,
-      scale,
       viewport
     });
+    if (!prepared) {
+      return;
+    }
+
+    if (prepared.resized) {
+      draft.renderedPointCount = 1;
+    }
+
+    const startIndex = Math.max(0, draft.renderedPointCount - 1);
+    const segment = draft.path.slice(startIndex);
+    if (segment.length === 0) {
+      return;
+    }
+
+    const color =
+      draft.kind === 'draw'
+        ? toolSettings.drawColor
+        : toolSettings.highlightColor;
+    const opacity =
+      draft.kind === 'draw'
+        ? toolSettings.drawOpacity
+        : toolSettings.highlightOpacity;
+    const width =
+      draft.kind === 'draw'
+        ? toolSettings.drawWidth
+        : toolSettings.highlightWidth;
+
+    drawRawInkCanvasPath({
+      color: rgbToCss(color),
+      context: prepared.context,
+      opacity,
+      path: segment,
+      viewport,
+      width: width * scale
+    });
+    draft.renderedPointCount = draft.path.length;
   }
 
   return (
@@ -2338,11 +2328,11 @@ export function PdfPageView({
                 onClose={() => onSelectAnnotations([])}
                 onCopyText={copySelectedHighlightText}
                 onUpdate={(updater) => {
-                  for (const annotation of selectedPageAnnotations) {
-                    onUpdateAnnotation(annotation.id, updater, {
-                      recordUndo: false
-                    });
-                  }
+                  onUpdateAnnotations(
+                    selectedPageAnnotations.map((annotation) => annotation.id),
+                    updater,
+                    { recordUndo: false }
+                  );
                 }}
                 pageRef={pageRef}
                 viewport={viewport}
@@ -2372,6 +2362,44 @@ export function PdfPageView({
       </div>
     </article>
   );
+}
+
+export const PdfPageView = memo(PdfPageViewComponent, arePdfPageViewPropsEqual);
+
+function arePdfPageViewPropsEqual(
+  previous: PdfPageViewProps,
+  next: PdfPageViewProps
+) {
+  return (
+    previous.active === next.active &&
+    previous.annotations === next.annotations &&
+    previous.focusedAnnotationId === next.focusedAnnotationId &&
+    previous.page === next.page &&
+    previous.pageCount === next.pageCount &&
+    previous.pageIndex === next.pageIndex &&
+    previous.readOnly === next.readOnly &&
+    previous.renderPriority === next.renderPriority &&
+    previous.scale === next.scale &&
+    previous.showAnnotations === next.showAnnotations &&
+    previous.tool === next.tool &&
+    previous.toolSettings === next.toolSettings &&
+    stringArraysEqual(
+      previous.selectedAnnotationIds,
+      next.selectedAnnotationIds
+    )
+  );
+}
+
+function stringArraysEqual(left: string[], right: string[]) {
+  if (left === right) {
+    return true;
+  }
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
 }
 
 function AnnotationShape({
@@ -2617,7 +2645,7 @@ function AnnotationShape({
               </div>
             )}
           </foreignObject>
-          {selected ? (
+          {editable ? (
             <FreeTextWidthHandles
               annotation={annotation}
               onBeginDrag={onBeginFreeTextResizeHandleDrag}
@@ -3297,6 +3325,25 @@ function prepareInkCanvasContext({
   displaySize: PageDisplaySize;
   viewport: PageViewport;
 }) {
+  return prepareInkCanvasContextState({
+    canvas,
+    clear,
+    displaySize,
+    viewport
+  })?.context ?? null;
+}
+
+function prepareInkCanvasContextState({
+  canvas,
+  clear,
+  displaySize,
+  viewport
+}: {
+  canvas: HTMLCanvasElement | null;
+  clear: boolean;
+  displaySize: PageDisplaySize;
+  viewport: PageViewport;
+}) {
   if (!canvas) {
     return null;
   }
@@ -3309,6 +3356,7 @@ function prepareInkCanvasContext({
   const pixelRatio = inkCanvasPixelRatio(displaySize);
   const pixelWidth = Math.max(1, Math.ceil(displaySize.width * pixelRatio));
   const pixelHeight = Math.max(1, Math.ceil(displaySize.height * pixelRatio));
+  const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
 
   if (canvas.width !== pixelWidth) {
     canvas.width = pixelWidth;
@@ -3318,7 +3366,7 @@ function prepareInkCanvasContext({
   }
 
   context.setTransform(1, 0, 0, 1, 0, 0);
-  if (clear) {
+  if (clear || resized) {
     context.clearRect(0, 0, canvas.width, canvas.height);
   }
   context.imageSmoothingEnabled = true;
@@ -3333,7 +3381,7 @@ function prepareInkCanvasContext({
     0
   );
 
-  return context;
+  return { context, resized };
 }
 
 function inkCanvasPixelRatio(displaySize: PageDisplaySize) {
@@ -3422,6 +3470,53 @@ function drawInkCanvasPath(
   } else {
     context.stroke();
   }
+}
+
+function drawRawInkCanvasPath({
+  color,
+  context,
+  opacity,
+  path,
+  viewport,
+  width
+}: {
+  color: string;
+  context: CanvasRenderingContext2D;
+  opacity: number;
+  path: PdfPoint[];
+  viewport: PageViewport;
+  width: number;
+}) {
+  if (path.length === 0) {
+    return;
+  }
+
+  context.globalAlpha = clamp(opacity, 0, 1);
+  context.fillStyle = color;
+  context.strokeStyle = color;
+  context.lineWidth = Math.max(0.25, width);
+
+  if (path.length === 1) {
+    const [x, y] = viewport.convertToViewportPoint(path[0].x, path[0].y);
+    context.beginPath();
+    context.arc(x, y, Math.max(0.25, width / 2), 0, Math.PI * 2);
+    context.fill();
+    context.globalAlpha = 1;
+    return;
+  }
+
+  const [startX, startY] = viewport.convertToViewportPoint(
+    path[0].x,
+    path[0].y
+  );
+  context.beginPath();
+  context.moveTo(startX, startY);
+  for (const point of path.slice(1)) {
+    const [x, y] = viewport.convertToViewportPoint(point.x, point.y);
+    context.lineTo(x, y);
+  }
+  context.stroke();
+  context.globalAlpha = 1;
 }
 
 function getTextSelectionHighlightAction(
@@ -4447,11 +4542,14 @@ function appendMutableInkPoint(
 }
 
 function appendPdfPoints(path: PdfPoint[], points: PdfPoint[]) {
-  return points.reduce(
-    (currentPath, point) =>
-      appendInkPoint(currentPath, point, Number.EPSILON),
-    path
-  );
+  return appendMutablePdfPoints([...path], points);
+}
+
+function appendMutablePdfPoints(path: PdfPoint[], points: PdfPoint[]) {
+  for (const point of points) {
+    appendMutableInkPoint(path, point, Number.EPSILON);
+  }
+  return path;
 }
 
 function cachedPathBounds(

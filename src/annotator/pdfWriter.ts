@@ -31,7 +31,9 @@ const PDF_COORDINATE_PRECISION = 0.01;
 const PDF_RATIO_PRECISION = 0.001;
 const linedPageLineColor = rgb(0.58, 0.66, 0.7);
 const linedPageMarginColor = rgb(0.68, 0.72, 0.74);
-const linedPageLineSpacing = 24;
+const millimetresPerInch = 25.4;
+const pdfPointsPerInch = 72;
+const linedPageLineSpacing = (8 / millimetresPerInch) * pdfPointsPerInch;
 const supportedAnnotationSubtypes = new Set([
   'Highlight',
   'Ink',
@@ -107,30 +109,39 @@ export async function mergePdfAfterPage(
 }
 
 function drawLinedPage(page: PDFPage, width: number, height: number) {
-  const marginX = Math.min(42, width * 0.09);
+  const marginX = Math.min(36, width * 0.075);
   const top = height - Math.min(60, height * 0.08);
-  const bottom = Math.min(60, height * 0.08);
-  const left = marginX;
-  const right = width - marginX;
-  const guideX = left + Math.min(30, width * 0.05);
+  const bottom = Math.max(
+    0,
+    Math.min(60, height * 0.08) - linedPageLineSpacing
+  );
+  const guideX = marginX + Math.min(24, width * 0.04);
 
   page.drawLine({
-    start: { x: guideX, y: bottom },
-    end: { x: guideX, y: top },
+    start: { x: guideX, y: 0 },
+    end: { x: guideX, y: height },
     color: linedPageMarginColor,
     opacity: 0.34,
     thickness: 0.6
   });
 
-  for (let y = top; y >= bottom; y -= linedPageLineSpacing) {
-    page.drawLine({
-      start: { x: left, y },
-      end: { x: right, y },
-      color: linedPageLineColor,
-      opacity: 0.58,
-      thickness: 0.6
-    });
+  const lineYs: number[] = [];
+  for (let y = bottom; y <= top; y += linedPageLineSpacing) {
+    lineYs.push(y);
   }
+  for (const y of lineYs.reverse()) {
+    drawLinedPageRule(page, width, y);
+  }
+}
+
+function drawLinedPageRule(page: PDFPage, width: number, y: number) {
+  page.drawLine({
+    start: { x: 0, y },
+    end: { x: width, y },
+    color: linedPageLineColor,
+    opacity: 0.58,
+    thickness: 0.6
+  });
 }
 
 export async function writePdfAnnotations(
@@ -952,7 +963,9 @@ function sourceIdKeys(sourceId: string): string[] {
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length > 1) {
-    return Array.from(new Set(parts.flatMap(sourceIdKeys)));
+    const preciseParts = parts.filter((part) => !isFallbackSourceIdPart(part));
+    const selectedParts = preciseParts.length > 0 ? preciseParts : parts;
+    return Array.from(new Set(selectedParts.flatMap(sourceIdKeys)));
   }
 
   const normalized = sourceId.toLowerCase().replace(/\s+/g, '');
@@ -974,6 +987,11 @@ function sourceIdKeys(sourceId: string): string[] {
   }
 
   return Array.from(keys);
+}
+
+function isFallbackSourceIdPart(sourceId: string) {
+  const normalized = sourceId.trim().toLowerCase();
+  return normalized.startsWith('geom:') || normalized.startsWith('page:');
 }
 
 function addAnnotation(page: PDFPage, object: Record<string, unknown>) {

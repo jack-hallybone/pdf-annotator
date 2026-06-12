@@ -15,6 +15,7 @@
 .pdf-annotator {
   --pdfa-control-bottom-edge: 0.75rem;
   --pdfa-control-right-edge: 0.75rem;
+  --pdfa-floating-safe-inline: 5rem;
   --pdfa-scrollbar-block: 0px;
   --pdfa-scrollbar-inline: 0px;
   background: var(--pdfa-bg);
@@ -66,6 +67,12 @@
   outline: none;
 }
 
+.ui-input:disabled { opacity: 0.55; }
+
+.pdf-annotator[data-busy="true"] .pdf-scroll-root {
+  cursor: progress;
+}
+
 .ui-button-active {
   background: var(--pdfa-bg);
   border-color: rgb(23 28 28 / 0.68);
@@ -106,7 +113,11 @@
   box-sizing: border-box;
   height: 100%;
   overflow: auto;
-  padding: 1rem 1rem 50vh;
+  padding:
+    1rem
+    calc(1rem + var(--pdfa-floating-safe-inline) + var(--pdfa-scrollbar-inline))
+    50vh
+    1rem;
 }
 
 .pdf-pages {
@@ -322,7 +333,16 @@
 .floating-frame {
   color: var(--pdfa-ink);
   padding: 0.25rem;
+  pointer-events: none;
   z-index: 40;
+}
+
+.floating-frame button,
+.floating-frame input,
+.floating-frame select,
+.floating-frame textarea,
+.floating-popover {
+  pointer-events: auto;
 }
 
 .tool-dock {
@@ -839,7 +859,8 @@
   border: 0;
   color: inherit;
   margin: 0;
-  outline: 1px solid var(--pdfa-ink);
+  outline: 1px dashed rgb(var(--pdfa-accent-rgb) / 0.85);
+  outline-offset: -1px;
   padding: 0;
   resize: none;
 }
