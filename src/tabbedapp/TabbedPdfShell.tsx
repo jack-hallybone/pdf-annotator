@@ -136,6 +136,8 @@ export type TabbedPdfWorkspaceOptions = Pick<
   | 'confirmDiscardChanges'
   | 'onOpenExternalLink'
   | 'pickImageFile'
+  | 'printTarget'
+  | 'showDownloadButton'
 >;
 
 export type TabbedPdfHomeRenderProps = {
@@ -1909,8 +1911,10 @@ function DocumentTabContent({
       onDocumentTitleChange={handleTitleChange}
       onOpenExternalLink={workspaceOptions.onOpenExternalLink}
       pickImageFile={workspaceOptions.pickImageFile}
+      printTarget={workspaceOptions.printTarget}
       ref={onRegisterWorkspaceRef(document.id)}
       showCloseButton={false}
+      showDownloadButton={workspaceOptions.showDownloadButton}
       source={document.source}
     />
   );

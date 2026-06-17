@@ -60,6 +60,7 @@ import type {
   PdfDownloadTarget,
   PdfExternalLinkOpener,
   PdfImageFilePicker,
+  PdfPrintTarget,
   PdfSaveAsTarget,
   PdfSaveTarget,
   PdfWorkspaceSource
@@ -215,8 +216,10 @@ export type PdfWorkspaceProps = {
   onBusyChange?: (busy: boolean) => void;
   onOpenExternalLink?: PdfExternalLinkOpener;
   pickImageFile?: PdfImageFilePicker;
+  printTarget?: PdfPrintTarget | null;
   onSessionChange?: (session: PdfWorkspaceSession) => void;
   showCloseButton?: boolean;
+  showDownloadButton?: boolean;
   source: PdfWorkspaceSource;
   style?: CSSProperties;
 };
@@ -236,8 +239,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       onBusyChange,
       onOpenExternalLink,
       pickImageFile,
+      printTarget = null,
       onSessionChange,
       showCloseButton = true,
+      showDownloadButton = true,
       source,
       style
     },
@@ -1708,6 +1713,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     try {
       const printableBytes = await printablePdfBytes();
+      if (printTarget) {
+        await printTarget.print(printableBytes, printableName(fileName));
+        return;
+      }
+
       void printPdfInFrame(printableBytes, printableName(fileName))
         .catch((error) => {
           console.error(error);
@@ -4031,6 +4041,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             onSave={handleSave}
             onSaveAs={handleSaveAs}
             saveLabel="Save"
+            showDownloadButton={showDownloadButton}
             onToggleAnnotations={handleToggleAnnotations}
             showCloseButton={showCloseButton}
             showAnnotations={showAnnotations}

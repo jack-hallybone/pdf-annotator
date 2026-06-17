@@ -26,6 +26,8 @@
 
 # production
 /build
+!/build/
+!/build/icon.ico
 /dist
 /dist-electron
 /release

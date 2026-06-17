@@ -52,9 +52,14 @@ confirmation.
 docker compose exec app npm run desktop:build
 ```
 
-GitHub Actions can build a portable Windows `.exe` from
-`Build Desktop App`. The workflow uploads `pdf-annotator-windows-portable` as a
-downloadable artifact.
+GitHub Actions can build a portable Windows `.exe` from the manually triggered
+`Build Desktop App` workflow. The workflow uploads
+`pdf-annotator-windows-portable` as a downloadable artifact. To build a Windows
+installer with `.pdf` file-association metadata, run:
+
+```powershell
+docker compose exec app npm run desktop:package:win:installer
+```
 
 For local interactive Electron development, run the Vite dev server first, then
 start Electron in a GUI-capable environment with:

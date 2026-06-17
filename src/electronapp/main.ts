@@ -8,10 +8,16 @@ import {
   session,
   shell
 } from 'electron';
-import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
+import type {
+  MessageBoxOptions,
+  OpenDialogOptions,
+  SaveDialogOptions
+} from 'electron';
+import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { safePdfFileName } from '../fileNames.js';
 import { electronIpcChannels } from './ipc.js';
@@ -19,11 +25,16 @@ import type { DesktopImageFile, DesktopPdfDocument } from './bridge.js';
 
 const appProtocol = 'pdfannotator';
 const allowedExternalProtocols = new Set(['http:', 'https:', 'mailto:']);
+const closeConfirmationTimeoutMs = 15000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(__dirname, '..', '..');
 const rendererDistDir = app.isPackaged
   ? path.join(app.getAppPath(), 'dist')
   : path.join(projectRoot, 'dist');
+const appIconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'icon.ico')
+  : path.join(projectRoot, 'build', 'icon.ico');
 const preloadPath = path.join(__dirname, 'preload.js');
 const devRendererUrl = process.env.ELECTRON_RENDERER_URL?.trim() || null;
 const filePathsById = new Map<string, string>();
@@ -32,6 +43,7 @@ const pendingOpenPaths: string[] = [];
 let mainWindow: BrowserWindow | null = null;
 let closeConfirmed = false;
 let closeRequestPending = false;
+let closeRequestTimer: NodeJS.Timeout | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -87,6 +99,7 @@ async function createMainWindow() {
   const window = new BrowserWindow({
     backgroundColor: '#f3f3f3',
     height: 900,
+    ...(existsSync(appIconPath) ? { icon: appIconPath } : {}),
     show: false,
     title: 'PDF Annotator',
     webPreferences: {
@@ -119,6 +132,11 @@ async function createMainWindow() {
     }
 
     event.preventDefault();
+    if (closeRequestPending) {
+      void confirmForceClose(window);
+      return;
+    }
+
     requestRendererCloseConfirmation(window);
   });
 
@@ -291,6 +309,12 @@ function registerIpcHandlers() {
     }
   );
 
+  ipcMain.handle(electronIpcChannels.printPdf, async (event, bytes, suggestedName) => {
+    assertTrustedSender(event.sender);
+    assertUint8Array(bytes);
+    await printPdfFile(bytes, String(suggestedName));
+  });
+
   ipcMain.handle(electronIpcChannels.openExternalLink, async (event, url) => {
     assertTrustedSender(event.sender);
     const safeUrl = safeExternalUrl(String(url));
@@ -303,6 +327,7 @@ function registerIpcHandlers() {
 
   ipcMain.on(electronIpcChannels.closeDecision, (event, allowed) => {
     assertTrustedSender(event.sender);
+    clearCloseRequestTimer();
     closeRequestPending = false;
     if (allowed === true && mainWindow) {
       closeConfirmed = true;
@@ -385,6 +410,70 @@ async function writePdfFile(filePath: string, bytes: Uint8Array) {
   }
 }
 
+async function printPdfFile(bytes: Uint8Array, suggestedName: string) {
+  const printDir = path.join(app.getPath('temp'), 'pdf-annotator-print');
+  await fs.mkdir(printDir, { recursive: true });
+  const printPath = path.join(
+    printDir,
+    `${randomUUID()}-${safePdfFileName(suggestedName)}`
+  );
+  await writePdfFile(printPath, bytes);
+  scheduleTempFileCleanup(printPath);
+
+  if (process.platform === 'win32') {
+    try {
+      await printPdfWithWindowsShell(printPath);
+      return;
+    } catch {
+      await showPrintFailureMessage();
+      return;
+    }
+  }
+
+  await showPrintFailureMessage();
+}
+
+async function printPdfWithWindowsShell(filePath: string) {
+  await execFileAsync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-Command',
+      'Start-Process -FilePath $args[0] -Verb Print',
+      filePath
+    ],
+    { windowsHide: true }
+  );
+}
+
+function scheduleTempFileCleanup(filePath: string) {
+  const timer = setTimeout(() => {
+    void fs.rm(filePath, { force: true });
+  }, 30 * 60 * 1000);
+  timer.unref?.();
+}
+
+async function showPrintFailureMessage() {
+  const options: MessageBoxOptions = {
+    buttons: ['OK'],
+    defaultId: 0,
+    message: 'PDF Annotator could not hand this PDF to the system printer.',
+    noLink: true,
+    title: 'Print failed',
+    type: 'warning'
+  };
+
+  if (mainWindow) {
+    await dialog.showMessageBox(mainWindow, options);
+    return;
+  }
+
+  await dialog.showMessageBox(options);
+}
+
 async function verifyFileBytes(filePath: string, expectedBytes: Uint8Array) {
   const actualBytes = await fs.readFile(filePath);
   if (actualBytes.byteLength !== expectedBytes.byteLength) {
@@ -405,6 +494,42 @@ function requestRendererCloseConfirmation(window: BrowserWindow) {
 
   closeRequestPending = true;
   window.webContents.send(electronIpcChannels.requestClose);
+  closeRequestTimer = setTimeout(() => {
+    closeRequestPending = false;
+    closeRequestTimer = null;
+  }, closeConfirmationTimeoutMs);
+  closeRequestTimer.unref?.();
+}
+
+async function confirmForceClose(window: BrowserWindow) {
+  if (window.isDestroyed()) {
+    return;
+  }
+
+  const result = await dialog.showMessageBox(window, {
+    buttons: ['Cancel', 'Close app'],
+    cancelId: 0,
+    defaultId: 0,
+    detail:
+      'PDF Annotator is still checking whether files have unsaved changes.',
+    message: 'Close without waiting?',
+    noLink: true,
+    title: 'PDF Annotator',
+    type: 'warning'
+  });
+  if (result.response === 1 && !window.isDestroyed()) {
+    clearCloseRequestTimer();
+    closeRequestPending = false;
+    closeConfirmed = true;
+    window.close();
+  }
+}
+
+function clearCloseRequestTimer() {
+  if (closeRequestTimer) {
+    clearTimeout(closeRequestTimer);
+    closeRequestTimer = null;
+  }
 }
 
 function showOpenDialog(options: OpenDialogOptions) {

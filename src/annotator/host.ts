@@ -8,6 +8,10 @@ export type PdfDownloadTarget = {
   download: (bytes: Uint8Array, suggestedName: string) => Promise<void> | void;
 };
 
+export type PdfPrintTarget = {
+  print: (bytes: Uint8Array, suggestedName: string) => Promise<void> | void;
+};
+
 export type PdfSaveAsResult = {
   fileName?: string;
   saveTarget?: PdfSaveTarget | null;

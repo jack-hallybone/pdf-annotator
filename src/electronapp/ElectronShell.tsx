@@ -3,7 +3,8 @@ import { TabbedPdfShell } from '../tabbedapp';
 import type { TabbedPdfShellHandle } from '../tabbedapp';
 import {
   desktopDocumentsToHostDocuments,
-  electronFileAdapter
+  electronFileAdapter,
+  electronPrintTarget
 } from './electronFileAdapter';
 
 export function ElectronShell() {
@@ -34,7 +35,9 @@ export function ElectronShell() {
       ref={shellRef}
       workspaceOptions={{
         onOpenExternalLink: (url) =>
-          window.pdfAnnotatorDesktop?.openExternalLink(url)
+          window.pdfAnnotatorDesktop?.openExternalLink(url),
+        printTarget: electronPrintTarget(),
+        showDownloadButton: false
       }}
     />
   );

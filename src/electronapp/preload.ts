@@ -50,6 +50,13 @@ const bridge: DesktopBridge = {
       electronIpcChannels.pickPdfFiles
     ) as Promise<DesktopPdfDocument[]>;
   },
+  printPdf(bytes, suggestedName) {
+    return ipcRenderer.invoke(
+      electronIpcChannels.printPdf,
+      bytes,
+      suggestedName
+    ) as Promise<void>;
+  },
   savePdf(fileId, bytes) {
     return ipcRenderer.invoke(
       electronIpcChannels.savePdf,
@@ -74,11 +81,15 @@ contextBridge.exposeInMainWorld('pdfAnnotatorDesktop', bridge);
 
 async function resolveCloseRequest() {
   let allowed = true;
-  for (const handler of closeHandlers) {
-    if (!(await handler())) {
-      allowed = false;
-      break;
+  try {
+    for (const handler of closeHandlers) {
+      if (!(await handler())) {
+        allowed = false;
+        break;
+      }
     }
+  } catch {
+    allowed = false;
   }
 
   ipcRenderer.send(electronIpcChannels.closeDecision, allowed);

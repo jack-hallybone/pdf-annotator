@@ -13,8 +13,10 @@
     "electron:build": "tsc -p tsconfig.electron.json",
     "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron dist-electron/electronapp/main.js",
     "electron:preview": "npm run desktop:build && electron dist-electron/electronapp/main.js",
-    "desktop:build": "npm run build && npm run electron:build",
+    "generate-icons": "node scripts/generate-electron-icon.mjs",
+    "desktop:build": "npm run generate-icons && npm run build && npm run electron:build",
     "desktop:package:win": "npm run desktop:build && electron-builder --win portable --publish never",
+    "desktop:package:win:installer": "npm run desktop:build && electron-builder --win nsis --publish never",
     "prepreview": "node scripts/copy-pdfjs-assets.mjs",
     "preview": "vite preview",
     "copy-pdfjs-assets": "node scripts/copy-pdfjs-assets.mjs",
@@ -32,6 +34,7 @@
     "asar": true,
     "compression": "normal",
     "directories": {
+      "buildResources": "build",
       "output": "release"
     },
     "extraMetadata": {
@@ -46,8 +49,27 @@
     "npmRebuild": false,
     "productName": "PDF Annotator",
     "publish": null,
+    "fileAssociations": [
+      {
+        "description": "PDF document",
+        "ext": "pdf",
+        "icon": "icon.ico",
+        "name": "PDF document",
+        "role": "Editor"
+      }
+    ],
+    "icon": "build/icon.ico",
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PDF-Annotator-${version}-win-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": true
+    },
+    "portable": {
+      "artifactName": "PDF-Annotator-${version}-win-${arch}-portable.${ext}"
+    },
     "win": {
-      "artifactName": "PDF-Annotator-${version}-win-${arch}-portable.${ext}",
+      "icon": "build/icon.ico",
       "target": [
         {
           "arch": [

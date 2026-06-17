@@ -8,6 +8,7 @@ export type {
   PdfExternalLinkOpener,
   PdfImageFilePicker,
   PdfDownloadTarget,
+  PdfPrintTarget,
   PdfSaveAsResult,
   PdfSaveAsTarget,
   PdfSaveTarget,
