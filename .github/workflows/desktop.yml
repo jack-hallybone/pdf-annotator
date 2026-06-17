@@ -1,6 +1,10 @@
 name: Build Desktop App
 
 on:
+  push:
+    branches:
+      - main
+      - electron
   workflow_dispatch:
     inputs:
       package:
@@ -13,6 +17,9 @@ on:
         type: choice
         default: portable
 
+env:
+  PACKAGE: ${{ github.event_name == 'push' && 'both' || inputs.package }}
+  
 permissions:
   contents: read
 
