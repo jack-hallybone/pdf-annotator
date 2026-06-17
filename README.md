@@ -37,8 +37,39 @@ Useful commands inside the container:
 
 ```powershell
 docker compose exec app npm run build
+docker compose exec app npm run desktop:build
 docker compose exec app npm run security:audit
 ```
+
+## Desktop Wrapper
+
+The Electron host is the first desktop wrapper. It reuses the same `TabbedPdfShell`
+and `PdfWorkspace` components, then adds a narrow preload bridge for native file
+dialogs, verified save/write operations, external-link opening, and window-close
+confirmation.
+
+```powershell
+docker compose exec app npm run desktop:build
+```
+
+GitHub Actions can build a portable Windows `.exe` from
+`Build Desktop App`. The workflow uploads `pdf-annotator-windows-portable` as a
+downloadable artifact.
+
+For local interactive Electron development, run the Vite dev server first, then
+start Electron in a GUI-capable environment with:
+
+```powershell
+docker compose exec app npm run electron:dev
+```
+
+The renderer has `nodeIntegration` disabled, `contextIsolation` and sandboxing
+enabled, navigation/popup creation blocked, and no direct filesystem paths are
+exposed to React.
+
+Windows code signing is optional for local testing. To sign CI builds, add a
+base64-encoded `.pfx`/`.p12` certificate as `WINDOWS_CODESIGN_CERTIFICATE` and
+its password as `WINDOWS_CODESIGN_PASSWORD` in GitHub Actions secrets.
 
 ## Reusable Components
 

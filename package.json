@@ -3,12 +3,18 @@
   "private": true,
   "version": "0.1.0",
   "description": "A local-first lightweight PDF reader and annotator MVP.",
+  "main": "dist-electron/electronapp/main.js",
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "vite",
     "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "tsc -b && vite build",
+    "electron:build": "tsc -p tsconfig.electron.json",
+    "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron dist-electron/electronapp/main.js",
+    "electron:preview": "npm run desktop:build && electron dist-electron/electronapp/main.js",
+    "desktop:build": "npm run build && npm run electron:build",
+    "desktop:package:win": "npm run desktop:build && electron-builder --win portable --publish never",
     "prepreview": "node scripts/copy-pdfjs-assets.mjs",
     "preview": "vite preview",
     "copy-pdfjs-assets": "node scripts/copy-pdfjs-assets.mjs",
@@ -21,10 +27,44 @@
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
+  "build": {
+    "appId": "uk.co.pdfannotator.app",
+    "asar": true,
+    "compression": "normal",
+    "directories": {
+      "output": "release"
+    },
+    "extraMetadata": {
+      "dependencies": {}
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "npmRebuild": false,
+    "productName": "PDF Annotator",
+    "publish": null,
+    "win": {
+      "artifactName": "PDF-Annotator-${version}-win-${arch}-portable.${ext}",
+      "target": [
+        {
+          "arch": [
+            "x64"
+          ],
+          "target": "portable"
+        }
+      ]
+    }
+  },
   "devDependencies": {
+    "@types/node": "^25.9.3",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "typescript": "6.0.3",
     "vite": "8.0.16"
   }

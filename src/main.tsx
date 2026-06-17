@@ -1,12 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserShell } from './browserapp/BrowserShell';
+import { ElectronShell } from './electronapp/ElectronShell';
+import { hasDesktopBridge } from './electronapp/electronFileAdapter';
 import { configurePdfRuntime } from './pdfRuntime';
 
 configurePdfRuntime();
 
+const AppShell = hasDesktopBridge() ? ElectronShell : BrowserShell;
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserShell />
+    <AppShell />
   </StrictMode>
 );
