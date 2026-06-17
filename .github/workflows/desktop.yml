@@ -19,7 +19,7 @@ on:
 
 env:
   PACKAGE: ${{ github.event_name == 'push' && 'both' || inputs.package }}
-  
+
 permissions:
   contents: read
 
@@ -45,21 +45,21 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build portable Windows app
-        if: ${{ inputs.package == 'portable' || inputs.package == 'both' }}
+        if: ${{ env.PACKAGE == 'portable' || env.PACKAGE == 'both' }}
         run: npm run desktop:package:win
         env:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
           CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
 
       - name: Build Windows installer
-        if: ${{ inputs.package == 'installer' || inputs.package == 'both' }}
+        if: ${{ env.PACKAGE == 'installer' || env.PACKAGE == 'both' }}
         run: npm run desktop:package:win:installer
         env:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
           CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
 
       - name: Upload portable app
-        if: ${{ inputs.package == 'portable' || inputs.package == 'both' }}
+        if: ${{ env.PACKAGE == 'portable' || env.PACKAGE == 'both' }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
@@ -67,7 +67,7 @@ jobs:
           path: release/*portable.exe
 
       - name: Upload installer
-        if: ${{ inputs.package == 'installer' || inputs.package == 'both' }}
+        if: ${{ env.PACKAGE == 'installer' || env.PACKAGE == 'both' }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
