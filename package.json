@@ -30,7 +30,7 @@
     "react-dom": "19.2.7"
   },
   "build": {
-    "appId": "uk.co.pdfannotator.app",
+    "appId": "io.github.jackhallybone.pdf-annotator",
     "asar": true,
     "compression": "normal",
     "directories": {

@@ -34,6 +34,9 @@ const bridge: DesktopBridge = {
     closeHandlers.add(callback);
     return () => closeHandlers.delete(callback);
   },
+  newWindow() {
+    return ipcRenderer.invoke(electronIpcChannels.newWindow) as Promise<void>;
+  },
   openExternalLink(url) {
     return ipcRenderer.invoke(
       electronIpcChannels.openExternalLink,
@@ -49,13 +52,6 @@ const bridge: DesktopBridge = {
     return ipcRenderer.invoke(
       electronIpcChannels.pickPdfFiles
     ) as Promise<DesktopPdfDocument[]>;
-  },
-  printPdf(bytes, suggestedName) {
-    return ipcRenderer.invoke(
-      electronIpcChannels.printPdf,
-      bytes,
-      suggestedName
-    ) as Promise<void>;
   },
   savePdf(fileId, bytes) {
     return ipcRenderer.invoke(

@@ -9,25 +9,32 @@ import {
   shell
 } from 'electron';
 import type {
-  MessageBoxOptions,
   OpenDialogOptions,
   SaveDialogOptions
 } from 'electron';
-import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { safePdfFileName } from '../fileNames.js';
 import { electronIpcChannels } from './ipc.js';
 import type { DesktopImageFile, DesktopPdfDocument } from './bridge.js';
 
+type DesktopFileRecord = {
+  filePath: string;
+  ownerWebContentsId: number;
+};
+
+type DesktopWindowState = {
+  closeConfirmed: boolean;
+  closeRequestPending: boolean;
+  closeRequestTimer: NodeJS.Timeout | null;
+};
+
 const appProtocol = 'pdfannotator';
 const allowedExternalProtocols = new Set(['http:', 'https:', 'mailto:']);
 const closeConfirmationTimeoutMs = 15000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(__dirname, '..', '..');
 const rendererDistDir = app.isPackaged
   ? path.join(app.getAppPath(), 'dist')
@@ -37,13 +44,12 @@ const appIconPath = app.isPackaged
   : path.join(projectRoot, 'build', 'icon.ico');
 const preloadPath = path.join(__dirname, 'preload.js');
 const devRendererUrl = process.env.ELECTRON_RENDERER_URL?.trim() || null;
-const filePathsById = new Map<string, string>();
-const pendingOpenPaths: string[] = [];
+const fileRecordsById = new Map<string, DesktopFileRecord>();
+const pendingOpenPathsByWindowId = new Map<number, string[]>();
+const windowStates = new Map<number, DesktopWindowState>();
 
-let mainWindow: BrowserWindow | null = null;
-let closeConfirmed = false;
-let closeRequestPending = false;
-let closeRequestTimer: NodeJS.Timeout | null = null;
+let activeWindow: BrowserWindow | null = null;
+let primaryWindow: BrowserWindow | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -63,14 +69,12 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   app.on('second-instance', (_event, argv) => {
-    queueOpenPaths(pdfPathsFromArgs(argv));
-    mainWindow?.show();
-    mainWindow?.focus();
+    void openPathsInExistingWindow(pdfPathsFromArgs(argv));
   });
 
   app.on('open-file', (event, filePath) => {
     event.preventDefault();
-    queueOpenPaths([filePath]);
+    void openPathsInExistingWindow([filePath]);
   });
 
   app.whenReady().then(async () => {
@@ -78,8 +82,8 @@ if (!hasSingleInstanceLock) {
     registerAppProtocol();
     configureSessionSecurity();
     registerIpcHandlers();
-    await createMainWindow();
-    queueOpenPaths(pdfPathsFromArgs(process.argv));
+    const window = await createMainWindow();
+    queueOpenPaths(pdfPathsFromArgs(process.argv), window);
   });
 
   app.on('window-all-closed', () => {
@@ -91,7 +95,10 @@ if (!hasSingleInstanceLock) {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow();
+      return;
     }
+
+    preferredOpenWindow()?.show();
   });
 }
 
@@ -115,24 +122,43 @@ async function createMainWindow() {
     width: 1280
   });
 
-  mainWindow = window;
+  activeWindow = window;
+  primaryWindow ??= window;
+  windowStates.set(window.id, {
+    closeConfirmed: false,
+    closeRequestPending: false,
+    closeRequestTimer: null
+  });
   hardenWindow(window);
+  window.on('focus', () => {
+    activeWindow = window;
+  });
   window.once('ready-to-show', () => window.show());
   window.webContents.once('did-finish-load', () => {
-    void flushPendingOpenPaths();
+    void flushPendingOpenPaths(window);
   });
   window.on('closed', () => {
-    if (mainWindow === window) {
-      mainWindow = null;
+    const state = windowStates.get(window.id);
+    if (state) {
+      clearCloseRequestTimer(state);
+      windowStates.delete(window.id);
+    }
+    pendingOpenPathsByWindowId.delete(window.id);
+    if (activeWindow === window) {
+      activeWindow = null;
+    }
+    if (primaryWindow === window) {
+      primaryWindow = BrowserWindow.getAllWindows()[0] ?? null;
     }
   });
   window.on('close', (event) => {
-    if (closeConfirmed) {
+    const state = windowStateFor(window);
+    if (state.closeConfirmed) {
       return;
     }
 
     event.preventDefault();
-    if (closeRequestPending) {
+    if (state.closeRequestPending) {
       void confirmForceClose(window);
       return;
     }
@@ -142,10 +168,11 @@ async function createMainWindow() {
 
   if (!app.isPackaged && devRendererUrl) {
     await window.loadURL(devRendererUrl);
-    return;
+    return window;
   }
 
   await window.loadURL(`${appProtocol}://app/index.html`);
+  return window;
 }
 
 function hardenWindow(window: BrowserWindow) {
@@ -241,17 +268,17 @@ function filePathForProtocolUrl(url: string) {
 
 function registerIpcHandlers() {
   ipcMain.handle(electronIpcChannels.pickPdfFiles, async (event) => {
-    assertTrustedSender(event.sender);
-    const result = await showOpenDialog({
+    const ownerWindow = trustedWindowForSender(event.sender);
+    const result = await showOpenDialog(ownerWindow, {
       filters: [{ extensions: ['pdf'], name: 'PDF files' }],
       properties: ['openFile', 'multiSelections']
     });
-    return result.canceled ? [] : readPdfDocuments(result.filePaths);
+    return result.canceled ? [] : readPdfDocuments(result.filePaths, ownerWindow);
   });
 
   ipcMain.handle(electronIpcChannels.pickImageFile, async (event) => {
-    assertTrustedSender(event.sender);
-    const result = await showOpenDialog({
+    const ownerWindow = trustedWindowForSender(event.sender);
+    const result = await showOpenDialog(ownerWindow, {
       filters: [
         { extensions: ['jpg', 'jpeg', 'png', 'webp'], name: 'Image files' }
       ],
@@ -265,22 +292,22 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle(electronIpcChannels.savePdf, async (event, fileId, bytes) => {
-    assertTrustedSender(event.sender);
+    const ownerWindow = trustedWindowForSender(event.sender);
     assertUint8Array(bytes);
-    const filePath = filePathsById.get(String(fileId));
-    if (!filePath) {
+    const fileRecord = fileRecordsById.get(String(fileId));
+    if (!fileRecord || fileRecord.ownerWebContentsId !== ownerWindow.webContents.id) {
       throw new Error('No save target is registered for this document.');
     }
 
-    await writePdfFile(filePath, bytes);
+    await writePdfFile(fileRecord.filePath, bytes);
   });
 
   ipcMain.handle(
     electronIpcChannels.savePdfAs,
     async (event, bytes, suggestedName) => {
-      assertTrustedSender(event.sender);
+      const ownerWindow = trustedWindowForSender(event.sender);
       assertUint8Array(bytes);
-      const result = await showSaveDialog({
+      const result = await showSaveDialog(ownerWindow, {
         defaultPath: safePdfFileName(String(suggestedName)),
         filters: [{ extensions: ['pdf'], name: 'PDF files' }]
       });
@@ -290,16 +317,16 @@ function registerIpcHandlers() {
 
       const filePath = ensurePdfExtension(result.filePath);
       await writePdfFile(filePath, bytes);
-      return rememberPdfFile(filePath, bytes);
+      return rememberPdfFile(filePath, bytes, ownerWindow);
     }
   );
 
   ipcMain.handle(
     electronIpcChannels.downloadPdf,
     async (event, bytes, suggestedName) => {
-      assertTrustedSender(event.sender);
+      const ownerWindow = trustedWindowForSender(event.sender);
       assertUint8Array(bytes);
-      const result = await showSaveDialog({
+      const result = await showSaveDialog(ownerWindow, {
         defaultPath: safePdfFileName(String(suggestedName)),
         filters: [{ extensions: ['pdf'], name: 'PDF files' }]
       });
@@ -309,14 +336,13 @@ function registerIpcHandlers() {
     }
   );
 
-  ipcMain.handle(electronIpcChannels.printPdf, async (event, bytes, suggestedName) => {
-    assertTrustedSender(event.sender);
-    assertUint8Array(bytes);
-    await printPdfFile(bytes, String(suggestedName));
+  ipcMain.handle(electronIpcChannels.newWindow, async (event) => {
+    trustedWindowForSender(event.sender);
+    await createMainWindow();
   });
 
   ipcMain.handle(electronIpcChannels.openExternalLink, async (event, url) => {
-    assertTrustedSender(event.sender);
+    trustedWindowForSender(event.sender);
     const safeUrl = safeExternalUrl(String(url));
     if (!safeUrl) {
       throw new Error('Blocked unsupported external link.');
@@ -326,46 +352,61 @@ function registerIpcHandlers() {
   });
 
   ipcMain.on(electronIpcChannels.closeDecision, (event, allowed) => {
-    assertTrustedSender(event.sender);
-    clearCloseRequestTimer();
-    closeRequestPending = false;
-    if (allowed === true && mainWindow) {
-      closeConfirmed = true;
-      mainWindow.close();
+    const ownerWindow = trustedWindowForSender(event.sender);
+    const state = windowStateFor(ownerWindow);
+    clearCloseRequestTimer(state);
+    state.closeRequestPending = false;
+    if (allowed === true) {
+      state.closeConfirmed = true;
+      ownerWindow.close();
     }
   });
 }
 
-async function flushPendingOpenPaths() {
-  if (!mainWindow || pendingOpenPaths.length === 0) {
+async function flushPendingOpenPaths(window: BrowserWindow) {
+  const pendingOpenPaths = pendingOpenPathsByWindowId.get(window.id) ?? [];
+  if (pendingOpenPaths.length === 0 || window.isDestroyed()) {
     return;
   }
 
   const paths = pendingOpenPaths.splice(0, pendingOpenPaths.length);
-  const documents = await readPdfDocuments(paths);
-  if (documents.length > 0 && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(electronIpcChannels.openPdfFiles, documents);
+  pendingOpenPathsByWindowId.delete(window.id);
+  const documents = await readPdfDocuments(paths, window);
+  if (documents.length > 0 && !window.isDestroyed()) {
+    window.webContents.send(electronIpcChannels.openPdfFiles, documents);
   }
 }
 
-function queueOpenPaths(filePaths: string[]) {
+function queueOpenPaths(filePaths: string[], targetWindow: BrowserWindow) {
   const pdfPaths = filePaths.filter(isPdfPath);
   if (pdfPaths.length === 0) {
     return;
   }
 
+  const pendingOpenPaths = pendingOpenPathsByWindowId.get(targetWindow.id) ?? [];
   pendingOpenPaths.push(...pdfPaths);
-  if (mainWindow?.webContents.isLoading() === false) {
-    void flushPendingOpenPaths();
+  pendingOpenPathsByWindowId.set(targetWindow.id, pendingOpenPaths);
+  if (targetWindow.webContents.isLoading() === false) {
+    void flushPendingOpenPaths(targetWindow);
   }
 }
 
-async function readPdfDocuments(filePaths: string[]) {
+async function openPathsInExistingWindow(filePaths: string[]) {
+  const targetWindow = preferredOpenWindow() ?? (await createMainWindow());
+  targetWindow.show();
+  targetWindow.focus();
+  queueOpenPaths(filePaths, targetWindow);
+}
+
+async function readPdfDocuments(
+  filePaths: string[],
+  ownerWindow: BrowserWindow
+) {
   const documents: DesktopPdfDocument[] = [];
   for (const filePath of uniqueFilePaths(filePaths.filter(isPdfPath))) {
     try {
       const bytes = new Uint8Array(await fs.readFile(filePath));
-      documents.push(rememberPdfFile(filePath, bytes));
+      documents.push(rememberPdfFile(filePath, bytes, ownerWindow));
     } catch {
       // A file may have been moved or become unreadable between selection and read.
     }
@@ -374,9 +415,16 @@ async function readPdfDocuments(filePaths: string[]) {
   return documents;
 }
 
-function rememberPdfFile(filePath: string, bytes: Uint8Array): DesktopPdfDocument {
+function rememberPdfFile(
+  filePath: string,
+  bytes: Uint8Array,
+  ownerWindow: BrowserWindow
+): DesktopPdfDocument {
   const fileId = randomUUID();
-  filePathsById.set(fileId, filePath);
+  fileRecordsById.set(fileId, {
+    filePath,
+    ownerWebContentsId: ownerWindow.webContents.id
+  });
   return {
     bytes,
     fileId,
@@ -410,70 +458,6 @@ async function writePdfFile(filePath: string, bytes: Uint8Array) {
   }
 }
 
-async function printPdfFile(bytes: Uint8Array, suggestedName: string) {
-  const printDir = path.join(app.getPath('temp'), 'pdf-annotator-print');
-  await fs.mkdir(printDir, { recursive: true });
-  const printPath = path.join(
-    printDir,
-    `${randomUUID()}-${safePdfFileName(suggestedName)}`
-  );
-  await writePdfFile(printPath, bytes);
-  scheduleTempFileCleanup(printPath);
-
-  if (process.platform === 'win32') {
-    try {
-      await printPdfWithWindowsShell(printPath);
-      return;
-    } catch {
-      await showPrintFailureMessage();
-      return;
-    }
-  }
-
-  await showPrintFailureMessage();
-}
-
-async function printPdfWithWindowsShell(filePath: string) {
-  await execFileAsync(
-    'powershell.exe',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      'Start-Process -FilePath $args[0] -Verb Print',
-      filePath
-    ],
-    { windowsHide: true }
-  );
-}
-
-function scheduleTempFileCleanup(filePath: string) {
-  const timer = setTimeout(() => {
-    void fs.rm(filePath, { force: true });
-  }, 30 * 60 * 1000);
-  timer.unref?.();
-}
-
-async function showPrintFailureMessage() {
-  const options: MessageBoxOptions = {
-    buttons: ['OK'],
-    defaultId: 0,
-    message: 'PDF Annotator could not hand this PDF to the system printer.',
-    noLink: true,
-    title: 'Print failed',
-    type: 'warning'
-  };
-
-  if (mainWindow) {
-    await dialog.showMessageBox(mainWindow, options);
-    return;
-  }
-
-  await dialog.showMessageBox(options);
-}
-
 async function verifyFileBytes(filePath: string, expectedBytes: Uint8Array) {
   const actualBytes = await fs.readFile(filePath);
   if (actualBytes.byteLength !== expectedBytes.byteLength) {
@@ -488,17 +472,20 @@ async function verifyFileBytes(filePath: string, expectedBytes: Uint8Array) {
 }
 
 function requestRendererCloseConfirmation(window: BrowserWindow) {
-  if (closeRequestPending || window.isDestroyed()) {
+  const state = windowStateFor(window);
+  if (state.closeRequestPending || window.isDestroyed()) {
     return;
   }
 
-  closeRequestPending = true;
+  state.closeRequestPending = true;
+  window.show();
+  window.focus();
   window.webContents.send(electronIpcChannels.requestClose);
-  closeRequestTimer = setTimeout(() => {
-    closeRequestPending = false;
-    closeRequestTimer = null;
+  state.closeRequestTimer = setTimeout(() => {
+    state.closeRequestPending = false;
+    state.closeRequestTimer = null;
   }, closeConfirmationTimeoutMs);
-  closeRequestTimer.unref?.();
+  state.closeRequestTimer.unref?.();
 }
 
 async function confirmForceClose(window: BrowserWindow) {
@@ -518,36 +505,60 @@ async function confirmForceClose(window: BrowserWindow) {
     type: 'warning'
   });
   if (result.response === 1 && !window.isDestroyed()) {
-    clearCloseRequestTimer();
-    closeRequestPending = false;
-    closeConfirmed = true;
+    const state = windowStateFor(window);
+    clearCloseRequestTimer(state);
+    state.closeRequestPending = false;
+    state.closeConfirmed = true;
     window.close();
   }
 }
 
-function clearCloseRequestTimer() {
-  if (closeRequestTimer) {
-    clearTimeout(closeRequestTimer);
-    closeRequestTimer = null;
+function clearCloseRequestTimer(state: DesktopWindowState) {
+  if (state.closeRequestTimer) {
+    clearTimeout(state.closeRequestTimer);
+    state.closeRequestTimer = null;
   }
 }
 
-function showOpenDialog(options: OpenDialogOptions) {
-  return mainWindow
-    ? dialog.showOpenDialog(mainWindow, options)
-    : dialog.showOpenDialog(options);
+function showOpenDialog(ownerWindow: BrowserWindow, options: OpenDialogOptions) {
+  return ownerWindow.isDestroyed()
+    ? dialog.showOpenDialog(options)
+    : dialog.showOpenDialog(ownerWindow, options);
 }
 
-function showSaveDialog(options: SaveDialogOptions) {
-  return mainWindow
-    ? dialog.showSaveDialog(mainWindow, options)
-    : dialog.showSaveDialog(options);
+function showSaveDialog(ownerWindow: BrowserWindow, options: SaveDialogOptions) {
+  return ownerWindow.isDestroyed()
+    ? dialog.showSaveDialog(options)
+    : dialog.showSaveDialog(ownerWindow, options);
 }
 
-function assertTrustedSender(sender: Electron.WebContents) {
-  if (!mainWindow || sender.id !== mainWindow.webContents.id) {
+function trustedWindowForSender(sender: Electron.WebContents) {
+  const ownerWindow = BrowserWindow.fromWebContents(sender);
+  if (!ownerWindow || !windowStates.has(ownerWindow.id)) {
     throw new Error('Blocked IPC from an untrusted sender.');
   }
+
+  return ownerWindow;
+}
+
+function windowStateFor(window: BrowserWindow) {
+  const state = windowStates.get(window.id);
+  if (!state) {
+    throw new Error('Missing Electron window state.');
+  }
+
+  return state;
+}
+
+function preferredOpenWindow() {
+  const candidate =
+    activeWindow && !activeWindow.isDestroyed()
+      ? activeWindow
+      : primaryWindow && !primaryWindow.isDestroyed()
+        ? primaryWindow
+        : BrowserWindow.getAllWindows()[0] ?? null;
+
+  return candidate && !candidate.isDestroyed() ? candidate : null;
 }
 
 function assertUint8Array(value: unknown): asserts value is Uint8Array {

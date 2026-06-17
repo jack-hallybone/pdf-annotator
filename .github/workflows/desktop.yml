@@ -1,11 +1,17 @@
 name: Build Desktop App
 
 on:
-  push:
-    branches:
-      - main
-      - electron
   workflow_dispatch:
+    inputs:
+      package:
+        description: Desktop package to build
+        options:
+          - portable
+          - installer
+          - both
+        required: true
+        type: choice
+        default: portable
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  windows-portable:
+  windows-package:
     runs-on: windows-latest
 
     steps:
@@ -32,14 +38,31 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build portable Windows app
+        if: ${{ inputs.package == 'portable' || inputs.package == 'both' }}
         run: npm run desktop:package:win
         env:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
           CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
 
+      - name: Build Windows installer
+        if: ${{ inputs.package == 'installer' || inputs.package == 'both' }}
+        run: npm run desktop:package:win:installer
+        env:
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
+          CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
+
       - name: Upload portable app
+        if: ${{ inputs.package == 'portable' || inputs.package == 'both' }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
           name: pdf-annotator-windows-portable
-          path: release/*.exe
+          path: release/*portable.exe
+
+      - name: Upload installer
+        if: ${{ inputs.package == 'installer' || inputs.package == 'both' }}
+        uses: actions/upload-artifact@v6
+        with:
+          if-no-files-found: error
+          name: pdf-annotator-windows-installer
+          path: release/*setup.exe

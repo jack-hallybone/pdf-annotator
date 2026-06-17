@@ -22,10 +22,10 @@ export type DesktopBridge = {
     callback: (documents: DesktopPdfDocument[]) => void
   ) => () => void;
   onRequestClose: (callback: () => boolean | Promise<boolean>) => () => void;
+  newWindow: () => Promise<void>;
   openExternalLink: (url: string) => Promise<void>;
   pickImageFile: () => Promise<DesktopImageFile | null>;
   pickPdfFiles: () => Promise<DesktopPdfDocument[]>;
-  printPdf: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
   savePdf: (fileId: string, bytes: Uint8Array) => Promise<void>;
   savePdfAs: (
     bytes: Uint8Array,

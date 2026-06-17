@@ -61,7 +61,7 @@ function drawIcon(size) {
 
 function pixelColor(x, y) {
   if (!insideRoundedRect(x, y, 0, 0, 24, 24, 5)) {
-    return [0, 0, 0, 0];
+    return [255, 255, 255, 0];
   }
 
   let color = [255, 255, 255, 255];
@@ -104,20 +104,33 @@ function downsample(source, sourceSize, targetSize) {
 
   for (let y = 0; y < targetSize; y += 1) {
     for (let x = 0; x < targetSize; x += 1) {
-      const totals = [0, 0, 0, 0];
+      const totals = [0, 0, 0];
+      let alphaTotal = 0;
       let count = 0;
       for (let yy = 0; yy < ratio; yy += 1) {
         for (let xx = 0; xx < ratio; xx += 1) {
           const sourceOffset =
             ((y * ratio + yy) * sourceSize + (x * ratio + xx)) * 4;
-          totals[0] += source[sourceOffset];
-          totals[1] += source[sourceOffset + 1];
-          totals[2] += source[sourceOffset + 2];
-          totals[3] += source[sourceOffset + 3];
+          const alpha = source[sourceOffset + 3] / 255;
+          totals[0] += source[sourceOffset] * alpha;
+          totals[1] += source[sourceOffset + 1] * alpha;
+          totals[2] += source[sourceOffset + 2] * alpha;
+          alphaTotal += alpha;
           count += 1;
         }
       }
-      writePixel(target, targetSize, x, y, totals.map((value) => value / count));
+
+      const alpha = alphaTotal / count;
+      const color =
+        alphaTotal > 0
+          ? [
+              totals[0] / alphaTotal,
+              totals[1] / alphaTotal,
+              totals[2] / alphaTotal,
+              alpha * 255
+            ]
+          : [255, 255, 255, 0];
+      writePixel(target, targetSize, x, y, color);
     }
   }
 

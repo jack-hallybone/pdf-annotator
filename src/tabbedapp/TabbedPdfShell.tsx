@@ -57,6 +57,12 @@ export type TabbedPdfTemplateAction = {
   renderIcon: (size: number) => ReactNode;
 };
 
+export type TabbedPdfMenuAction = {
+  label: string;
+  onSelect: () => Promise<void> | void;
+  renderIcon: (size: number) => ReactNode;
+};
+
 const TEMPLATE_ACTIONS: TabbedPdfTemplateAction[] = [
   {
     kind: 'a4Blank',
@@ -149,6 +155,7 @@ export type TabbedPdfHomeRenderProps = {
 
 export type TabbedPdfShellHandle = {
   closeAllDocuments: () => Promise<boolean>;
+  confirmWindowClose: () => Promise<boolean>;
   focusHome: () => void;
   getDocuments: () => TabbedPdfDocumentSummary[];
   openDocument: (document: PdfHostDocument) => void;
@@ -166,6 +173,7 @@ export type TabbedPdfShellProps = {
   ) => boolean | Promise<boolean>;
   fileAdapter: PdfHostAdapter;
   initialDocuments?: PdfHostDocument[];
+  newTabMenuActions?: TabbedPdfMenuAction[];
   onDocumentsChange?: (documents: TabbedPdfDocumentSummary[]) => void;
   renderHome?: (props: TabbedPdfHomeRenderProps) => ReactNode;
   workspaceOptions?: TabbedPdfWorkspaceOptions;
@@ -181,6 +189,7 @@ export const TabbedPdfShell = forwardRef<
   confirmCloseDocuments,
   fileAdapter,
   initialDocuments = [],
+  newTabMenuActions = [],
   onDocumentsChange,
   renderHome,
   workspaceOptions = DEFAULT_WORKSPACE_OPTIONS
@@ -300,6 +309,7 @@ export const TabbedPdfShell = forwardRef<
 
   useImperativeHandle(ref, () => ({
     closeAllDocuments,
+    confirmWindowClose,
     focusHome: selectHome,
     getDocuments: documentSummaries,
     openDocument: (document) => openHostDocuments([document]),
@@ -866,6 +876,39 @@ export const TabbedPdfShell = forwardRef<
     );
   }
 
+  async function confirmWindowClose() {
+    if (shellLockedRef.current) {
+      return false;
+    }
+
+    const currentDocuments = documentsRef.current;
+    const dirtyDocuments = currentDocuments.filter(
+      (document) => document.hasUnsavedChanges
+    );
+    if (dirtyDocuments.length === 0) {
+      return true;
+    }
+
+    const dirtyDocumentIds = new Set(
+      dirtyDocuments.map((document) => document.id)
+    );
+    const decision = await confirmDocumentClose(
+      dirtyDocuments,
+      dirtyDocuments.length,
+      dirtyDocumentIds,
+      canSaveClosingDocuments(dirtyDocuments, dirtyDocuments.length)
+    );
+
+    if (decision === 'cancel') {
+      return false;
+    }
+    if (decision === 'save') {
+      return saveDocumentBeforeClose(dirtyDocuments[0].id);
+    }
+
+    return true;
+  }
+
   function openTabContextMenu(
     event: ReactMouseEvent<HTMLElement>,
     documentId: string
@@ -1351,6 +1394,19 @@ export const TabbedPdfShell = forwardRef<
     }
   }
 
+  async function runNewTabMenuAction(action: TabbedPdfMenuAction) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
+    closeNewTabMenu();
+    try {
+      await action.onSelect();
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
   const activeDocument = documents.find(
     (document) => document.id === activeDocumentId
   );
@@ -1541,6 +1597,21 @@ export const TabbedPdfShell = forwardRef<
                   <span>{label}</span>
                 </button>
               ))}
+              {newTabMenuActions.length > 0 ? (
+                <span className="tabbedapp-context-menu-separator" />
+              ) : null}
+              {newTabMenuActions.map((action) => (
+                <button
+                  key={action.label}
+                  disabled={shellLocked}
+                  onClick={() => void runNewTabMenuAction(action)}
+                  role="menuitem"
+                  type="button"
+                >
+                  {action.renderIcon(15)}
+                  <span>{action.label}</span>
+                </button>
+              ))}
             </div>
           ) : null}
         </div>
@@ -1633,17 +1704,19 @@ export const TabbedPdfShell = forwardRef<
             <SaveAll size={15} />
             <span>Save As...</span>
           </button>
-          <button
-            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
-            onClick={() =>
-              void runWorkspaceCommand(tabContextMenuDocument.id, 'downloadCopy')
-            }
-            role="menuitem"
-            type="button"
-          >
-            <Download size={15} />
-            <span>Download a copy</span>
-          </button>
+          {workspaceOptions.showDownloadButton !== false ? (
+            <button
+              disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
+              onClick={() =>
+                void runWorkspaceCommand(tabContextMenuDocument.id, 'downloadCopy')
+              }
+              role="menuitem"
+              type="button"
+            >
+              <Download size={15} />
+              <span>Download a copy</span>
+            </button>
+          ) : null}
           <button
             disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() =>
