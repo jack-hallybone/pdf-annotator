@@ -10,7 +10,7 @@
     "dev": "vite",
     "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "tsc -b && vite build",
-    "electron:build": "tsc -p tsconfig.electron.json",
+    "electron:build": "tsc -p tsconfig.electron.json && node scripts/copy-electron-preload.mjs",
     "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron dist-electron/electronapp/main.js",
     "electron:preview": "npm run desktop:build && electron dist-electron/electronapp/main.js",
     "generate-icons": "node scripts/generate-electron-icon.mjs",

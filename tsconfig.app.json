@@ -19,5 +19,5 @@
     "noUncheckedSideEffectImports": true
   },
   "include": ["src"],
-  "exclude": ["src/electronapp/main.ts", "src/electronapp/preload.ts"]
+  "exclude": ["src/electronapp/main.ts"]
 }

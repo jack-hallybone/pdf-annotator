@@ -43,7 +43,7 @@ const rendererDistDir = app.isPackaged
 const appIconPath = app.isPackaged
   ? path.join(process.resourcesPath, 'icon.ico')
   : path.join(projectRoot, 'build', 'icon.ico');
-const preloadPath = path.join(__dirname, 'preload.js');
+const preloadPath = path.join(__dirname, 'preload.cjs');
 const devRendererUrl = process.env.ELECTRON_RENDERER_URL?.trim() || null;
 const fileRecordsById = new Map<string, DesktopFileRecord>();
 const pendingOpenPathsByWindowId = new Map<number, string[]>();

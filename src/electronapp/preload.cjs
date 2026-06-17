@@ -1,26 +1,31 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type {
-  DesktopBridge,
-  DesktopImageFile,
-  DesktopPdfDocument,
-  DesktopSaveAsResult
-} from './bridge.js';
-import { electronIpcChannels } from './ipc.js';
+const { contextBridge, ipcRenderer } = require('electron');
 
-type CloseHandler = () => boolean | Promise<boolean>;
+const electronIpcChannels = {
+  closeDecision: 'desktop:close-decision',
+  downloadPdf: 'desktop:download-pdf',
+  newWindow: 'desktop:new-window',
+  openExternalLink: 'desktop:open-external-link',
+  openPdfFiles: 'desktop:open-pdf-files',
+  pickImageFile: 'desktop:pick-image-file',
+  pickPdfFiles: 'desktop:pick-pdf-files',
+  printPdf: 'desktop:print-pdf',
+  requestClose: 'desktop:request-close',
+  savePdf: 'desktop:save-pdf',
+  savePdfAs: 'desktop:save-pdf-as'
+};
 
-const closeHandlers = new Set<CloseHandler>();
+const closeHandlers = new Set();
 
-const bridge: DesktopBridge = {
+const bridge = {
   downloadPdf(bytes, suggestedName) {
     return ipcRenderer.invoke(
       electronIpcChannels.downloadPdf,
       bytes,
       suggestedName
-    ) as Promise<void>;
+    );
   },
   onOpenPdfFiles(callback) {
-    const listener = (_event: Electron.IpcRendererEvent, documents: unknown) => {
+    const listener = (_event, documents) => {
       if (Array.isArray(documents)) {
         callback(documents.filter(isDesktopPdfDocument));
       }
@@ -35,44 +40,33 @@ const bridge: DesktopBridge = {
     return () => closeHandlers.delete(callback);
   },
   newWindow() {
-    return ipcRenderer.invoke(electronIpcChannels.newWindow) as Promise<void>;
+    return ipcRenderer.invoke(electronIpcChannels.newWindow);
   },
   openExternalLink(url) {
-    return ipcRenderer.invoke(
-      electronIpcChannels.openExternalLink,
-      url
-    ) as Promise<void>;
+    return ipcRenderer.invoke(electronIpcChannels.openExternalLink, url);
   },
   pickImageFile() {
-    return ipcRenderer.invoke(
-      electronIpcChannels.pickImageFile
-    ) as Promise<DesktopImageFile | null>;
+    return ipcRenderer.invoke(electronIpcChannels.pickImageFile);
   },
   pickPdfFiles() {
-    return ipcRenderer.invoke(
-      electronIpcChannels.pickPdfFiles
-    ) as Promise<DesktopPdfDocument[]>;
+    return ipcRenderer.invoke(electronIpcChannels.pickPdfFiles);
   },
   printPdf(bytes, suggestedName) {
     return ipcRenderer.invoke(
       electronIpcChannels.printPdf,
       bytes,
       suggestedName
-    ) as Promise<void>;
+    );
   },
   savePdf(fileId, bytes) {
-    return ipcRenderer.invoke(
-      electronIpcChannels.savePdf,
-      fileId,
-      bytes
-    ) as Promise<void>;
+    return ipcRenderer.invoke(electronIpcChannels.savePdf, fileId, bytes);
   },
   savePdfAs(bytes, suggestedName) {
     return ipcRenderer.invoke(
       electronIpcChannels.savePdfAs,
       bytes,
       suggestedName
-    ) as Promise<DesktopSaveAsResult | null>;
+    );
   }
 };
 
@@ -98,14 +92,13 @@ async function resolveCloseRequest() {
   ipcRenderer.send(electronIpcChannels.closeDecision, allowed);
 }
 
-function isDesktopPdfDocument(value: unknown): value is DesktopPdfDocument {
-  const candidate = value as Partial<DesktopPdfDocument> | null;
+function isDesktopPdfDocument(value) {
   return (
     typeof value === 'object' &&
     value !== null &&
-    candidate?.bytes instanceof Uint8Array &&
-    typeof candidate.fileKey === 'string' &&
-    typeof candidate.fileId === 'string' &&
-    typeof candidate.name === 'string'
+    value.bytes instanceof Uint8Array &&
+    typeof value.fileKey === 'string' &&
+    typeof value.fileId === 'string' &&
+    typeof value.name === 'string'
   );
 }

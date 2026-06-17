@@ -21,7 +21,6 @@
     "src/electronapp/bridge.ts",
     "src/electronapp/ipc.ts",
     "src/electronapp/main.ts",
-    "src/electronapp/preload.ts",
     "src/fileNames.ts"
   ]
 }
