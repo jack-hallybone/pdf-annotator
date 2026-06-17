@@ -116,10 +116,14 @@ type FreeTextResizeHandle = {
   handle: 'left' | 'right';
   pointerId: number;
 };
+type ImageStampResizeHandle = {
+  annotationId: string;
+  handle: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+  pointerId: number;
+};
 type DraftInkPath = {
   kind: 'draw' | 'freehandHighlight';
   path: PdfPoint[];
-  renderedPointCount: number;
 };
 type EraserGesture = {
   pendingUntilDrag: boolean;
@@ -274,6 +278,7 @@ function PdfPageViewComponent({
   const eraserPreviewFrameRef = useRef<number | null>(null);
   const eraserRemainingPathsRef = useRef<Map<string, PdfPoint[][]>>(new Map());
   const eraserDeletedIdsRef = useRef<Set<string>>(new Set());
+  const suppressNextContextMenuRef = useRef(false);
   const pendingEraseChangesRef = useRef<PendingEraseChanges>({
     deleteIds: new Set(),
     pathUpdates: new Map()
@@ -298,6 +303,8 @@ function PdfPageViewComponent({
   );
   const [freeTextResizeHandle, setFreeTextResizeHandle] =
     useState<FreeTextResizeHandle | null>(null);
+  const [imageStampResizeHandle, setImageStampResizeHandle] =
+    useState<ImageStampResizeHandle | null>(null);
   const [dragHandle, setDragHandle] = useState<{
     anchorIndex: number | null;
     annotationId: string;
@@ -363,10 +370,16 @@ function PdfPageViewComponent({
       ),
     [displayAnnotations, selectedAnnotationIdSet]
   );
+  const imageDisplayAnnotations = useMemo(
+    () =>
+      displayAnnotations.filter((annotation) => annotation.kind === 'imageStamp'),
+    [displayAnnotations]
+  );
   const vectorDisplayAnnotations = useMemo(
     () =>
       displayAnnotations.filter(
         (annotation) =>
+          annotation.kind !== 'imageStamp' &&
           !isCanvasBackedInkAnnotation(annotation, selectedAnnotationIdSet)
       ),
     [displayAnnotations, selectedAnnotationIdSet]
@@ -734,7 +747,7 @@ function PdfPageViewComponent({
         context.setTransform(scaleX, 0, 0, scaleY, 0, 0);
         const renderTask = page.render({
           annotationMode: AnnotationMode.ENABLE,
-          background: 'rgb(255 255 255)',
+          background: pageBackgroundColor(pageRef.current),
           canvas: overlayCanvas,
           canvasContext: context,
           viewport
@@ -1058,6 +1071,7 @@ function PdfPageViewComponent({
     }
 
     if (tool === 'eraser') {
+      event.preventDefault();
       onBeginAnnotationEdit({ finishOnPointerUp: true });
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -1069,6 +1083,7 @@ function PdfPageViewComponent({
     }
 
     if (tool === 'lasso') {
+      event.preventDefault();
       const point = eventToPdfPoint(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
       setLassoPath([point]);
@@ -1079,6 +1094,7 @@ function PdfPageViewComponent({
       return;
     }
 
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     beginDraftInkPath(
       tool === 'draw' ? 'draw' : 'freehandHighlight',
@@ -1192,16 +1208,19 @@ function PdfPageViewComponent({
     }
 
     if (moveActiveDragSelection(event.clientX, event.clientY)) {
+      event.preventDefault();
       return;
     }
 
     if (eraserPathRef.current) {
       const points = eventToPdfPointsFromElement(event, viewport);
+      event.preventDefault();
       appendEraserPoints(points);
       return;
     }
 
     if (tool === 'highlight' && draftTextHighlight) {
+      event.preventDefault();
       const segment = nearestTextSegmentFromPointerEventWithGeometry(
         event,
         getActiveTextGeometry(),
@@ -1222,6 +1241,7 @@ function PdfPageViewComponent({
     }
 
     const points = eventToPdfPointsFromElement(event, viewport);
+    event.preventDefault();
     appendDraftInkPath(points);
   }
 
@@ -1365,12 +1385,12 @@ function PdfPageViewComponent({
       return;
     }
 
-    releasePointer(event, event.pointerId);
     const path = appendDraftInkPath(
       eventToPdfPointsFromElement(event, viewport)
     );
     const normalizedPath = normalizeDraftInkPath(path, viewport);
     endDraftInkPath();
+    releasePointer(event, event.pointerId);
 
     if (
       path.length > 2 &&
@@ -1395,6 +1415,7 @@ function PdfPageViewComponent({
     }
 
     if (moveActiveDragSelection(event.clientX, event.clientY)) {
+      event.preventDefault();
       return;
     }
 
@@ -1435,14 +1456,34 @@ function PdfPageViewComponent({
       return;
     }
 
+    if (imageStampResizeHandle) {
+      const point = eventToPdfPoint(event, viewport);
+      onUpdateAnnotation(
+        imageStampResizeHandle.annotationId,
+        (annotation) =>
+          annotation.kind === 'imageStamp'
+            ? resizeImageStampRect(
+                annotation,
+                point,
+                imageStampResizeHandle.handle,
+                scale
+              )
+            : annotation,
+        { recordUndo: false }
+      );
+      return;
+    }
+
     if (eraserPathRef.current) {
       const points = eventToPdfPoints(event, viewport);
+      event.preventDefault();
       appendEraserPoints(points);
       return;
     }
 
     if (lassoPath) {
       const points = eventToPdfPoints(event, viewport);
+      event.preventDefault();
       setLassoPath((current) =>
         current ? appendPdfPoints(current, points) : current
       );
@@ -1457,7 +1498,48 @@ function PdfPageViewComponent({
     }
 
     const points = eventToPdfPoints(event, viewport);
+    event.preventDefault();
     appendDraftInkPath(points);
+  }
+
+  function handlePointerCancel(event: React.PointerEvent<Element>) {
+    if (dismissedSelectionPointerIdRef.current === event.pointerId) {
+      dismissedSelectionPointerIdRef.current = null;
+    }
+
+    if (dragSelectionRef.current?.pointerId === event.pointerId) {
+      dragSelectionRef.current = null;
+    }
+
+    if (freeTextResizeHandle?.pointerId === event.pointerId) {
+      setFreeTextResizeHandle(null);
+    }
+
+    if (imageStampResizeHandle?.pointerId === event.pointerId) {
+      setImageStampResizeHandle(null);
+    }
+
+    if (dragHandle?.pointerId === event.pointerId) {
+      setDragHandle(null);
+      activeTextGeometryRef.current = null;
+    }
+
+    if (eraserPathRef.current) {
+      endEraserGesture();
+    }
+
+    if (lassoPath) {
+      setLassoPath(null);
+    }
+
+    if (draftTextHighlight) {
+      setDraftTextHighlight(null);
+      activeTextGeometryRef.current = null;
+    }
+
+    if (draftInkPathRef.current) {
+      endDraftInkPath();
+    }
   }
 
   function handlePointerUp(event: React.PointerEvent<SVGSVGElement>) {
@@ -1477,6 +1559,12 @@ function PdfPageViewComponent({
     if (freeTextResizeHandle) {
       releasePointer(event, freeTextResizeHandle.pointerId);
       setFreeTextResizeHandle(null);
+      return;
+    }
+
+    if (imageStampResizeHandle) {
+      releasePointer(event, imageStampResizeHandle.pointerId);
+      setImageStampResizeHandle(null);
       return;
     }
 
@@ -1512,7 +1600,6 @@ function PdfPageViewComponent({
       draftInkPathRef.current &&
       (tool === 'draw' || tool === 'freehandHighlight')
     ) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
       const path = appendDraftInkPath(eventToPdfPoints(event, viewport));
       const normalizedPath =
         tool === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
@@ -1552,6 +1639,7 @@ function PdfPageViewComponent({
       }
 
       endDraftInkPath();
+      releasePointer(event, event.pointerId);
 
       if (annotation) {
         onAddAnnotation(annotation);
@@ -1877,6 +1965,7 @@ function PdfPageViewComponent({
     eraserGestureRef.current = {
       pendingUntilDrag: requireMovement
     };
+    suppressNextContextMenuRef.current = !requireMovement;
     scheduleEraserPreviewRender();
 
     if (!requireMovement) {
@@ -1910,6 +1999,7 @@ function PdfPageViewComponent({
       }
 
       gesture.pendingUntilDrag = false;
+      suppressNextContextMenuRef.current = true;
       nextPath.forEach(eraseAtPoint);
       return;
     }
@@ -2035,7 +2125,7 @@ function PdfPageViewComponent({
     point: PdfPoint
   ) {
     clearDraftInkCanvases();
-    draftInkPathRef.current = { kind, path: [point], renderedPointCount: 1 };
+    draftInkPathRef.current = { kind, path: [point] };
     scheduleDraftInkRender();
   }
 
@@ -2117,21 +2207,11 @@ function PdfPageViewComponent({
         draft.kind === 'draw'
           ? draftInkCanvasRef.current
           : draftHighlightInkCanvasRef.current,
-      clear: false,
+      clear: true,
       displaySize,
       viewport
     });
     if (!prepared) {
-      return;
-    }
-
-    if (prepared.resized) {
-      draft.renderedPointCount = 1;
-    }
-
-    const startIndex = Math.max(0, draft.renderedPointCount - 1);
-    const segment = draft.path.slice(startIndex);
-    if (segment.length === 0) {
       return;
     }
 
@@ -2147,16 +2227,23 @@ function PdfPageViewComponent({
       draft.kind === 'draw'
         ? toolSettings.drawWidth
         : toolSettings.highlightWidth;
+    const displayPath =
+      draft.kind === 'draw' && pathLength(draft.path) <= inkDotMaxLength(viewport)
+        ? dotPath(draft.path[0], toolSettings.drawWidth)
+        : normalizeDraftInkPath(draft.path, viewport);
 
-    drawRawInkCanvasPath({
-      color: rgbToCss(color),
-      context: prepared.context,
-      opacity,
-      path: segment,
+    prepared.context.globalAlpha = clamp(opacity, 0, 1);
+    prepared.context.fillStyle = rgbToCss(color);
+    prepared.context.strokeStyle = rgbToCss(color);
+    prepared.context.lineWidth = Math.max(0.25, width * scale);
+    drawInkCanvasPath(
+      prepared.context,
+      displayPath,
       viewport,
-      width: width * scale
-    });
-    draft.renderedPointCount = draft.path.length;
+      false,
+      width * scale
+    );
+    prepared.context.globalAlpha = 1;
   }
 
   return (
@@ -2168,14 +2255,18 @@ function PdfPageViewComponent({
     >
       <div
         className="pdf-page"
+        data-tool={tool}
         ref={pageRef}
         style={pageStyle}
         onPointerDown={handlePagePointerDown}
         onPointerMove={handlePagePointerMove}
         onPointerUp={handlePagePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onLostPointerCapture={handlePointerCancel}
         onMouseUp={handleMouseUp}
         onContextMenu={(event) => {
-          if (tool === 'draw' || tool === 'highlight' || tool === 'eraser') {
+          if (suppressNextContextMenuRef.current) {
+            suppressNextContextMenuRef.current = false;
             event.preventDefault();
           }
         }}
@@ -2199,6 +2290,47 @@ function PdfPageViewComponent({
             ref={annotationLayerRef}
             style={{ pointerEvents: 'none' }}
           />
+          {showSynchronizedAnnotations && imageDisplayAnnotations.length > 0 ? (
+            <svg
+              className="pdfa-image-stamp-layer pdfa-fill"
+              height={displaySize.height}
+              style={{ pointerEvents: readOnly ? 'none' : 'auto' }}
+              viewBox={`0 0 ${viewport.width} ${viewport.height}`}
+              width={displaySize.width}
+            >
+              {imageDisplayAnnotations.map((annotation) => (
+                <AnnotationShape
+                  annotation={annotation}
+                  focused={false}
+                  key={annotation.id}
+                  onBeginHighlightHandleDrag={() => undefined}
+                  onBeginFreeTextResizeHandleDrag={() => undefined}
+                  onBeginImageStampResizeHandleDrag={() => undefined}
+                  onBeginMoveDrag={beginMoveAnnotation}
+                  onHoverChange={(hovered) =>
+                    setHoveredAnnotationId(hovered ? annotation.id : null)
+                  }
+                  onBeginEdit={onBeginAnnotationEdit}
+                  onFocusEnd={onFocusAnnotationConsumed}
+                  onSelect={() => {
+                    onActivate(pageIndex);
+                    onSelectAnnotations([annotation.id]);
+                  }}
+                  onUpdate={(updater) =>
+                    onUpdateAnnotation(annotation.id, updater, {
+                      recordUndo: false
+                    })
+                  }
+                  readOnly={readOnly}
+                  scale={scale}
+                  selected={false}
+                  showPopover={false}
+                  tool={tool}
+                  viewport={viewport}
+                />
+              ))}
+            </svg>
+          ) : null}
           <canvas
             className="pdfa-ink-canvas-layer pdfa-highlight-canvas-layer pdfa-fill"
             ref={highlightInkCanvasRef}
@@ -2221,7 +2353,7 @@ function PdfPageViewComponent({
           />
           {shouldMountInteractionOverlay ? (
             <svg
-              className="pdfa-fill"
+              className="pdfa-interaction-layer pdfa-fill"
               height={displaySize.height}
               style={{
                 pointerEvents:
@@ -2235,6 +2367,8 @@ function PdfPageViewComponent({
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerCancel}
+              onLostPointerCapture={handlePointerCancel}
             >
             {draftTextHighlightRects.map((rect, index) => {
               const bounds = pdfRectToViewportRect(rect, viewport);
@@ -2285,6 +2419,16 @@ function PdfPageViewComponent({
                     pointerId: event.pointerId
                   });
                 }}
+                onBeginImageStampResizeHandleDrag={(event, handle) => {
+                  event.stopPropagation();
+                  onBeginAnnotationEdit({ finishOnPointerUp: true });
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setImageStampResizeHandle({
+                    annotationId: annotation.id,
+                    handle,
+                    pointerId: event.pointerId
+                  });
+                }}
                 onBeginMoveDrag={beginMoveAnnotation}
                 onHoverChange={(hovered) =>
                   setHoveredAnnotationId(hovered ? annotation.id : null)
@@ -2316,6 +2460,27 @@ function PdfPageViewComponent({
                 viewport={viewport}
               />
             )) : null}
+            {showSynchronizedAnnotations
+              ? selectedPageAnnotations
+                  .filter((annotation) => annotation.kind === 'imageStamp')
+                  .map((annotation) => (
+                    <ImageStampSelectionOverlay
+                      annotation={annotation}
+                      key={`image-selection-${annotation.id}`}
+                      onBeginDrag={(event, handle) => {
+                        event.stopPropagation();
+                        onBeginAnnotationEdit({ finishOnPointerUp: true });
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        setImageStampResizeHandle({
+                          annotationId: annotation.id,
+                          handle,
+                          pointerId: event.pointerId
+                        });
+                      }}
+                      viewport={viewport}
+                    />
+                  ))
+              : null}
             {!readOnly && showSynchronizedAnnotations && selectedPageAnnotations.length > 0 ? (
               <SelectionToolbar
                 annotations={selectedPageAnnotations}
@@ -2408,6 +2573,7 @@ function AnnotationShape({
   onBeginEdit,
   onBeginFreeTextResizeHandleDrag,
   onBeginHighlightHandleDrag,
+  onBeginImageStampResizeHandleDrag,
   onBeginMoveDrag,
   onFocusEnd,
   onHoverChange,
@@ -2426,6 +2592,10 @@ function AnnotationShape({
   onBeginFreeTextResizeHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
     handle: 'left' | 'right'
+  ) => void;
+  onBeginImageStampResizeHandleDrag: (
+    event: React.PointerEvent<SVGCircleElement>,
+    handle: ImageStampResizeHandle['handle']
   ) => void;
   onBeginHighlightHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
@@ -2656,23 +2826,61 @@ function AnnotationShape({
       );
     }
 
+    case 'imageStamp': {
+      const rect = pdfRectToViewportRect(annotation.rect, viewport);
+      return (
+        <g {...commonProps}>
+          <image
+            height={rect.height}
+            href={`data:${annotation.mimeType};base64,${annotation.imageData}`}
+            preserveAspectRatio="xMidYMid meet"
+            width={rect.width}
+            x={rect.x}
+            y={rect.y}
+          />
+          {selected ? (
+            <>
+              <rect
+                fill="none"
+                height={rect.height}
+                stroke={SELECTION_ACCENT}
+                strokeDasharray="4 3"
+                strokeWidth="1.5"
+                width={rect.width}
+                x={rect.x}
+                y={rect.y}
+              />
+              <ImageStampResizeHandles
+                annotation={annotation}
+                onBeginDrag={onBeginImageStampResizeHandleDrag}
+                viewport={viewport}
+              />
+            </>
+          ) : null}
+        </g>
+      );
+    }
+
     case 'stickyNote': {
       const rect = pdfRectToViewportRect(annotation.rect, viewport);
+      const detailColor = 'var(--pdfa-ink)';
       return (
         <g {...commonProps} transform={`translate(${rect.x} ${rect.y})`}>
           <rect
             fill={rgbToCss(annotation.color)}
             height={Math.max(rect.height, 22)}
             rx="3"
-            stroke={selected ? '#047857' : '#ca8a04'}
+            stroke={detailColor}
+            strokeOpacity={selected ? 0.95 : 0.62}
             strokeWidth={selected ? 2 : 1}
             width={Math.max(rect.width, 22)}
           />
           <path
             d="M6 7h12M6 12h10M6 17h8"
             fill="none"
-            stroke="#854d0e"
+            stroke={detailColor}
             strokeLinecap="round"
+            strokeOpacity="0.66"
             strokeWidth="1.5"
           />
           {showPopover ? (
@@ -2791,6 +2999,94 @@ function FreeTextWidthHandles({
   );
 }
 
+function ImageStampSelectionOverlay({
+  annotation,
+  onBeginDrag,
+  viewport
+}: {
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>;
+  onBeginDrag: (
+    event: React.PointerEvent<SVGCircleElement>,
+    handle: ImageStampResizeHandle['handle']
+  ) => void;
+  viewport: PageViewport;
+}) {
+  const rect = pdfRectToViewportRect(annotation.rect, viewport);
+  return (
+    <g style={{ pointerEvents: 'auto' }}>
+      <rect
+        fill="none"
+        height={rect.height}
+        stroke={SELECTION_ACCENT}
+        strokeDasharray="4 3"
+        strokeWidth="1.5"
+        width={rect.width}
+        x={rect.x}
+        y={rect.y}
+      />
+      <ImageStampResizeHandles
+        annotation={annotation}
+        onBeginDrag={onBeginDrag}
+        viewport={viewport}
+      />
+    </g>
+  );
+}
+
+function ImageStampResizeHandles({
+  annotation,
+  onBeginDrag,
+  viewport
+}: {
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>;
+  onBeginDrag: (
+    event: React.PointerEvent<SVGCircleElement>,
+    handle: ImageStampResizeHandle['handle']
+  ) => void;
+  viewport: PageViewport;
+}) {
+  const rect = annotation.rect;
+  const handles: Array<{
+    handle: ImageStampResizeHandle['handle'];
+    point: [number, number];
+  }> = [
+    {
+      handle: 'top-left',
+      point: viewport.convertToViewportPoint(rect.x1, rect.y2) as [number, number]
+    },
+    {
+      handle: 'top-right',
+      point: viewport.convertToViewportPoint(rect.x2, rect.y2) as [number, number]
+    },
+    {
+      handle: 'bottom-left',
+      point: viewport.convertToViewportPoint(rect.x1, rect.y1) as [number, number]
+    },
+    {
+      handle: 'bottom-right',
+      point: viewport.convertToViewportPoint(rect.x2, rect.y1) as [number, number]
+    }
+  ];
+
+  return (
+    <g style={{ pointerEvents: 'auto' }}>
+      {handles.map(({ handle, point }) => (
+        <circle
+          cx={point[0]}
+          cy={point[1]}
+          fill={SELECTION_ACCENT}
+          key={handle}
+          onPointerDown={(event) => onBeginDrag(event, handle)}
+          r="4.5"
+          stroke="white"
+          strokeWidth="1.5"
+          style={{ cursor: `${handle.replace('-', '')}-resize` }}
+        />
+      ))}
+    </g>
+  );
+}
+
 function SelectionToolbar({
   annotations,
   onClose,
@@ -2816,18 +3112,23 @@ function SelectionToolbar({
   );
   const first = annotations[0];
   const showsFontSize = annotations.length === 1 && first?.kind === 'freeText';
+  const showsImageSize =
+    annotations.length === 1 && first?.kind === 'imageStamp';
   const showsStroke = annotations.some(hasStroke);
   const showsOpacity = annotations.some(hasOpacity);
   const showsCopyText = annotations.some(
     (annotation) => annotation.kind === 'textHighlight'
   );
+  const showsColor = Boolean(first && hasColor(first));
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const visibleBounds = useVisiblePageBounds(pageRef, viewport);
   const rowHeights = [
-    first ? 22 : 0,
+    showsColor ? 22 : 0,
     showsOpacity ? 30 : 0,
     showsStroke ? 30 : 0,
     showsFontSize ? 30 : 0,
+    showsImageSize ? 30 : 0,
+    showsImageSize ? 30 : 0,
     30
   ].filter((height) => height > 0);
   const toolbarHeight =
@@ -2904,13 +3205,15 @@ function SelectionToolbar({
         onPointerUp={(event) => event.stopPropagation()}
       >
         <SettingsPanelShell>
-          {first ? (
+          {first && hasColor(first) ? (
             <div onPointerDownCapture={onBeginEdit}>
               <ColorPalette
                 color={first.color}
                 label={null}
                 onChange={(color) =>
-                  onUpdate((current) => ({ ...current, color }))
+                  onUpdate((current) =>
+                    hasColor(current) ? { ...current, color } : current
+                  )
                 }
                 onCommit={onClose}
               />
@@ -2970,6 +3273,48 @@ function SelectionToolbar({
               />
             </div>
           ) : null}
+          {showsImageSize && first.kind === 'imageStamp' ? (
+            <>
+              <div onPointerDownCapture={onBeginEdit}>
+                <NumberSetting
+                  label="W mm"
+                  max={1000}
+                  min={5}
+                  onChange={(value) =>
+                    onUpdate((current) =>
+                      current.kind === 'imageStamp'
+                        ? resizeImageStampToWidth(current, millimetresToPdfUnits(value, viewport))
+                        : current
+                    )
+                  }
+                  step={1}
+                  value={pdfUnitsToMillimetres(
+                    Math.abs(first.rect.x2 - first.rect.x1),
+                    viewport
+                  )}
+                />
+              </div>
+              <div onPointerDownCapture={onBeginEdit}>
+                <NumberSetting
+                  label="H mm"
+                  max={1000}
+                  min={5}
+                  onChange={(value) =>
+                    onUpdate((current) =>
+                      current.kind === 'imageStamp'
+                        ? resizeImageStampToHeight(current, millimetresToPdfUnits(value, viewport))
+                        : current
+                    )
+                  }
+                  step={1}
+                  value={pdfUnitsToMillimetres(
+                    Math.abs(first.rect.y2 - first.rect.y1),
+                    viewport
+                  )}
+                />
+              </div>
+            </>
+          ) : null}
           <div className="selection-toolbar-actions">
             {showsCopyText && onCopyText ? (
               <button
@@ -3001,12 +3346,14 @@ function annotationRenderRank(annotation: PdfAnnotation) {
     case 'textHighlight':
     case 'freehandHighlight':
       return 0;
-    case 'draw':
+    case 'imageStamp':
       return 1;
-    case 'freeText':
+    case 'draw':
       return 2;
-    case 'stickyNote':
+    case 'freeText':
       return 3;
+    case 'stickyNote':
+      return 4;
   }
 }
 
@@ -3472,53 +3819,6 @@ function drawInkCanvasPath(
   }
 }
 
-function drawRawInkCanvasPath({
-  color,
-  context,
-  opacity,
-  path,
-  viewport,
-  width
-}: {
-  color: string;
-  context: CanvasRenderingContext2D;
-  opacity: number;
-  path: PdfPoint[];
-  viewport: PageViewport;
-  width: number;
-}) {
-  if (path.length === 0) {
-    return;
-  }
-
-  context.globalAlpha = clamp(opacity, 0, 1);
-  context.fillStyle = color;
-  context.strokeStyle = color;
-  context.lineWidth = Math.max(0.25, width);
-
-  if (path.length === 1) {
-    const [x, y] = viewport.convertToViewportPoint(path[0].x, path[0].y);
-    context.beginPath();
-    context.arc(x, y, Math.max(0.25, width / 2), 0, Math.PI * 2);
-    context.fill();
-    context.globalAlpha = 1;
-    return;
-  }
-
-  const [startX, startY] = viewport.convertToViewportPoint(
-    path[0].x,
-    path[0].y
-  );
-  context.beginPath();
-  context.moveTo(startX, startY);
-  for (const point of path.slice(1)) {
-    const [x, y] = viewport.convertToViewportPoint(point.x, point.y);
-    context.lineTo(x, y);
-  }
-  context.stroke();
-  context.globalAlpha = 1;
-}
-
 function getTextSelectionHighlightAction(
   selection: Selection | null,
   pageElement: HTMLDivElement | null,
@@ -3943,6 +4243,88 @@ function resizeFreeTextWidth(
       x2: nextRight,
       y2: top
     }
+  };
+}
+
+function resizeImageStampRect(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  point: PdfPoint,
+  handle: ImageStampResizeHandle['handle'],
+  scale: number
+) {
+  const rect = annotation.rect;
+  const aspectRatio = imageStampAspectRatio(annotation);
+  const minSize = Math.max(4, 12 / scale);
+  const anchors = {
+    'top-left': { x: rect.x2, y: rect.y1 },
+    'top-right': { x: rect.x1, y: rect.y1 },
+    'bottom-left': { x: rect.x2, y: rect.y2 },
+    'bottom-right': { x: rect.x1, y: rect.y2 }
+  };
+  const anchor = anchors[handle];
+  const requestedWidth = Math.max(minSize, Math.abs(point.x - anchor.x));
+  const requestedHeight = Math.max(minSize, Math.abs(point.y - anchor.y));
+  const width = Math.max(requestedWidth, requestedHeight * aspectRatio);
+  const height = width / aspectRatio;
+  const right = handle.endsWith('right');
+  const top = handle.startsWith('top');
+  const x1 = right ? anchor.x : anchor.x - width;
+  const x2 = right ? anchor.x + width : anchor.x;
+  const y1 = top ? anchor.y : anchor.y - height;
+  const y2 = top ? anchor.y + height : anchor.y;
+
+  return {
+    ...annotation,
+    rect: normalizedRect({ x1, x2, y1, y2 })
+  };
+}
+
+function resizeImageStampToWidth(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  width: number
+) {
+  const rect = annotation.rect;
+  const nextWidth = Math.max(1, width);
+  const height = nextWidth / imageStampAspectRatio(annotation);
+  return {
+    ...annotation,
+    rect: {
+      ...rect,
+      x2: rect.x1 + nextWidth,
+      y1: rect.y2 - height
+    }
+  };
+}
+
+function resizeImageStampToHeight(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  height: number
+) {
+  const rect = annotation.rect;
+  const nextHeight = Math.max(1, height);
+  const width = nextHeight * imageStampAspectRatio(annotation);
+  return {
+    ...annotation,
+    rect: {
+      ...rect,
+      x2: rect.x1 + width,
+      y1: rect.y2 - nextHeight
+    }
+  };
+}
+
+function imageStampAspectRatio(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>
+) {
+  return Math.max(0.01, annotation.widthPx / Math.max(1, annotation.heightPx));
+}
+
+function normalizedRect(rect: PdfRect): PdfRect {
+  return {
+    x1: Math.min(rect.x1, rect.x2),
+    y1: Math.min(rect.y1, rect.y2),
+    x2: Math.max(rect.x1, rect.x2),
+    y2: Math.max(rect.y1, rect.y2)
   };
 }
 
@@ -4618,6 +5000,14 @@ function millimetresToPdfUnits(millimetres: number, viewport: PageViewport) {
   return (millimetres * PDF_UNITS_PER_INCH) / MILLIMETRES_PER_INCH / userUnit;
 }
 
+function pdfUnitsToMillimetres(pdfUnits: number, viewport: PageViewport) {
+  const userUnit =
+    Number.isFinite(viewport.userUnit) && viewport.userUnit > 0
+      ? viewport.userUnit
+      : 1;
+  return (pdfUnits * MILLIMETRES_PER_INCH * userUnit) / PDF_UNITS_PER_INCH;
+}
+
 function schedulePriorityTask(
   priority: PageRenderPriority,
   task: () => void | Promise<void>
@@ -4654,6 +5044,12 @@ function hasOpacity(
   );
 }
 
+function hasColor(
+  annotation: PdfAnnotation
+): annotation is Extract<PdfAnnotation, { color: [number, number, number] }> {
+  return annotation.kind !== 'imageStamp';
+}
+
 function annotationMatchesEraserScope(
   annotation: PdfAnnotation,
   scope: EraserScope
@@ -4684,6 +5080,13 @@ function isTextLayerTarget(target: EventTarget) {
 
 function isPdfLinkTarget(target: EventTarget) {
   return target instanceof Element && Boolean(target.closest('.annotationLayer a'));
+}
+
+function pageBackgroundColor(element: HTMLElement | null) {
+  const value = element
+    ? getComputedStyle(element).getPropertyValue('--pdfa-page').trim()
+    : '';
+  return value || 'white';
 }
 
 function isEditingTarget(target: EventTarget | null) {

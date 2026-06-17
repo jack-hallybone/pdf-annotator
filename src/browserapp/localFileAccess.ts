@@ -1,3 +1,5 @@
+import { uint8ArrayToArrayBuffer } from '../bytes';
+
 export type LocalPdfFileHandle = {
   kind: 'file';
   name: string;
@@ -68,6 +70,21 @@ const pdfPickerOptions: LocalOpenFilePickerOptions = {
   ]
 };
 
+const imagePickerOptions: LocalOpenFilePickerOptions = {
+  excludeAcceptAllOption: false,
+  multiple: false,
+  types: [
+    {
+      accept: {
+        'image/jpeg': ['.jpg', '.jpeg'],
+        'image/png': ['.png'],
+        'image/webp': ['.webp']
+      },
+      description: 'Image files'
+    }
+  ]
+};
+
 export function canPickLocalPdfFile() {
   return typeof localWindow().showOpenFilePicker === 'function';
 }
@@ -88,6 +105,24 @@ export async function pickLocalPdfFiles() {
   } catch (error) {
     if (isPickerAbort(error)) {
       return [];
+    }
+    throw error;
+  }
+}
+
+export async function pickLocalImageFile() {
+  const picker = localWindow().showOpenFilePicker;
+  if (!picker) {
+    return null;
+  }
+
+  try {
+    const [handle] = await picker(imagePickerOptions);
+    const file = await handle?.getFile();
+    return file && isSupportedImageFile(file) ? file : null;
+  } catch (error) {
+    if (isPickerAbort(error)) {
+      return null;
     }
     throw error;
   }
@@ -260,15 +295,17 @@ function isPdfFile(file: File) {
   );
 }
 
-function pdfBlob(bytes: Uint8Array) {
-  return new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
+function isSupportedImageFile(file: File) {
+  return (
+    ['image/jpeg', 'image/png', 'image/webp'].includes(file.type) ||
+    /\.(jpe?g|png|webp)$/i.test(file.name)
+  );
 }
 
-function toArrayBuffer(bytes: Uint8Array) {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength
-  ) as ArrayBuffer;
+function pdfBlob(bytes: Uint8Array) {
+  return new Blob([uint8ArrayToArrayBuffer(bytes)], {
+    type: 'application/pdf'
+  });
 }
 
 function isPickerAbort(error: unknown) {

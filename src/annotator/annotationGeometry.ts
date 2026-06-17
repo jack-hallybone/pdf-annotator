@@ -65,6 +65,7 @@ export function moveAnnotation(
       };
 
     case 'freeText':
+    case 'imageStamp':
     case 'stickyNote':
       return {
         ...annotation,
@@ -92,6 +93,7 @@ export function annotationBounds(annotation: PdfAnnotation): PdfRect {
       return boundsForPointPaths(annotation.paths);
 
     case 'freeText':
+    case 'imageStamp':
     case 'stickyNote':
       return annotation.rect;
   }

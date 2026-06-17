@@ -2,13 +2,14 @@ import type { ComponentType, SVGProps } from 'react';
 import {
   Eraser,
   Highlighter,
+  Image,
   LassoSelect,
   MousePointer2,
   PenLine,
   StickyNote,
   TextCursor
 } from 'lucide-react';
-import { inkColors, rgbToHex } from './SettingsPanel';
+import { annotationColors, rgbToHex } from './annotationColors';
 import type { Tool, ToolPresetMap, ToolSettings } from './types';
 
 type ToolIcon = ComponentType<
@@ -30,34 +31,35 @@ export const tools: ToolDefinition[] = [
     tool: 'draw',
     label: 'Blue ink',
     icon: PenLine,
-    preset: { drawColor: inkColors.blue }
+    preset: { drawColor: annotationColors.blue }
   },
   {
     key: 'draw-purple',
     tool: 'draw',
     label: 'Purple ink',
     icon: PenLine,
-    preset: { drawColor: inkColors.purple }
+    preset: { drawColor: annotationColors.purple }
   },
   { key: 'highlight', tool: 'highlight', label: 'Highlight', icon: Highlighter },
   { key: 'freeText', tool: 'freeText', label: 'Text', icon: TextCursor },
   { key: 'stickyNote', tool: 'stickyNote', label: 'Note', icon: StickyNote },
+  { key: 'imageStamp', tool: 'imageStamp', label: 'Image', icon: Image },
   { key: 'eraser', tool: 'eraser', label: 'Eraser', icon: Eraser },
   { key: 'lasso', tool: 'lasso', label: 'Lasso', icon: LassoSelect }
 ];
 
 export const defaultToolSettings: ToolSettings = {
-  highlightColor: inkColors.yellow,
+  highlightColor: annotationColors.yellow,
   highlightOpacity: 0.5,
   highlightWidth: 8,
-  drawColor: inkColors.blue,
+  drawColor: annotationColors.blue,
   drawOpacity: 1,
   drawWidth: 1,
   eraserWidth: 10,
-  textColor: inkColors.blue,
+  textColor: annotationColors.blue,
   textFontSize: 12,
   textOpacity: 1,
-  noteColor: inkColors.yellow
+  noteColor: annotationColors.yellow
 };
 
 export function createDefaultToolPresets(): ToolPresetMap {
@@ -95,11 +97,13 @@ export function toolAccent(
       return rgbToHex(settings.textColor);
     case 'stickyNote':
       return rgbToHex(settings.noteColor);
+    case 'imageStamp':
+      return 'var(--app-foreground)';
     case 'eraser':
     case 'lasso':
-      return '#111827';
+      return 'var(--app-foreground)';
     case 'select':
-      return '#334155';
+      return 'var(--app-foreground)';
   }
 }
 
@@ -108,7 +112,7 @@ export function defaultToolKeyForTool(tool: Tool) {
 }
 
 export function toolHasSettings(tool: Tool) {
-  return tool !== 'select' && tool !== 'lasso';
+  return tool !== 'select' && tool !== 'lasso' && tool !== 'imageStamp';
 }
 
 export function isDrawToolKey(toolKey: string) {

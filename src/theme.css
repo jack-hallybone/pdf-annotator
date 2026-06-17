@@ -1,0 +1,12 @@
+:root {
+  --app-canvas: #f3f3f3;
+  --app-canvas-rgb: 243 243 243;
+  --app-surface: #ffffff;
+  --app-surface-rgb: 255 255 255;
+  --app-page: #ffffff;
+  --app-foreground: #171c1c;
+  --app-foreground-rgb: 23 28 28;
+  --app-accent: #cc41bf;
+  --app-accent-rgb: 204 65 191;
+  --app-danger-rgb: 230 45 42;
+}

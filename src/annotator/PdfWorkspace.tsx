@@ -49,11 +49,17 @@ import {
   writePdfAnnotations
 } from './pdfWriter';
 import { viewportPointToPdfPoint } from './pdfGeometry';
+import {
+  prepareImageStampFromClipboardItems,
+  prepareImageStampFromFile
+} from './imageImport';
+import type { PreparedImageStamp } from './imageImport';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
 import { readPdfFile } from './pdfFile';
 import type {
   PdfDownloadTarget,
   PdfExternalLinkOpener,
+  PdfImageFilePicker,
   PdfSaveAsTarget,
   PdfSaveTarget,
   PdfWorkspaceSource
@@ -72,6 +78,7 @@ import type {
   PageViewport,
   PageSize,
   PdfAnnotation,
+  PdfRect,
   PdfPoint,
   Tool,
   ToolPresetMap,
@@ -88,6 +95,8 @@ import {
   SIDEBAR_DEFAULT_WIDTH,
   ZOOM_STEP
 } from './viewerConfig';
+import { safePdfFileName } from '../fileNames';
+import { uint8ArrayToArrayBuffer } from '../bytes';
 
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const PRINT_FRAME_FALLBACK_MS = 4000;
@@ -203,7 +212,9 @@ export type PdfWorkspaceProps = {
   onClose: () => void;
   onDirtyChange?: (hasUnsavedChanges: boolean) => void;
   onDocumentTitleChange?: (title: string) => void;
+  onBusyChange?: (busy: boolean) => void;
   onOpenExternalLink?: PdfExternalLinkOpener;
+  pickImageFile?: PdfImageFilePicker;
   onSessionChange?: (session: PdfWorkspaceSession) => void;
   showCloseButton?: boolean;
   source: PdfWorkspaceSource;
@@ -222,7 +233,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       onClose,
       onDirtyChange,
       onDocumentTitleChange,
+      onBusyChange,
       onOpenExternalLink,
+      pickImageFile,
       onSessionChange,
       showCloseButton = true,
       source,
@@ -579,6 +592,13 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     pdfDocRef.current = pdfDoc;
   }, [pdfDoc]);
 
+  useEffect(
+    () => () => {
+      onBusyChange?.(false);
+    },
+    [onBusyChange]
+  );
+
   useEffect(() => {
     if (!onSessionChange) {
       return;
@@ -611,6 +631,40 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     trustedExternalLinkKeys,
     undoStack
   ]);
+
+  useEffect(() => {
+    function handlePaste(event: ClipboardEvent) {
+      if (
+        readOnly ||
+        busyRef.current ||
+        !initialVisualReadyRef.current ||
+        isTextEntryTarget(event.target)
+      ) {
+        return;
+      }
+
+      const clipboardData = event.clipboardData;
+      if (!clipboardData) {
+        return;
+      }
+
+      const hasSupportedImage = Array.from(clipboardData.items).some(
+        (item) =>
+          item.kind === 'file' &&
+          ['image/png', 'image/jpeg', 'image/webp'].includes(item.type)
+      );
+      const text = clipboardData.getData('text/plain');
+      if (!hasSupportedImage && text.trim().length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      void handleClipboardPaste(clipboardData);
+    }
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [readOnly]);
 
   useLayoutEffect(() => {
     mountedRef.current = true;
@@ -1498,6 +1552,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
   function setWorkspaceBusy(nextBusy: boolean) {
     busyRef.current = nextBusy;
+    onBusyChange?.(nextBusy);
     setBusy(nextBusy);
   }
 
@@ -2733,7 +2788,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     let result;
     try {
-      result = await saveAsTarget.saveAs(bytes, safeDownloadName(suggestedName));
+      result = await saveAsTarget.saveAs(bytes, safePdfFileName(suggestedName));
     } catch (error) {
       console.error(error);
       return 'unavailable' as const;
@@ -2798,7 +2853,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   async function downloadPdfBytes(bytes: Uint8Array, suggestedName: string) {
     const target = downloadTargetRef.current;
     if (target) {
-      await target.download(bytes, safeDownloadName(suggestedName));
+      await target.download(bytes, safePdfFileName(suggestedName));
       return;
     }
 
@@ -2850,7 +2905,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 
   function createPrintBlobUrl(bytes: Uint8Array) {
-    const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
+    const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
+      type: 'application/pdf'
+    });
     const url = URL.createObjectURL(blob);
     cleanupPrintResources();
     printBlobUrlRef.current = url;
@@ -3013,6 +3070,232 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(
       shouldKeepOpenForInitialText ? annotation.id : null
+    );
+  }
+
+  async function handleAddImageFromFile(file: File) {
+    await addPreparedImageAnnotation(() => prepareImageStampFromFile(file));
+  }
+
+  async function handlePickImageFile() {
+    if (!pickImageFile) {
+      return;
+    }
+
+    setSelectedAnnotationIds([]);
+    setFocusedAnnotationId(null);
+    try {
+      const file = await pickImageFile();
+      if (file) {
+        await handleAddImageFromFile(file);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  async function handleClipboardPaste(clipboardData: DataTransfer) {
+    if (readOnly || busyRef.current) {
+      return;
+    }
+
+    const image = await prepareImageStampFromClipboardItems(
+      clipboardData.items
+    ).catch((error) => {
+      console.error(error);
+      return null;
+    });
+    if (image) {
+      addPreparedImageAnnotationFromData(image);
+      return;
+    }
+
+    const text = clipboardData.getData('text/plain');
+    if (text.trim()) {
+      addTextAnnotationForActivePage(text);
+    }
+  }
+
+  async function addPreparedImageAnnotation(
+    prepareImage: () => Promise<PreparedImageStamp>
+  ) {
+    if (readOnly || busyRef.current || !beginBusyOperation()) {
+      return;
+    }
+
+    try {
+      const preparedImage = await prepareImage();
+      addPreparedImageAnnotationFromData(preparedImage);
+    } catch (error) {
+      console.error(error);
+      throw error;
+    } finally {
+      finishBusyOperation();
+    }
+  }
+
+  function addPreparedImageAnnotationFromData(preparedImage: PreparedImageStamp) {
+    if (readOnly) {
+      return;
+    }
+
+    const annotation = imageStampAnnotationForActivePage(preparedImage);
+    if (!annotation) {
+      return;
+    }
+
+    managedAnnotationPagesRef.current.add(annotation.pageIndex);
+    setShowAnnotations(true);
+    commitAnnotations(
+      (current) => [...current, annotation],
+      { assumeChanged: true }
+    );
+    setSelectedAnnotationIds([annotation.id]);
+    setFocusedAnnotationId(null);
+    setTool('select');
+    setActiveToolKey(defaultToolKeyForTool('select'));
+    setSettingsToolKey(null);
+  }
+
+  function addTextAnnotationForActivePage(text: string) {
+    if (readOnly || busyRef.current) {
+      return;
+    }
+
+    const annotation = freeTextAnnotationForActivePage(text);
+    if (!annotation) {
+      return;
+    }
+
+    managedAnnotationPagesRef.current.add(annotation.pageIndex);
+    setShowAnnotations(true);
+    commitAnnotations(
+      (current) => [...current, normalizeAnnotationLayout(annotation)],
+      { assumeChanged: true }
+    );
+    setSelectedAnnotationIds([annotation.id]);
+    setFocusedAnnotationId(null);
+    setTool('select');
+    setActiveToolKey(defaultToolKeyForTool('select'));
+    setSettingsToolKey(null);
+  }
+
+  function imageStampAnnotationForActivePage(image: PreparedImageStamp) {
+    const pageIndex = activePageIndexRef.current;
+    const page = pagesRef.current[pageIndex];
+    if (!page) {
+      return null;
+    }
+
+    const viewport = page.getViewport({ scale: 1 });
+    const pageBounds = pagePdfBounds(viewport);
+    const pageWidth = pageBounds.x2 - pageBounds.x1;
+    const pageHeight = pageBounds.y2 - pageBounds.y1;
+    const naturalWidth = image.widthPx * 0.5;
+    const naturalHeight = image.heightPx * 0.5;
+    const fitScale = Math.min(
+      1,
+      (pageWidth * 0.6) / Math.max(1, naturalWidth),
+      (pageHeight * 0.6) / Math.max(1, naturalHeight)
+    );
+    const width = Math.max(12, naturalWidth * fitScale);
+    const height = Math.max(12, naturalHeight * fitScale);
+    const center = activePageVisibleCenter(pageIndex, viewport) ?? {
+      x: pageBounds.x1 + pageWidth / 2,
+      y: pageBounds.y1 + pageHeight / 2
+    };
+    const rect: PdfRect = {
+      x1: clamp(center.x - width / 2, pageBounds.x1, pageBounds.x2 - width),
+      x2: clamp(center.x - width / 2, pageBounds.x1, pageBounds.x2 - width) + width,
+      y1: clamp(center.y - height / 2, pageBounds.y1, pageBounds.y2 - height),
+      y2: clamp(center.y - height / 2, pageBounds.y1, pageBounds.y2 - height) + height
+    };
+
+    return {
+      id: crypto.randomUUID(),
+      imageData: image.data,
+      heightPx: image.heightPx,
+      kind: 'imageStamp',
+      mimeType: image.mimeType,
+      pageIndex,
+      rect,
+      widthPx: image.widthPx
+    } satisfies PdfAnnotation;
+  }
+
+  function freeTextAnnotationForActivePage(text: string) {
+    const pageIndex = activePageIndexRef.current;
+    const page = pagesRef.current[pageIndex];
+    if (!page) {
+      return null;
+    }
+
+    const viewport = page.getViewport({ scale: 1 });
+    const pageBounds = pagePdfBounds(viewport);
+    const pageWidth = pageBounds.x2 - pageBounds.x1;
+    const pageHeight = pageBounds.y2 - pageBounds.y1;
+    const width = Math.min(260, pageWidth * 0.72);
+    const height = Math.min(160, Math.max(48, pageHeight * 0.16));
+    const center = activePageVisibleCenter(pageIndex, viewport) ?? {
+      x: pageBounds.x1 + pageWidth / 2,
+      y: pageBounds.y1 + pageHeight / 2
+    };
+    const x1 = clamp(
+      center.x - width / 2,
+      pageBounds.x1,
+      pageBounds.x2 - width
+    );
+    const y2 = clamp(
+      center.y + height / 2,
+      pageBounds.y1 + height,
+      pageBounds.y2
+    );
+
+    return {
+      id: crypto.randomUUID(),
+      kind: 'freeText',
+      pageIndex,
+      rect: {
+        x1,
+        x2: x1 + width,
+        y1: y2 - height,
+        y2
+      },
+      text,
+      fontSize: toolSettings.textFontSize,
+      color: toolSettings.textColor,
+      opacity: toolSettings.textOpacity
+    } satisfies PdfAnnotation;
+  }
+
+  function activePageVisibleCenter(
+    pageIndex: number,
+    viewport: PageViewport
+  ): PdfPoint | null {
+    const container = scrollContainerRef.current;
+    const pageElement = pageVisualElementForIndex(pageIndex);
+    if (!container || !pageElement) {
+      return null;
+    }
+
+    const containerBounds = container.getBoundingClientRect();
+    const pageBounds = pageElement.getBoundingClientRect();
+    const visibleLeft = Math.max(pageBounds.left, containerBounds.left);
+    const visibleRight = Math.min(pageBounds.right, containerBounds.right);
+    const visibleTop = Math.max(pageBounds.top, containerBounds.top);
+    const visibleBottom = Math.min(pageBounds.bottom, containerBounds.bottom);
+    if (visibleLeft >= visibleRight || visibleTop >= visibleBottom) {
+      return null;
+    }
+
+    return viewportPointToPdfPoint(
+      (((visibleLeft + visibleRight) / 2 - pageBounds.left) *
+        viewport.width) /
+        Math.max(1, pageBounds.width),
+      (((visibleTop + visibleBottom) / 2 - pageBounds.top) *
+        viewport.height) /
+        Math.max(1, pageBounds.height),
+      viewport
     );
   }
 
@@ -3290,6 +3573,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     window.getSelection()?.removeAllRanges();
+    setSelectedAnnotationIds([]);
+    setFocusedAnnotationId(null);
     const preset = toolPresets[toolKey] ?? item.preset;
     if (preset) {
       setToolSettings((current) => ({ ...current, ...preset }));
@@ -3725,6 +4010,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
               disabled={busy}
               onChangeSettings={updateToolSettings}
               onCloseSettings={() => setSettingsToolKey(null)}
+              onPickImageFile={() => void handlePickImageFile()}
               onSelectTool={selectToolbarTool}
               onToggleSettings={(nextToolKey) =>
                 setSettingsToolKey((current) =>
@@ -4063,11 +4349,13 @@ function asciiLower(value: number) {
 }
 
 function downloadPdf(bytes: Uint8Array, name: string) {
-  const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
+  const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
+    type: 'application/pdf'
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = safeDownloadName(name);
+  link.download = safePdfFileName(name);
   link.style.display = 'none';
   document.body.append(link);
   link.click();
@@ -4121,15 +4409,6 @@ function annotatedName(name: string) {
 
 function printableName(name: string) {
   return name.replace(/\.pdf$/i, '') + '-print.pdf';
-}
-
-function safeDownloadName(name: string) {
-  const cleaned = name
-    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return cleaned || 'annotated.pdf';
 }
 
 function externalLinkTrustKey(url: string) {
@@ -4188,6 +4467,8 @@ function annotationSourceIdsForReplacement(
   for (const annotation of annotations) {
     if (annotation.sourceId) {
       sourceIds.add(annotation.sourceId);
+    } else if (annotation.kind === 'imageStamp') {
+      sourceIds.add(annotation.id);
     }
   }
   for (const annotation of allAnnotations) {
@@ -4342,13 +4623,6 @@ function writableAnnotations(
   });
 }
 
-function toArrayBuffer(bytes: Uint8Array) {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength
-  ) as ArrayBuffer;
-}
-
 function isZoomShortcut(event: KeyboardEvent) {
   return isZoomInShortcut(event) || isZoomOutShortcut(event);
 }
@@ -4363,6 +4637,17 @@ function isZoomOutShortcut(event: KeyboardEvent) {
 
 function usesAnnotationLayer(tool: Tool) {
   return tool !== 'select';
+}
+
+function isTextEntryTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        'input, textarea, select, [contenteditable="true"], [contenteditable=""]'
+      )
+    )
+  );
 }
 
 function pageRenderPriority(

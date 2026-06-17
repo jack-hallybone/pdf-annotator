@@ -30,6 +30,8 @@ export type PdfExternalLinkOpener = (
   context: PdfExternalLinkContext
 ) => Promise<void> | void;
 
+export type PdfImageFilePicker = () => Promise<File | null | undefined>;
+
 type PdfWorkspaceSourceBase = {
   initialAnnotations?: PdfAnnotation[];
   markDirty?: boolean;

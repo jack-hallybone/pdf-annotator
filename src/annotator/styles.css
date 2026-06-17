@@ -1,12 +1,17 @@
+@import "../theme.css";
+
 :root {
-  --pdfa-bg: #f3f3f3;
-  --pdfa-ui: #ffffff;
-  --pdfa-ink: #171c1c;
-  --pdfa-accent: #cc41bf;
-  --pdfa-accent-rgb: 204 65 191;
-  --pdfa-highlight: #fffe4e;
-  --pdfa-frame-shadow: 0 8px 22px rgb(23 28 28 / 0.05);
-  --pdfa-menu-shadow: 0 12px 30px rgb(23 28 28 / 0.14);
+  --pdfa-bg: var(--app-canvas);
+  --pdfa-canvas-rgb: var(--app-canvas-rgb);
+  --pdfa-ui: var(--app-surface);
+  --pdfa-surface-rgb: var(--app-surface-rgb);
+  --pdfa-page: var(--app-page);
+  --pdfa-ink: var(--app-foreground);
+  --pdfa-ink-rgb: var(--app-foreground-rgb);
+  --pdfa-accent: var(--app-accent);
+  --pdfa-accent-rgb: var(--app-accent-rgb);
+  --pdfa-frame-shadow: 0 8px 22px rgb(var(--pdfa-ink-rgb) / 0.05);
+  --pdfa-menu-shadow: 0 12px 30px rgb(var(--pdfa-ink-rgb) / 0.14);
   --pdfa-focus-ring: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.32);
   --pdfa-selection-bg: rgb(var(--pdfa-accent-rgb) / 0.24);
   --pdfa-menu-font-size: 0.8125rem;
@@ -37,7 +42,7 @@
 .ui-frame,
 .ui-panel {
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.12);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.12);
   border-radius: 6px;
   color: var(--pdfa-ink);
 }
@@ -75,13 +80,13 @@
 
 .ui-button-active {
   background: var(--pdfa-bg);
-  border-color: rgb(23 28 28 / 0.68);
-  box-shadow: inset 0 0 0 1px rgb(23 28 28 / 0.04);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.68);
+  box-shadow: inset 0 0 0 1px rgb(var(--pdfa-ink-rgb) / 0.04);
 }
 
 .ui-input {
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.16);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.16);
   border-radius: 4px;
   box-sizing: border-box;
   color: var(--pdfa-ink);
@@ -93,7 +98,7 @@
 }
 
 .ui-input:focus {
-  border-color: rgb(23 28 28 / 0.62);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.62);
   box-shadow: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.18);
 }
 
@@ -126,23 +131,38 @@
 }
 
 .pdf-page-frame {
-  background: white;
-  box-shadow: 0 10px 15px -3px rgb(15 23 42 / 0.15);
+  background: var(--pdfa-page);
+  box-shadow: 0 10px 15px -3px rgb(var(--pdfa-ink-rgb) / 0.15);
   margin: 0 auto 1rem;
   outline: none;
   width: fit-content;
 }
 
 .pdf-page {
-  background: white;
+  background: var(--pdfa-page);
   overflow: hidden;
   position: relative;
 }
 
+.pdf-page[data-tool="draw"],
+.pdf-page[data-tool="highlight"],
+.pdf-page[data-tool="textHighlight"],
+.pdf-page[data-tool="freehandHighlight"],
+.pdf-page[data-tool="freeText"],
+.pdf-page[data-tool="stickyNote"],
+.pdf-page[data-tool="eraser"],
+.pdf-page[data-tool="lasso"] {
+  touch-action: none;
+}
+
+.pdf-page[data-tool="select"] {
+  touch-action: auto;
+}
+
 .pdf-page-placeholder {
   background: var(--pdfa-ui);
-  box-shadow: 0 1px 2px rgb(23 28 28 / 0.05);
-  color: rgb(23 28 28 / 0.5);
+  box-shadow: 0 1px 2px rgb(var(--pdfa-ink-rgb) / 0.05);
+  color: rgb(var(--pdfa-ink-rgb) / 0.5);
   display: grid;
   font-size: 0.75rem;
   font-weight: 500;
@@ -209,7 +229,7 @@
 
 .password-unlock-input {
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.18);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.18);
   border-radius: 5px;
   box-sizing: border-box;
   color: var(--pdfa-ink);
@@ -219,27 +239,27 @@
 }
 
 .password-unlock-input:focus {
-  border-color: rgb(23 28 28 / 0.42);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.42);
   outline: 2px solid rgb(var(--pdfa-accent-rgb) / 0.22);
   outline-offset: 1px;
 }
 
 .password-unlock-input[aria-invalid="true"] {
-  border-color: rgb(230 45 42 / 0.7);
+  border-color: rgb(var(--app-danger-rgb) / 0.7);
 }
 
 .password-unlock-button {
-  border-color: rgb(23 28 28 / 0.18);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.18);
   padding: 0.35rem 0.65rem;
 }
 
 .loading-retry-button {
-  border-color: rgb(23 28 28 / 0.18);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.18);
   padding: 0.25rem 0.5rem;
 }
 
 .external-link-backdrop {
-  background: rgb(243 243 243 / 0.76);
+  background: rgb(var(--pdfa-canvas-rgb) / 0.76);
   backdrop-filter: blur(2px);
   display: grid;
   inset: 0;
@@ -269,14 +289,14 @@
 }
 
 .external-link-dialog p {
-  color: rgb(23 28 28 / 0.72);
+  color: rgb(var(--pdfa-ink-rgb) / 0.72);
   font-size: 0.875rem;
   line-height: 1.45;
 }
 
 .external-link-url {
   background: var(--pdfa-bg);
-  border: 1px solid rgb(23 28 28 / 0.12);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.12);
   border-radius: 4px;
   color: var(--pdfa-ink) !important;
   font-family:
@@ -296,7 +316,7 @@
 .external-link-secondary {
   appearance: none;
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.14);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
   border-radius: 6px;
   color: var(--pdfa-ink);
   cursor: pointer;
@@ -327,7 +347,7 @@
 
 .external-link-actions .external-link-primary:hover,
 .external-link-actions .external-link-primary:focus-visible {
-  background: rgb(23 28 28 / 0.88);
+  background: rgb(var(--pdfa-ink-rgb) / 0.88);
 }
 
 .floating-frame {
@@ -436,7 +456,7 @@
 }
 
 .protected-pdf-edit-button {
-  border: 1px solid rgb(23 28 28 / 0.18);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.18);
   flex: 0 0 auto;
   font-size: var(--pdfa-menu-font-size);
   min-height: 1.75rem;
@@ -470,7 +490,7 @@
 
 .page-jump-control {
   align-items: center;
-  border-left: 1px solid rgb(23 28 28 / 0.12);
+  border-left: 1px solid rgb(var(--pdfa-ink-rgb) / 0.12);
   display: flex;
   gap: 0.25rem;
   height: 2rem;
@@ -515,7 +535,7 @@
 }
 
 .zoom-percent-unit {
-  color: rgb(23 28 28 / 0.7);
+  color: rgb(var(--pdfa-ink-rgb) / 0.7);
   padding-left: 0.25rem;
 }
 
@@ -543,7 +563,7 @@
 }
 
 .document-sidebar-header {
-  border-bottom: 1px solid rgb(23 28 28 / 0.1);
+  border-bottom: 1px solid rgb(var(--pdfa-ink-rgb) / 0.1);
   display: flex;
   justify-content: flex-end;
   padding: 0.375rem;
@@ -559,7 +579,7 @@
 .merge-pdf-button {
   align-items: center;
   background: var(--pdfa-ui);
-  border-color: rgb(23 28 28 / 0.2);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.2);
   border-style: dashed;
   display: flex;
   font-size: 0.75rem;
@@ -597,7 +617,7 @@
   width: 100%;
 }
 
-.page-thumbnail-button-inactive { border-color: rgb(23 28 28 / 0.12); }
+.page-thumbnail-button-inactive { border-color: rgb(var(--pdfa-ink-rgb) / 0.12); }
 
 .page-thumbnail-preview {
   background: var(--pdfa-ui);
@@ -608,7 +628,7 @@
 
 .page-thumbnail-placeholder {
   background: var(--pdfa-bg);
-  color: rgb(23 28 28 / 0.5);
+  color: rgb(var(--pdfa-ink-rgb) / 0.5);
   display: grid;
   font-size: 10px;
   font-weight: 500;
@@ -618,7 +638,7 @@
 }
 
 .page-thumbnail-number {
-  color: rgb(23 28 28 / 0.85);
+  color: rgb(var(--pdfa-ink-rgb) / 0.85);
   font-size: 11px;
   font-weight: 500;
   margin-top: 0.25rem;
@@ -627,7 +647,7 @@
 
 .page-thumbnail-menu-toggle {
   background: var(--pdfa-ui);
-  box-shadow: 0 1px 2px rgb(23 28 28 / 0.05);
+  box-shadow: 0 1px 2px rgb(var(--pdfa-ink-rgb) / 0.05);
   height: 1.5rem;
   position: absolute;
   right: 0.25rem;
@@ -662,7 +682,7 @@
 }
 
 .page-menu-separator {
-  background: rgb(23 28 28 / 0.1);
+  background: rgb(var(--pdfa-ink-rgb) / 0.1);
   height: 1px;
   margin: 0.125rem 0.25rem;
 }
@@ -730,9 +750,9 @@
 
 .color-swatch,
 .color-picker-button {
-  border-color: rgb(23 28 28 / 0.18);
+  border-color: rgb(var(--pdfa-ink-rgb) / 0.18);
   border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.45);
+  box-shadow: inset 0 0 0 1px rgb(var(--pdfa-surface-rgb) / 0.45);
   height: 1.375rem;
   padding: 0;
   width: 1.375rem;
@@ -749,9 +769,9 @@
 
 .color-swatch-active {
   box-shadow:
-    inset 0 0 0 1px rgb(255 255 255 / 0.55),
+    inset 0 0 0 1px rgb(var(--pdfa-surface-rgb) / 0.55),
     0 0 0 2px var(--pdfa-ui),
-    0 0 0 3px rgb(23 28 28 / 0.52);
+    0 0 0 3px rgb(var(--pdfa-ink-rgb) / 0.52);
 }
 
 .color-picker-dots {
@@ -779,7 +799,7 @@
 .text-selection-highlight-button {
   align-items: center;
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.14);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
   border-radius: 999px;
   box-shadow: var(--pdfa-menu-shadow);
   box-sizing: border-box;
@@ -807,8 +827,8 @@
 
 .number-setting {
   align-items: center;
-  background: rgb(23 28 28 / 0.025);
-  border: 1px solid rgb(23 28 28 / 0.08);
+  background: rgb(var(--pdfa-ink-rgb) / 0.025);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.08);
   border-radius: 5px;
   box-sizing: border-box;
   color: var(--pdfa-ink);
@@ -877,7 +897,7 @@
 
 .selection-toolbar {
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.12);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.12);
   border-radius: 6px;
   box-shadow: var(--pdfa-menu-shadow);
   box-sizing: border-box;
@@ -895,7 +915,7 @@
 .selection-copy-button {
   align-items: center;
   background: transparent;
-  border: 1px solid rgb(23 28 28 / 0.14);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
   border-radius: 4px;
   color: var(--pdfa-ink);
   cursor: pointer;
@@ -908,7 +928,7 @@
 
 .selection-delete-button {
   background: transparent;
-  border: 1px solid rgb(23 28 28 / 0.14);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
   border-radius: 4px;
   color: var(--pdfa-ink);
   cursor: pointer;
@@ -921,11 +941,11 @@
 .selection-delete-button:hover { background: var(--pdfa-bg); }
 
 .note-popover {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: rgb(var(--pdfa-ink-rgb) / 0.04);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.18);
   border-radius: 4px;
   box-shadow: var(--pdfa-menu-shadow);
-  color: #0f172a;
+  color: var(--pdfa-ink);
   font-size: 0.875rem;
   line-height: 1.25rem;
   overflow: auto;
@@ -946,7 +966,7 @@
 
 .existing-free-text {
   background: var(--pdfa-ui);
-  border: 1px solid rgb(23 28 28 / 0.12);
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.12);
   border-radius: 4px;
   color: var(--pdfa-ink);
   font-size: 12px;
@@ -958,12 +978,44 @@
 }
 
 .pdf-page .textLayer { pointer-events: auto; }
-.pdf-page .pdfa-annotation-appearance-layer { pointer-events: none; }
-.pdf-page .pdfa-ink-canvas-layer { pointer-events: none; }
+.pdf-page .pdfViewer { z-index: 0; }
+.pdf-page .pdfa-annotation-appearance-layer {
+  pointer-events: none;
+  z-index: 1;
+}
 .pdf-page .pdfa-highlight-canvas-layer { mix-blend-mode: multiply; }
-.pdf-page .annotationLayer { pointer-events: none; }
+.pdf-page .pdfa-ink-canvas-layer {
+  pointer-events: none;
+  z-index: 4;
+}
+.pdf-page .pdfa-image-stamp-layer {
+  z-index: 3;
+}
+.pdf-page .pdfa-interaction-layer {
+  z-index: 5;
+}
+.pdf-page .text-selection-highlight-button {
+  z-index: 8;
+}
+.pdf-page .annotationLayer {
+  pointer-events: none;
+  z-index: 2;
+}
 
-.pdf-page .annotationLayer .linkAnnotation,
+.pdf-page .annotationLayer .linkAnnotation {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.pdf-page .annotationLayer .linkAnnotation *,
+.pdf-page .annotationLayer [data-internal-link],
+.pdf-page .annotationLayer .pdf-external-link {
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
 .pdf-page .annotationLayer .linkAnnotation > a,
 .pdf-page .annotationLayer [data-internal-link],
 .pdf-page .annotationLayer .pdf-external-link {
@@ -971,8 +1023,14 @@
 }
 
 .pdf-page .annotationLayer .linkAnnotation > a,
+.pdf-page .annotationLayer [data-internal-link],
 .pdf-page .annotationLayer .pdf-external-link {
+  background: rgb(var(--pdfa-accent-rgb) / 0.08) !important;
+  border: 1px solid rgb(var(--pdfa-accent-rgb) / 0.42) !important;
+  box-shadow: none !important;
+  color: inherit;
   cursor: pointer;
+  outline: none !important;
 }
 
 .pdf-page .pdfViewer {
@@ -1000,7 +1058,7 @@
 }
 
 .pdf-page .pdfViewer .canvasWrapper .selection {
-  background: var(--pdfa-selection-bg);
+  background: var(--pdfa-selection-bg) !important;
 }
 
 .pdf-page .textLayer::selection {

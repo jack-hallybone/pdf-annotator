@@ -135,6 +135,7 @@ export type TabbedPdfWorkspaceOptions = Pick<
   PdfWorkspaceProps,
   | 'confirmDiscardChanges'
   | 'onOpenExternalLink'
+  | 'pickImageFile'
 >;
 
 export type TabbedPdfHomeRenderProps = {
@@ -202,7 +203,15 @@ export const TabbedPdfShell = forwardRef<
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(
     null
   );
+  const [busyDocumentIds, setBusyDocumentIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [shellCommandBusy, setShellCommandBusy] = useState(false);
   const activeDocumentIdRef = useLatestRef(activeDocumentId);
+  const activeWorkspaceBusy =
+    activeDocumentId !== null && busyDocumentIds.has(activeDocumentId);
+  const shellLocked = shellCommandBusy || activeWorkspaceBusy;
+  const shellLockedRef = useLatestRef(shellLocked);
   const closeConfirmationResolverRef = useRef<
     ((decision: CloseDocumentsDecision) => void) | null
   >(null);
@@ -454,6 +463,39 @@ export const TabbedPdfShell = forwardRef<
     []
   );
 
+  const handleWorkspaceBusyChange = useCallback(
+    (documentId: string, busy: boolean) => {
+      setBusyDocumentIds((current) => {
+        const isCurrentlyBusy = current.has(documentId);
+        if (isCurrentlyBusy === busy) {
+          return current;
+        }
+
+        const next = new Set(current);
+        if (busy) {
+          next.add(documentId);
+        } else {
+          next.delete(documentId);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  async function runShellLockedTask<T>(task: () => Promise<T>) {
+    if (shellLockedRef.current) {
+      return null;
+    }
+
+    setShellCommandBusy(true);
+    try {
+      return await task();
+    } finally {
+      setShellCommandBusy(false);
+    }
+  }
+
   function captureMountedSessions(documentIds = visibleDocumentIds()) {
     const updates: SessionUpdate[] = [];
     for (const documentId of new Set(documentIds)) {
@@ -495,18 +537,28 @@ export const TabbedPdfShell = forwardRef<
     }
 
     workspaceRefs.current.delete(documentId);
+    handleWorkspaceBusyChange(documentId, false);
     window.setTimeout(() => {
       void handle.releaseRenderResources().catch(console.error);
     }, 0);
   }
 
   function handleFileInputChange(event: ReactChangeEvent<HTMLInputElement>) {
+    if (shellLockedRef.current) {
+      event.target.value = '';
+      return;
+    }
+
     const files = Array.from(event.target.files ?? []);
     event.target.value = '';
     openHostDocuments(fileAdapter.pdfDocumentsFromFileInput?.(files) ?? []);
   }
 
   function openTabbedDocuments(openedDocuments: TabbedPdfDocument[]) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     const firstOpenedId = openedDocuments[0]?.id ?? null;
     if (!firstOpenedId) {
       return;
@@ -541,6 +593,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function openHostDocuments(hostDocuments: PdfHostDocument[]) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     warmPdfRuntimeCaches();
 
     if (hostDocuments.length === 0) {
@@ -605,7 +661,7 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function selectHome() {
-    if (activeDocumentIdRef.current === null) {
+    if (shellLockedRef.current || activeDocumentIdRef.current === null) {
       return;
     }
 
@@ -615,7 +671,7 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function selectDocument(documentId: string) {
-    if (activeDocumentIdRef.current === documentId) {
+    if (shellLockedRef.current || activeDocumentIdRef.current === documentId) {
       return;
     }
 
@@ -628,6 +684,10 @@ export const TabbedPdfShell = forwardRef<
     documentId: string,
     { skipConfirm = false }: { skipConfirm?: boolean } = {}
   ) {
+    if (shellLockedRef.current) {
+      return false;
+    }
+
     const session = workspaceRefs.current.get(documentId)?.snapshot();
     const currentDocuments = documentsRef.current;
     const documentIndex = currentDocuments.findIndex(
@@ -690,6 +750,10 @@ export const TabbedPdfShell = forwardRef<
     documentIds: string[],
     focusFallbackId: string
   ) {
+    if (shellLockedRef.current) {
+      return false;
+    }
+
     const uniqueDocumentIds = new Set(documentIds);
     if (uniqueDocumentIds.size === 0) {
       return true;
@@ -785,7 +849,7 @@ export const TabbedPdfShell = forwardRef<
       return false;
     }
 
-    return handle.save();
+    return (await runShellLockedTask(() => handle.save())) === true;
   }
 
   async function closeAllDocuments() {
@@ -806,6 +870,10 @@ export const TabbedPdfShell = forwardRef<
   ) {
     event.preventDefault();
     event.stopPropagation();
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeNewTabMenu();
     const position = clampContextMenuPosition(event.clientX, event.clientY);
     setTabContextMenu({
@@ -824,6 +892,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function toggleNewTabMenu(event: ReactMouseEvent<HTMLButtonElement>) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     if (newTabMenuOpen) {
       setNewTabMenuOpen(false);
@@ -854,6 +926,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function openRenameDialog(documentId: string) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     const document = documentsRef.current.find((item) => item.id === documentId);
     if (!document) {
       return;
@@ -867,7 +943,7 @@ export const TabbedPdfShell = forwardRef<
   }
 
   async function submitRenameDialog() {
-    if (!renameDialog) {
+    if (!renameDialog || shellLockedRef.current) {
       return;
     }
 
@@ -882,7 +958,7 @@ export const TabbedPdfShell = forwardRef<
       return;
     }
 
-    const saved = await workspace.saveAs(nextName);
+    const saved = await runShellLockedTask(() => workspace.saveAs(nextName));
     if (saved) {
       setRenameDialog(null);
     }
@@ -894,14 +970,20 @@ export const TabbedPdfShell = forwardRef<
   ) {
     const workspace = workspaceRefs.current.get(documentId);
     closeTabContextMenu();
-    if (!workspace) {
+    if (!workspace || shellLockedRef.current) {
       return;
     }
 
-    await workspace[command]();
+    await runShellLockedTask(async () => {
+      await workspace[command]();
+    });
   }
 
   async function createTemplateDocument(kind: PdfTemplateKind) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeNewTabMenu();
     try {
       const { bytes } = await createPdfTemplate(kind);
@@ -916,6 +998,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   async function createCornellNoteForDocument(documentId: string) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     const document = documentsRef.current.find((item) => item.id === documentId);
     if (!document) {
@@ -937,6 +1023,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function closeOtherTabs(documentId: string) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     void closeDocumentGroup(
       documentsRef.current
@@ -947,16 +1037,28 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function closeCurrentTab(documentId: string) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     void closeDocument(documentId);
   }
 
   function closeEveryTab() {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     void closeAllDocuments();
   }
 
   function closeTabsToRight(documentId: string) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     const documentIndex = documentsRef.current.findIndex(
       (document) => document.id === documentId
@@ -983,6 +1085,10 @@ export const TabbedPdfShell = forwardRef<
 
     event.preventDefault();
     event.stopPropagation();
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeTabContextMenu();
     closeNewTabMenu();
     void closeDocument(documentId);
@@ -998,6 +1104,11 @@ export const TabbedPdfShell = forwardRef<
     event: ReactDragEvent<HTMLElement>,
     documentId: string
   ) {
+    if (shellLockedRef.current) {
+      event.preventDefault();
+      return;
+    }
+
     if (
       event.target instanceof Element &&
       event.target.closest('.tabbedapp-tab-close')
@@ -1145,6 +1256,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function handleDragEnter(event: ReactDragEvent<HTMLElement>) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     if (!canOpenDroppedFiles(fileAdapter) || !isFileDrag(event.dataTransfer)) {
       return;
     }
@@ -1154,6 +1269,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   function handleDragOver(event: ReactDragEvent<HTMLElement>) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     if (!canOpenDroppedFiles(fileAdapter) || !isFileDrag(event.dataTransfer)) {
       return;
     }
@@ -1176,6 +1295,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   async function handleDrop(event: ReactDragEvent<HTMLElement>) {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     if (!canOpenDroppedFiles(fileAdapter) || !isFileDrag(event.dataTransfer)) {
       return;
     }
@@ -1201,6 +1324,10 @@ export const TabbedPdfShell = forwardRef<
   }
 
   async function handleOpenPdfRequest() {
+    if (shellLockedRef.current) {
+      return;
+    }
+
     closeNewTabMenu();
     warmPdfRuntimeCaches({ immediate: true });
 
@@ -1265,6 +1392,7 @@ export const TabbedPdfShell = forwardRef<
   return (
     <main
       className={['tabbedapp-shell', className].filter(Boolean).join(' ')}
+      data-busy={shellLocked ? 'true' : 'false'}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
@@ -1295,6 +1423,7 @@ export const TabbedPdfShell = forwardRef<
           className={`tabbedapp-home-tab tabbedapp-tab-button ${
             activeDocumentId === null ? 'tabbedapp-tab-button-active' : ''
           }`}
+          disabled={shellLocked}
           onClick={selectHome}
           title="Home"
           type="button"
@@ -1322,7 +1451,7 @@ export const TabbedPdfShell = forwardRef<
                     : ''
                 }`}
                 data-tabbedapp-tab-id={document.id}
-                draggable
+                draggable={!shellLocked}
                 onAuxClick={(event) =>
                   closeTabOnMiddleClick(event, document.id)
                 }
@@ -1337,6 +1466,7 @@ export const TabbedPdfShell = forwardRef<
               >
                 <button
                   className="tabbedapp-tab-main"
+                  disabled={shellLocked}
                   onClick={() => selectDocument(document.id)}
                   title={document.title}
                   type="button"
@@ -1350,6 +1480,7 @@ export const TabbedPdfShell = forwardRef<
                       ? 'tabbedapp-tab-close-dirty'
                       : ''
                   }`}
+                  disabled={shellLocked}
                   onClick={() => void closeDocument(document.id)}
                   type="button"
                 >
@@ -1374,6 +1505,7 @@ export const TabbedPdfShell = forwardRef<
             aria-expanded={newTabMenuOpen}
             aria-label="New tab"
             className="tabbedapp-new-tab tabbedapp-tab-button"
+            disabled={shellLocked}
             onClick={toggleNewTabMenu}
             title="New tab"
             type="button"
@@ -1387,6 +1519,7 @@ export const TabbedPdfShell = forwardRef<
               style={{ left: newTabMenuPosition.x, top: newTabMenuPosition.y }}
             >
               <button
+                disabled={shellLocked}
                 onClick={() => void handleOpenPdfRequest()}
                 role="menuitem"
                 type="button"
@@ -1397,6 +1530,7 @@ export const TabbedPdfShell = forwardRef<
               {TEMPLATE_ACTIONS.map(({ kind, label, renderIcon }) => (
                 <button
                   key={kind}
+                  disabled={shellLocked}
                   onClick={() => void createTemplateDocument(kind)}
                   role="menuitem"
                   type="button"
@@ -1416,10 +1550,15 @@ export const TabbedPdfShell = forwardRef<
             document={activeDocument}
             key={activeDocument.id}
             onCloseDocument={closeDocument}
+            onBusyChange={handleWorkspaceBusyChange}
             onDirtyChange={updateDocumentDirtyState}
             onRegisterWorkspaceRef={registerWorkspaceRef}
             onTitleChange={updateDocumentTitle}
-            workspaceOptions={workspaceOptions}
+            workspaceOptions={{
+              ...workspaceOptions,
+              pickImageFile:
+                workspaceOptions.pickImageFile ?? fileAdapter.pickImageFile
+            }}
           />
         ) : (
           renderHome?.({
@@ -1441,6 +1580,7 @@ export const TabbedPdfShell = forwardRef<
           style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
         >
           <button
+            disabled={shellLocked}
             onClick={() => void copyTabFilename(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
@@ -1449,7 +1589,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Copy filename</span>
           </button>
           <button
-            disabled={!tabContextMenuWorkspaceAvailable}
+            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() => openRenameDialog(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
@@ -1458,6 +1598,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Rename file...</span>
           </button>
           <button
+            disabled={shellLocked}
             onClick={() =>
               void createCornellNoteForDocument(tabContextMenuDocument.id)
             }
@@ -1469,7 +1610,7 @@ export const TabbedPdfShell = forwardRef<
           </button>
           <span className="tabbedapp-context-menu-separator" />
           <button
-            disabled={!tabContextMenuWorkspaceAvailable}
+            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() =>
               void runWorkspaceCommand(tabContextMenuDocument.id, 'save')
             }
@@ -1480,7 +1621,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Save</span>
           </button>
           <button
-            disabled={!tabContextMenuWorkspaceAvailable}
+            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() =>
               void runWorkspaceCommand(tabContextMenuDocument.id, 'saveAs')
             }
@@ -1491,7 +1632,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Save As...</span>
           </button>
           <button
-            disabled={!tabContextMenuWorkspaceAvailable}
+            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() =>
               void runWorkspaceCommand(tabContextMenuDocument.id, 'downloadCopy')
             }
@@ -1502,7 +1643,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Download a copy</span>
           </button>
           <button
-            disabled={!tabContextMenuWorkspaceAvailable}
+            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
             onClick={() =>
               void runWorkspaceCommand(tabContextMenuDocument.id, 'print')
             }
@@ -1514,6 +1655,7 @@ export const TabbedPdfShell = forwardRef<
           </button>
           <span className="tabbedapp-context-menu-separator" />
           <button
+            disabled={shellLocked}
             onClick={() => closeCurrentTab(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
@@ -1522,7 +1664,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Close tab</span>
           </button>
           <button
-            disabled={documents.length <= 1}
+            disabled={shellLocked || documents.length <= 1}
             onClick={() => closeOtherTabs(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
@@ -1531,7 +1673,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Close other tabs</span>
           </button>
           <button
-            disabled={tabContextMenuIndex >= documents.length - 1}
+            disabled={shellLocked || tabContextMenuIndex >= documents.length - 1}
             onClick={() => closeTabsToRight(tabContextMenuDocument.id)}
             role="menuitem"
             type="button"
@@ -1540,7 +1682,7 @@ export const TabbedPdfShell = forwardRef<
             <span>Close tabs to the right</span>
           </button>
           <button
-            disabled={documents.length === 0}
+            disabled={shellLocked || documents.length === 0}
             onClick={closeEveryTab}
             role="menuitem"
             type="button"
@@ -1719,6 +1861,7 @@ function CloseDocumentsDialog({
 
 function DocumentTabContent({
   document,
+  onBusyChange,
   onCloseDocument,
   onDirtyChange,
   onRegisterWorkspaceRef,
@@ -1726,6 +1869,7 @@ function DocumentTabContent({
   workspaceOptions
 }: {
   document: TabbedPdfDocument;
+  onBusyChange: (documentId: string, busy: boolean) => void;
   onCloseDocument: (
     documentId: string,
     options?: { skipConfirm?: boolean }
@@ -1746,6 +1890,10 @@ function DocumentTabContent({
     (title: string) => onTitleChange(document.id, title),
     [document.id, onTitleChange]
   );
+  const handleBusyChange = useCallback(
+    (busy: boolean) => onBusyChange(document.id, busy),
+    [document.id, onBusyChange]
+  );
 
   return (
     <PdfWorkspace
@@ -1756,9 +1904,11 @@ function DocumentTabContent({
       manageDocumentTitle={false}
       confirmDiscardChanges={workspaceOptions.confirmDiscardChanges}
       onClose={() => void onCloseDocument(document.id, { skipConfirm: true })}
+      onBusyChange={handleBusyChange}
       onDirtyChange={handleDirtyChange}
       onDocumentTitleChange={handleTitleChange}
       onOpenExternalLink={workspaceOptions.onOpenExternalLink}
+      pickImageFile={workspaceOptions.pickImageFile}
       ref={onRegisterWorkspaceRef(document.id)}
       showCloseButton={false}
       source={document.source}

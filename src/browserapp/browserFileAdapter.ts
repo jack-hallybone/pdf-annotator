@@ -1,10 +1,13 @@
 import { createPdfFileLoader } from '../annotator';
 import type { PdfDownloadTarget, PdfSaveTarget } from '../annotator';
+import { uint8ArrayToArrayBuffer } from '../bytes';
+import { safePdfFileName } from '../fileNames';
 import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
 import {
   canPickLocalPdfFile,
   canSaveLocalPdfFileAs,
   localPdfFilesFromDrop,
+  pickLocalImageFile,
   pickLocalPdfFiles,
   savePdfAsLocalFile,
   savePdfToLocalFile
@@ -31,6 +34,7 @@ export const browserFileAdapter: PdfHostAdapter = {
     const pickedFiles = await pickLocalPdfFiles();
     return { documents: browserFilesToHostDocuments(pickedFiles) };
   },
+  pickImageFile: browserPickImageFile,
   async pdfDocumentsFromDrop(dataTransfer) {
     try {
       const localFiles = await localPdfFilesFromDrop(dataTransfer);
@@ -47,6 +51,14 @@ export const browserFileAdapter: PdfHostAdapter = {
     return browserFilesToHostDocuments(filesToBrowserFiles(files));
   }
 };
+
+async function browserPickImageFile() {
+  if (canPickLocalPdfFile()) {
+    return pickLocalImageFile();
+  }
+
+  return pickImageFileWithInput();
+}
 
 function browserFilesToHostDocuments(
   files: BrowserPdfFile[]
@@ -68,6 +80,32 @@ function browserFilesToHostDocuments(
 
 function filesToBrowserFiles(files: FileList | File[]) {
   return Array.from(files).map((file) => ({ file }));
+}
+
+function pickImageFileWithInput() {
+  return new Promise<File | null>((resolve) => {
+    const input = document.createElement('input');
+    input.accept = 'image/png,image/jpeg,image/webp';
+    input.type = 'file';
+    input.style.display = 'none';
+
+    function cleanup(file: File | null) {
+      window.setTimeout(() => {
+        input.remove();
+        resolve(file);
+      }, 0);
+    }
+
+    input.addEventListener(
+      'change',
+      () => cleanup(input.files?.[0] ?? null),
+      { once: true }
+    );
+    input.addEventListener('cancel', () => cleanup(null), { once: true });
+
+    document.body.append(input);
+    input.click();
+  });
 }
 
 function browserFileSaveAsTarget() {
@@ -103,11 +141,13 @@ function browserFileDownloadTarget(): PdfDownloadTarget {
 }
 
 function browserDownloadPdf(bytes: Uint8Array, suggestedName: string) {
-  const blob = new Blob([toArrayBuffer(bytes)], { type: 'application/pdf' });
+  const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
+    type: 'application/pdf'
+  });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = safeDownloadName(suggestedName);
+  link.download = safePdfFileName(suggestedName);
   link.style.display = 'none';
   document.body.append(link);
   link.click();
@@ -129,20 +169,4 @@ function pdfFileKey(file: File) {
     String(file.size),
     String(file.lastModified)
   ].join('\u001f');
-}
-
-function toArrayBuffer(bytes: Uint8Array) {
-  return bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength
-  ) as ArrayBuffer;
-}
-
-function safeDownloadName(name: string) {
-  const cleaned = name
-    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '_')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return cleaned || 'annotated.pdf';
 }

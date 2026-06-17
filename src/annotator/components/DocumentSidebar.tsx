@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { ChevronLeft, FilePlus2, MoreVertical, RotateCw, Trash2 } from 'lucide-react';
-import { rgbToHex } from '../SettingsPanel';
+import { rgbToHex } from '../annotationColors';
 import { pathToViewportD, pdfRectToViewportRect } from '../pdfGeometry';
 import {
   cachePageBaseRenderMode,
@@ -680,9 +680,25 @@ function ThumbnailAnnotations({
                 fill={rgbToHex(annotation.color)}
                 height={Math.max(8, bounds.height)}
                 key={annotation.id}
-                stroke="#854d0e"
+                stroke="var(--pdfa-ink)"
+                strokeOpacity="0.62"
                 strokeWidth="1"
                 width={Math.max(8, bounds.width)}
+                x={bounds.x}
+                y={bounds.y}
+              />
+            );
+          }
+
+          case 'imageStamp': {
+            const bounds = pdfRectToViewportRect(annotation.rect, viewport);
+            return (
+              <image
+                height={Math.max(4, bounds.height)}
+                href={`data:${annotation.mimeType};base64,${annotation.imageData}`}
+                key={annotation.id}
+                preserveAspectRatio="xMidYMid meet"
+                width={Math.max(4, bounds.width)}
                 x={bounds.x}
                 y={bounds.y}
               />

@@ -29,7 +29,7 @@
 
 .browserapp-home-action-frame {
   background: var(--tabbedapp-ui);
-  border: 1px solid rgb(23 28 28 / 0.12);
+  border: 1px solid rgb(var(--tabbedapp-ink-rgb) / 0.12);
   border-radius: 6px;
   box-shadow: var(--tabbedapp-frame-shadow);
   box-sizing: border-box;
@@ -92,7 +92,7 @@
 }
 
 .browserapp-home-template-grid {
-  border-top: 1px solid rgb(23 28 28 / 0.12);
+  border-top: 1px solid rgb(var(--tabbedapp-ink-rgb) / 0.12);
   display: grid;
   gap: 0.25rem;
   grid-template-columns: 1fr;

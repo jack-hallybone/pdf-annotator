@@ -7,6 +7,7 @@ export type Tool =
   | 'freehandHighlight'
   | 'draw'
   | 'freeText'
+  | 'imageStamp'
   | 'stickyNote'
   | 'eraser'
   | 'lasso';
@@ -85,11 +86,24 @@ export type StickyNoteAnnotation = {
   color: [number, number, number];
 };
 
+export type ImageStampAnnotation = {
+  id: string;
+  sourceId?: string;
+  kind: 'imageStamp';
+  pageIndex: number;
+  rect: PdfRect;
+  imageData: string;
+  mimeType: 'image/png';
+  widthPx: number;
+  heightPx: number;
+};
+
 export type PdfAnnotation =
   | TextHighlightAnnotation
   | InkAnnotation
   | FreeTextAnnotation
-  | StickyNoteAnnotation;
+  | StickyNoteAnnotation
+  | ImageStampAnnotation;
 
 export type PageViewport = ReturnType<PDFPageProxy['getViewport']>;
 export type LoadedPage = PDFPageProxy | null;

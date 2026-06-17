@@ -5,7 +5,7 @@ import { pathToViewportD } from '../pdfGeometry';
 import type { PageViewport, PdfPoint } from '../types';
 import { clamp } from '../viewerConfig';
 
-export const SELECTION_ACCENT = '#CC41BF';
+export const SELECTION_ACCENT = 'var(--pdfa-accent)';
 export const TEXT_HIGHLIGHT_STYLE = { mixBlendMode: 'multiply' as const };
 
 type AutoFocusTextareaProps = {
@@ -183,7 +183,7 @@ export function LassoShape({
   return (
     <path
       d={`${d} Z`}
-      fill="rgb(139 92 246 / 0.08)"
+      fill="rgb(var(--pdfa-accent-rgb) / 0.08)"
       stroke={SELECTION_ACCENT}
       strokeDasharray="5 4"
       strokeWidth="1.5"

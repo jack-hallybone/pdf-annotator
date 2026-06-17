@@ -8,6 +8,7 @@ import {
   PDFRef,
   PDFNumber,
   PDFString,
+  ParseSpeeds,
   PDFFont,
   StandardFonts,
   degrees,
@@ -40,17 +41,34 @@ const supportedAnnotationSubtypes = new Set([
   'FreeText',
   'Text'
 ]);
+const pdfLoadOptions = {
+  parseSpeed: ParseSpeeds.Fastest,
+  updateMetadata: false
+};
+const pdfSaveOptions = {
+  objectsPerTick: Infinity,
+  updateFieldAppearances: false
+};
+const freeTextFontResourceName = 'Helvetica';
+
+function loadEditablePdf(bytes: Uint8Array) {
+  return PDFDocument.load(bytes, pdfLoadOptions);
+}
+
+function saveEditedPdf(pdfDoc: PDFDocument) {
+  return pdfDoc.save(pdfSaveOptions);
+}
 
 export async function addBlankPageAt(
   bytes: Uint8Array,
   pageIndex: number,
   templatePageIndex: number
 ) {
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await loadEditablePdf(bytes);
   const sourcePage = pdfDoc.getPage(templatePageIndex);
   const { width, height } = sourcePage.getSize();
   pdfDoc.insertPage(pageIndex, [width, height]);
-  return pdfDoc.save();
+  return saveEditedPdf(pdfDoc);
 }
 
 export async function addLinedPageAt(
@@ -58,30 +76,30 @@ export async function addLinedPageAt(
   pageIndex: number,
   templatePageIndex: number
 ) {
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await loadEditablePdf(bytes);
   const sourcePage = pdfDoc.getPage(templatePageIndex);
   const { width, height } = sourcePage.getSize();
   const page = pdfDoc.insertPage(pageIndex, [width, height]);
   drawLinedPage(page, width, height);
-  return pdfDoc.save();
+  return saveEditedPdf(pdfDoc);
 }
 
 export async function removePage(bytes: Uint8Array, pageIndex: number) {
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await loadEditablePdf(bytes);
   if (pdfDoc.getPageCount() <= 1) {
     throw new Error('A PDF must keep at least one page.');
   }
 
   pdfDoc.removePage(pageIndex);
-  return pdfDoc.save();
+  return saveEditedPdf(pdfDoc);
 }
 
 export async function rotatePageClockwise(bytes: Uint8Array, pageIndex: number) {
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await loadEditablePdf(bytes);
   const page = pdfDoc.getPage(pageIndex);
   const currentAngle = page.getRotation().angle;
   page.setRotation(degrees((currentAngle + 90) % 360));
-  return pdfDoc.save();
+  return saveEditedPdf(pdfDoc);
 }
 
 export async function mergePdfAfterPage(
@@ -89,8 +107,8 @@ export async function mergePdfAfterPage(
   mergeBytes: Uint8Array,
   afterPageIndex: number
 ) {
-  const pdfDoc = await PDFDocument.load(bytes);
-  const mergeDoc = await PDFDocument.load(mergeBytes);
+  const pdfDoc = await loadEditablePdf(bytes);
+  const mergeDoc = await loadEditablePdf(mergeBytes);
   const pageIndexes = mergeDoc.getPageIndices();
   const copiedPages = await pdfDoc.copyPages(mergeDoc, pageIndexes);
   const insertAt = Math.min(
@@ -103,7 +121,7 @@ export async function mergePdfAfterPage(
   });
 
   return {
-    bytes: await pdfDoc.save(),
+    bytes: await saveEditedPdf(pdfDoc),
     insertedPageCount: copiedPages.length
   };
 }
@@ -152,7 +170,7 @@ export async function writePdfAnnotations(
     replacePageIndexes?: Iterable<number>;
   } = {}
 ) {
-  const pdfDoc = await PDFDocument.load(bytes);
+  const pdfDoc = await loadEditablePdf(bytes);
   const replacePageIndexes = options.replacePageIndexes
     ? new Set(options.replacePageIndexes)
     : null;
@@ -169,7 +187,7 @@ export async function writePdfAnnotations(
 
   let freeTextFont: PDFFont | null = null;
 
-  for (const annotation of annotations) {
+  for (const annotation of [...annotations].sort(annotationWriteOrder)) {
     if (!isWritablePageIndex(pdfDoc, annotation.pageIndex)) {
       continue;
     }
@@ -256,11 +274,11 @@ export async function writePdfAnnotations(
         ...annotationBase(annotation.id),
         CA: pdfOpacity(annotation.opacity),
         DA: PDFString.of(
-          `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg /Helv ${fontSize} Tf`
+          `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg /${freeTextFontResourceName} ${fontSize} Tf`
         ),
         DR: {
           Font: {
-            Helv: freeTextFont.ref
+            [freeTextFontResourceName]: freeTextFont.ref
           }
         },
         AP: {
@@ -308,10 +326,50 @@ export async function writePdfAnnotations(
           N: stickyNoteAppearance(page, annotation.rect, annotation.color)
         }
       });
+      continue;
+    }
+
+    if (annotation.kind === 'imageStamp') {
+      if (!isUsableRect(annotation.rect) || annotation.imageData.length === 0) {
+        continue;
+      }
+
+      const image = await pdfDoc.embedPng(base64ToBytes(annotation.imageData));
+      addAnnotation(page, {
+        Type: 'Annot',
+        Subtype: 'Stamp',
+        Rect: rectToArray(annotation.rect),
+        ...annotationBase(annotation.id),
+        Name: 'Image',
+        AP: {
+          N: imageStampAppearance(page, annotation.rect, image.ref)
+        }
+      });
     }
   }
 
-  return pdfDoc.save();
+  return saveEditedPdf(pdfDoc);
+}
+
+function annotationWriteOrder(left: PdfAnnotation, right: PdfAnnotation) {
+  return annotationWriteRank(left) - annotationWriteRank(right);
+}
+
+function annotationWriteRank(annotation: PdfAnnotation) {
+  switch (annotation.kind) {
+    case 'textHighlight':
+      return 0;
+    case 'imageStamp':
+      return 1;
+    case 'freehandHighlight':
+      return 2;
+    case 'draw':
+      return 3;
+    case 'freeText':
+      return 4;
+    case 'stickyNote':
+      return 5;
+  }
 }
 
 function isWritablePageIndex(pdfDoc: PDFDocument, pageIndex: number) {
@@ -393,7 +451,7 @@ function freeTextAppearance(
     '/GS0 gs',
     'BT',
     `${pdfNumber(r)} ${pdfNumber(g)} ${pdfNumber(b)} rg`,
-    `/Helv ${pdfCoordinateNumber(fontSize)} Tf`,
+    `/${freeTextFontResourceName} ${pdfCoordinateNumber(fontSize)} Tf`,
     `${pdfCoordinateNumber(lineHeight)} TL`,
     `0 ${pdfCoordinateNumber(baselineY)} Td`,
     lines.map((line, index) =>
@@ -419,7 +477,7 @@ function freeTextAppearance(
           }
         },
         Font: {
-          Helv: font.ref
+          [freeTextFontResourceName]: font.ref
         }
       }
     })
@@ -458,6 +516,34 @@ function stickyNoteAppearance(
       FormType: 1,
       BBox: [0, 0, width, height],
       Matrix: [1, 0, 0, 1, 0, 0]
+    })
+  );
+}
+
+function imageStampAppearance(page: PDFPage, rect: PdfRect, imageRef: PDFRef) {
+  const context = page.doc.context;
+  const [x1, y1, x2, y2] = rectToArray(rect);
+  const width = pdfCoordinate(x2 - x1);
+  const height = pdfCoordinate(y2 - y1);
+  const content = [
+    'q',
+    `${pdfCoordinateNumber(width)} 0 0 ${pdfCoordinateNumber(height)} 0 0 cm`,
+    '/Im0 Do',
+    'Q'
+  ].join('\n');
+
+  return context.register(
+    context.flateStream(content, {
+      Type: 'XObject',
+      Subtype: 'Form',
+      FormType: 1,
+      BBox: [0, 0, width, height],
+      Matrix: [1, 0, 0, 1, 0, 0],
+      Resources: {
+        XObject: {
+          Im0: imageRef
+        }
+      }
     })
   );
 }
@@ -763,7 +849,7 @@ function removeSupportedExistingAnnotations(
 
       if (
         subtype &&
-        supportedAnnotationSubtypes.has(subtype) &&
+        isRemovableAnnotationSubtype(subtype, replaceAnnotationSourceIds) &&
         shouldRemoveSupportedAnnotation(
           annotation,
           annotationRef,
@@ -817,7 +903,7 @@ function shouldRemoveExistingAnnotation(
     return false;
   }
 
-  if (supportedAnnotationSubtypes.has(subtype)) {
+  if (isRemovableAnnotationSubtype(subtype, replaceAnnotationSourceIds)) {
     return shouldRemoveSupportedAnnotation(
       annotation,
       annotationRef,
@@ -832,6 +918,19 @@ function shouldRemoveExistingAnnotation(
   }
 
   return popupBelongsToSupportedAnnotation(annotation, supportedAnnotationRefs);
+}
+
+function isRemovableAnnotationSubtype(
+  subtype: string,
+  replaceAnnotationSourceIds: Set<string> | null
+) {
+  if (supportedAnnotationSubtypes.has(subtype)) {
+    return true;
+  }
+
+  // Image stamps created by this app are editable only when we can match their
+  // /NM id. Do not bulk-remove arbitrary Stamp annotations from other software.
+  return subtype === 'Stamp' && replaceAnnotationSourceIds !== null;
 }
 
 function shouldRemoveSupportedAnnotation(
@@ -1097,6 +1196,15 @@ function pdfColor(color: [number, number, number]): [number, number, number] {
 
 function pdfOpacity(opacity: number) {
   return pdfRatio(clampPdfNumber(opacity, 0, 1, 1));
+}
+
+function base64ToBytes(base64: string) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function pdfStrokeWidth(width: number) {

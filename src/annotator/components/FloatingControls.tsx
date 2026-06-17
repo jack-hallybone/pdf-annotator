@@ -14,7 +14,7 @@ import {
   Undo2,
   X
 } from 'lucide-react';
-import { rgbToHex } from '../SettingsPanel';
+import { rgbToHex } from '../annotationColors';
 import {
   clamp,
   MAX_ZOOM,
@@ -39,6 +39,7 @@ type FloatingToolDockProps = {
   disabled?: boolean;
   onChangeSettings: (update: Partial<ToolSettings>) => void;
   onCloseSettings: () => void;
+  onPickImageFile: () => void;
   onSelectTool: (toolKey: string) => void;
   onToggleSettings: (toolKey: string) => void;
   settings: ToolSettings;
@@ -52,6 +53,7 @@ export function FloatingToolDock({
   disabled = false,
   onChangeSettings,
   onCloseSettings,
+  onPickImageFile,
   onSelectTool,
   onToggleSettings,
   settings,
@@ -71,6 +73,7 @@ export function FloatingToolDock({
         const accent = toolAccent(tool, settings, buttonPreset);
         const active = activeTool === tool && activeToolKey === key;
         const hasSettings = toolHasSettings(tool);
+        const commandOnly = tool === 'imageStamp';
 
         return (
           <div className="tool-dock-row" key={key}>
@@ -81,7 +84,14 @@ export function FloatingToolDock({
                 active ? 'ui-button-active' : ''
               }`}
               disabled={disabled}
-              onClick={() => onSelectTool(key)}
+              onClick={() => {
+                if (commandOnly) {
+                  onPickImageFile();
+                  return;
+                }
+
+                onSelectTool(key);
+              }}
               title={label}
               type="button"
             >

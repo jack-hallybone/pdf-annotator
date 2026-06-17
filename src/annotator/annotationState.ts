@@ -77,7 +77,6 @@ export function annotationFingerprint(annotation: PdfAnnotation) {
 
 function annotationSignature(annotation: PdfAnnotation) {
   const base = {
-    color: annotation.color.map(signatureNumber),
     id: annotation.id,
     kind: annotation.kind,
     pageIndex: annotation.pageIndex,
@@ -88,6 +87,7 @@ function annotationSignature(annotation: PdfAnnotation) {
     case 'textHighlight':
       return {
         ...base,
+        color: annotation.color.map(signatureNumber),
         contents: annotation.contents,
         opacity: signatureNumber(annotation.opacity),
         quadPoints: annotation.quadPoints.map((quad) =>
@@ -99,6 +99,7 @@ function annotationSignature(annotation: PdfAnnotation) {
     case 'freehandHighlight':
       return {
         ...base,
+        color: annotation.color.map(signatureNumber),
         contents: annotation.contents,
         filled: annotation.filled ?? false,
         opacity: signatureNumber(annotation.opacity),
@@ -113,6 +114,7 @@ function annotationSignature(annotation: PdfAnnotation) {
     case 'freeText':
       return {
         ...base,
+        color: annotation.color.map(signatureNumber),
         fontSize: signatureNumber(annotation.fontSize),
         layoutWidth:
           annotation.layoutWidth === undefined
@@ -125,8 +127,18 @@ function annotationSignature(annotation: PdfAnnotation) {
     case 'stickyNote':
       return {
         ...base,
+        color: annotation.color.map(signatureNumber),
         rect: rectSignature(annotation.rect),
         text: annotation.text
+      };
+    case 'imageStamp':
+      return {
+        ...base,
+        dataHash: stringHash(annotation.imageData),
+        heightPx: annotation.heightPx,
+        mimeType: annotation.mimeType,
+        rect: rectSignature(annotation.rect),
+        widthPx: annotation.widthPx
       };
   }
 }
@@ -174,6 +186,16 @@ export function normalizeAnnotationLayout(
       layoutWidth: annotation.layoutWidth
     })
   };
+}
+
+function stringHash(value: string) {
+  let hash = 2166136261;
+  const step = Math.max(1, Math.floor(value.length / 65536));
+  for (let index = 0; index < value.length; index += step) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${value.length}:${(hash >>> 0).toString(16)}`;
 }
 
 export function byteFingerprint(bytes: Uint8Array) {
