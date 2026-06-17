@@ -159,6 +159,11 @@
   touch-action: auto;
 }
 
+.pdfa-interaction-layer,
+.pdfa-image-stamp-layer {
+  touch-action: none;
+}
+
 .pdf-page-placeholder {
   background: var(--pdfa-ui);
   box-shadow: 0 1px 2px rgb(var(--pdfa-ink-rgb) / 0.05);

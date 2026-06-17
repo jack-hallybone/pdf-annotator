@@ -9,13 +9,14 @@ import {
   shell
 } from 'electron';
 import type {
+  MessageBoxOptions,
   OpenDialogOptions,
   SaveDialogOptions
 } from 'electron';
 import { randomUUID, createHash } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { safePdfFileName } from '../fileNames.js';
 import { electronIpcChannels } from './ipc.js';
 import type { DesktopImageFile, DesktopPdfDocument } from './bridge.js';
@@ -341,6 +342,15 @@ function registerIpcHandlers() {
     await createMainWindow();
   });
 
+  ipcMain.handle(
+    electronIpcChannels.printPdf,
+    async (event, bytes, suggestedName) => {
+      const ownerWindow = trustedWindowForSender(event.sender);
+      assertUint8Array(bytes);
+      await printPdfFile(ownerWindow, bytes, String(suggestedName));
+    }
+  );
+
   ipcMain.handle(electronIpcChannels.openExternalLink, async (event, url) => {
     trustedWindowForSender(event.sender);
     const safeUrl = safeExternalUrl(String(url));
@@ -456,6 +466,114 @@ async function writePdfFile(filePath: string, bytes: Uint8Array) {
     await fs.rm(tempPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+async function printPdfFile(
+  ownerWindow: BrowserWindow,
+  bytes: Uint8Array,
+  suggestedName: string
+) {
+  const printDir = path.join(app.getPath('temp'), 'pdf-annotator-print');
+  await fs.mkdir(printDir, { recursive: true });
+  const printPath = path.join(
+    printDir,
+    `${randomUUID()}-${safePdfFileName(suggestedName)}`
+  );
+
+  await writePdfFile(printPath, bytes);
+  try {
+    await printTempPdfInChromium(ownerWindow, printPath);
+  } catch (error) {
+    await showPrintFailureMessage(ownerWindow, error);
+  } finally {
+    await fs.rm(printPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function printTempPdfInChromium(
+  ownerWindow: BrowserWindow,
+  printPath: string
+) {
+  const printWindow = new BrowserWindow({
+    backgroundColor: '#ffffff',
+    height: 800,
+    parent: ownerWindow.isDestroyed() ? undefined : ownerWindow,
+    show: false,
+    title: 'Print PDF',
+    webPreferences: {
+      allowRunningInsecureContent: false,
+      contextIsolation: true,
+      devTools: false,
+      experimentalFeatures: false,
+      nodeIntegration: false,
+      plugins: true,
+      sandbox: true,
+      webSecurity: true
+    },
+    width: 1000
+  });
+
+  hardenPrintWindow(printWindow, printPath);
+  try {
+    await printWindow.loadFile(printPath);
+    await new Promise<void>((resolve, reject) => {
+      printWindow.webContents.print(
+        {
+          printBackground: true,
+          silent: false
+        },
+        (success, failureReason) => {
+          if (success || isPrintCancelled(failureReason)) {
+            resolve();
+            return;
+          }
+
+          reject(new Error(failureReason || 'Print failed.'));
+        }
+      );
+    });
+  } finally {
+    if (!printWindow.isDestroyed()) {
+      printWindow.close();
+    }
+  }
+}
+
+function hardenPrintWindow(window: BrowserWindow, printPath: string) {
+  const allowedPrintUrl = pathToFileURL(printPath).href;
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url !== allowedPrintUrl) {
+      event.preventDefault();
+    }
+  });
+}
+
+function isPrintCancelled(reason?: string) {
+  return /cancel/i.test(reason ?? '');
+}
+
+async function showPrintFailureMessage(
+  ownerWindow: BrowserWindow,
+  error: unknown
+) {
+  const options: MessageBoxOptions = {
+    buttons: ['OK'],
+    defaultId: 0,
+    detail: error instanceof Error ? error.message : undefined,
+    message: 'PDF Annotator could not open the print dialog for this PDF.',
+    noLink: true,
+    title: 'Print failed',
+    type: 'warning'
+  };
+
+  if (!ownerWindow.isDestroyed()) {
+    await dialog.showMessageBox(ownerWindow, options);
+    return;
+  }
+
+  await dialog.showMessageBox(options);
 }
 
 async function verifyFileBytes(filePath: string, expectedBytes: Uint8Array) {

@@ -3,8 +3,8 @@ name: Build Desktop App
 on:
   push:
     branches:
-      - main
       - electron
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -21,14 +21,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Debug checkout
-        run: |
-          git branch --show-current
-          git rev-parse HEAD
-          git log -1 --oneline
-          echo "ref=${{ github.ref }}"
-          echo "sha=${{ github.sha }}"
-
       - name: Set up Node
         uses: actions/setup-node@v6
         with:
@@ -38,14 +30,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      - name: Build portable Windows app
-        run: npm run desktop:package:win
-        env:
-          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
-          CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
-
-      - name: Build Windows installer
-        run: npm run desktop:package:win:installer
+      - name: Build Windows desktop apps
+        run: |
+          npm run desktop:package:win
+          npm run desktop:package:win:installer
         env:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
           CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}

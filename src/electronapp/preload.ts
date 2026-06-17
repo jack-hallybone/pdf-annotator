@@ -53,6 +53,13 @@ const bridge: DesktopBridge = {
       electronIpcChannels.pickPdfFiles
     ) as Promise<DesktopPdfDocument[]>;
   },
+  printPdf(bytes, suggestedName) {
+    return ipcRenderer.invoke(
+      electronIpcChannels.printPdf,
+      bytes,
+      suggestedName
+    ) as Promise<void>;
+  },
   savePdf(fileId, bytes) {
     return ipcRenderer.invoke(
       electronIpcChannels.savePdf,

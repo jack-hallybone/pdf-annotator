@@ -1,6 +1,7 @@
 import { readPdfFile } from '../annotator';
 import type {
   PdfDownloadTarget,
+  PdfPrintTarget,
   PdfSaveAsTarget,
   PdfSaveTarget
 } from '../annotator';
@@ -90,6 +91,13 @@ function electronDownloadTarget(): PdfDownloadTarget {
   return {
     download: (bytes, suggestedName) =>
       requireDesktopBridge().downloadPdf(bytes, suggestedName)
+  };
+}
+
+export function electronPrintTarget(): PdfPrintTarget {
+  return {
+    print: (bytes, suggestedName) =>
+      requireDesktopBridge().printPdf(bytes, suggestedName)
   };
 }
 

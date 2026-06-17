@@ -7,7 +7,9 @@ import { configurePdfRuntime } from './pdfRuntime';
 
 configurePdfRuntime();
 
-const AppShell = hasDesktopBridge() ? ElectronShell : BrowserShell;
+const desktopRuntimeExpected =
+  hasDesktopBridge() || window.location.protocol === 'pdfannotator:';
+const AppShell = desktopRuntimeExpected ? ElectronShell : BrowserShell;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -4,14 +4,15 @@ import { TabbedPdfShell } from '../tabbedapp';
 import type { TabbedPdfShellHandle } from '../tabbedapp';
 import {
   desktopDocumentsToHostDocuments,
-  electronFileAdapter
+  electronFileAdapter,
+  electronPrintTarget
 } from './electronFileAdapter';
 
 export function ElectronShell() {
   const shellRef = useRef<TabbedPdfShellHandle>(null);
+  const bridge = window.pdfAnnotatorDesktop;
 
   useEffect(() => {
-    const bridge = window.pdfAnnotatorDesktop;
     if (!bridge) {
       return;
     }
@@ -27,7 +28,19 @@ export function ElectronShell() {
       unsubscribeOpen();
       unsubscribeClose();
     };
-  }, []);
+  }, [bridge]);
+
+  if (!bridge) {
+    return (
+      <main className="tabbedapp-shell">
+        <section className="tabbedapp-content">
+          <div className="tabbedapp-home-panel">
+            <p>Desktop integration did not load.</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <TabbedPdfShell
@@ -35,14 +48,14 @@ export function ElectronShell() {
       newTabMenuActions={[
         {
           label: 'New window',
-          onSelect: () => window.pdfAnnotatorDesktop?.newWindow(),
+          onSelect: () => bridge.newWindow(),
           renderIcon: (size) => <AppWindow size={size} />
         }
       ]}
       ref={shellRef}
       workspaceOptions={{
-        onOpenExternalLink: (url) =>
-          window.pdfAnnotatorDesktop?.openExternalLink(url),
+        onOpenExternalLink: (url) => bridge.openExternalLink(url),
+        printTarget: electronPrintTarget(),
         showDownloadButton: false
       }}
     />

@@ -26,6 +26,7 @@ export type DesktopBridge = {
   openExternalLink: (url: string) => Promise<void>;
   pickImageFile: () => Promise<DesktopImageFile | null>;
   pickPdfFiles: () => Promise<DesktopPdfDocument[]>;
+  printPdf: (bytes: Uint8Array, suggestedName: string) => Promise<void>;
   savePdf: (fileId: string, bytes: Uint8Array) => Promise<void>;
   savePdfAs: (
     bytes: Uint8Array,
