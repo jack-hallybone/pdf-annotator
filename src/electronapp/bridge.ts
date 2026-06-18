@@ -1,8 +1,9 @@
 export type DesktopPdfDocument = {
   bytes: Uint8Array;
   fileKey: string;
-  fileId: string;
+  fileId: string | null;
   name: string;
+  readOnly: boolean;
 };
 
 export type DesktopImageFile = {

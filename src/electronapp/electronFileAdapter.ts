@@ -40,12 +40,16 @@ export function desktopDocumentsToHostDocuments(
 ): PdfHostDocument[] {
   return documents.map((document) => ({
     fileKey: document.fileKey,
+    readOnly: document.readOnly,
+    readOnlyMessage: document.readOnly
+      ? 'This file is open as read-only because it is being edited in another window.'
+      : undefined,
     source: {
       bytes: document.bytes,
       fileKey: document.fileKey,
       name: document.name,
       saveAsTarget: electronFileAdapter.saveAsTarget ?? null,
-      saveTarget: electronSaveTarget(document.fileId)
+      saveTarget: document.fileId ? electronSaveTarget(document.fileId) : null
     },
     title: document.name
   }));

@@ -31,9 +31,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Build Windows desktop apps
-        run: |
-          npm run desktop:package:win
-          npm run desktop:package:win:installer
+        run: npm run desktop:package:win
         env:
           CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PASSWORD }}
           CSC_LINK: ${{ secrets.WINDOWS_CODESIGN_CERTIFICATE }}
@@ -43,11 +41,11 @@ jobs:
         with:
           if-no-files-found: error
           name: pdf-annotator-windows-portable
-          path: release/*portable.exe
+          path: out/desktop/*portable.exe
 
       - name: Upload installer
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
           name: pdf-annotator-windows-installer
-          path: release/*setup.exe
+          path: out/desktop/*setup.exe

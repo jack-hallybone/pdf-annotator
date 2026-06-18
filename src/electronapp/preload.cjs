@@ -98,7 +98,8 @@ function isDesktopPdfDocument(value) {
     value !== null &&
     value.bytes instanceof Uint8Array &&
     typeof value.fileKey === 'string' &&
-    typeof value.fileId === 'string' &&
-    typeof value.name === 'string'
+    typeof value.name === 'string' &&
+    typeof value.readOnly === 'boolean' &&
+    (value.readOnly ? value.fileId === null : typeof value.fileId === 'string')
   );
 }

@@ -54,6 +54,7 @@ import type { PdfTemplateKind } from '../pdfTemplates';
 import { warmPdfRuntimeCaches } from '../pdfRuntime';
 import { appThemeStyle } from '../theme';
 import type { AppTheme } from '../theme';
+import titleImageUrl from './assets/title.svg?url';
 
 export type TabbedPdfTemplateAction = {
   kind: PdfTemplateKind;
@@ -89,6 +90,8 @@ type TabbedPdfDocument = {
   fileKey?: string;
   hasUnsavedChanges: boolean;
   id: string;
+  readOnly?: boolean;
+  readOnlyMessage?: string;
   session: PdfWorkspaceSession | null;
   source: PdfWorkspaceSource;
   title: string;
@@ -690,26 +693,31 @@ export const TabbedPdfShell = forwardRef<
       return;
     }
 
-    const openedDocuments = newDocuments.map(({ fileKey, source, title }) => {
-      const id = nextDocumentId(source.name, nextDocumentIdRef);
-      const sourceWithHostTargets = {
-        ...source,
-        downloadTarget: source.downloadTarget ?? fileAdapter.downloadTarget ?? null,
-        fileKey: source.fileKey ?? fileKey,
-        saveAsTarget: source.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
-      };
-      return {
-        fileKey,
-        hasUnsavedChanges: Boolean(
-          sourceWithHostTargets.markDirty ||
-            sourceWithHostTargets.initialAnnotations?.length
-        ),
-        id,
-        session: null,
-        source: attachPdfSourceId(sourceWithHostTargets, id),
-        title: title ?? sourceWithHostTargets.name
-      };
-    });
+    const openedDocuments = newDocuments.map(
+      ({ fileKey, readOnly, readOnlyMessage, source, title }) => {
+        const id = nextDocumentId(source.name, nextDocumentIdRef);
+        const sourceWithHostTargets = {
+          ...source,
+          downloadTarget:
+            source.downloadTarget ?? fileAdapter.downloadTarget ?? null,
+          fileKey: source.fileKey ?? fileKey,
+          saveAsTarget: source.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
+        };
+        return {
+          fileKey,
+          hasUnsavedChanges: Boolean(
+            sourceWithHostTargets.markDirty ||
+              sourceWithHostTargets.initialAnnotations?.length
+          ),
+          id,
+          readOnly,
+          readOnlyMessage,
+          session: null,
+          source: attachPdfSourceId(sourceWithHostTargets, id),
+          title: title ?? sourceWithHostTargets.name
+        };
+      }
+    );
 
     openTabbedDocuments(openedDocuments);
   }
@@ -1937,7 +1945,7 @@ function DefaultHomePanel({
           <img
             alt="PDF Annotator"
             className="tabbedapp-home-title-image"
-            src={`${import.meta.env.BASE_URL}title.svg`}
+            src={titleImageUrl}
           />
         </h1>
         <div className="tabbedapp-home-action-frame">
@@ -2104,8 +2112,11 @@ function DocumentTabContent({
       pickImageFile={workspaceOptions.pickImageFile}
       pickMergePdfFile={workspaceOptions.pickMergePdfFile}
       printTarget={workspaceOptions.printTarget}
+      readOnlyMessage={document.readOnlyMessage}
       ref={onRegisterWorkspaceRef(document.id)}
-      allowEditing={workspaceOptions.allowEditing}
+      allowEditing={
+        (workspaceOptions.allowEditing ?? true) && !document.readOnly
+      }
       allowImageAnnotations={workspaceOptions.allowImageAnnotations}
       showCloseButton={false}
       source={document.source}

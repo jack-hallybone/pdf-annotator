@@ -22,6 +22,7 @@ import { electronIpcChannels } from './ipc.js';
 import type { DesktopImageFile, DesktopPdfDocument } from './bridge.js';
 
 type DesktopFileRecord = {
+  fileKey: string;
   filePath: string;
   ownerWebContentsId: number;
 };
@@ -36,13 +37,11 @@ const appProtocol = 'pdfannotator';
 const allowedExternalProtocols = new Set(['http:', 'https:', 'mailto:']);
 const closeConfirmationTimeoutMs = 15000;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, '..', '..');
-const rendererDistDir = app.isPackaged
-  ? path.join(app.getAppPath(), 'dist')
-  : path.join(projectRoot, 'dist');
+const projectRoot = app.getAppPath();
+const rendererDistDir = path.join(projectRoot, 'out', 'renderer');
 const appIconPath = app.isPackaged
-  ? path.join(process.resourcesPath, 'icon.ico')
-  : path.join(projectRoot, 'build', 'icon.ico');
+  ? path.join(process.resourcesPath, 'icon.png')
+  : path.join(projectRoot, 'src', 'electronapp', 'assets', 'icon.png');
 const preloadPath = path.join(__dirname, 'preload.cjs');
 const devRendererUrl = process.env.ELECTRON_RENDERER_URL?.trim() || null;
 const fileRecordsById = new Map<string, DesktopFileRecord>();
@@ -135,6 +134,7 @@ async function createMainWindow() {
 
   activeWindow = window;
   primaryWindow ??= window;
+  const ownerWebContentsId = window.webContents.id;
   windowStates.set(window.id, {
     closeConfirmed: false,
     closeRequestPending: false,
@@ -149,6 +149,7 @@ async function createMainWindow() {
     void flushPendingOpenPaths(window);
   });
   window.on('closed', () => {
+    releaseFileRecordsForWindow(ownerWebContentsId);
     const state = windowStates.get(window.id);
     if (state) {
       clearCloseRequestTimer(state);
@@ -328,6 +329,19 @@ function registerIpcHandlers() {
       }
 
       const filePath = ensurePdfExtension(result.filePath);
+      if (fileIsOwnedByAnotherWindow(filePath, ownerWindow.webContents.id)) {
+        await dialog.showMessageBox(ownerWindow, {
+          buttons: ['OK'],
+          defaultId: 0,
+          detail: 'Close it in the other window or choose a different filename.',
+          message: 'This PDF is already open for editing in another window.',
+          noLink: true,
+          title: 'Cannot replace open PDF',
+          type: 'warning'
+        });
+        return null;
+      }
+
       await writePdfFile(filePath, bytes);
       return rememberPdfFile(filePath, bytes, ownerWindow);
     }
@@ -441,17 +455,70 @@ function rememberPdfFile(
   bytes: Uint8Array,
   ownerWindow: BrowserWindow
 ): DesktopPdfDocument {
+  const fileKey = fileKeyForPath(filePath);
+  const existingRecord = findFileRecord(fileKey);
+  if (
+    existingRecord &&
+    existingRecord.record.ownerWebContentsId !== ownerWindow.webContents.id
+  ) {
+    return {
+      bytes,
+      fileId: null,
+      fileKey,
+      name: path.basename(filePath),
+      readOnly: true
+    };
+  }
+
+  if (existingRecord) {
+    return {
+      bytes,
+      fileId: existingRecord.fileId,
+      fileKey,
+      name: path.basename(filePath),
+      readOnly: false
+    };
+  }
+
   const fileId = randomUUID();
   fileRecordsById.set(fileId, {
+    fileKey,
     filePath,
     ownerWebContentsId: ownerWindow.webContents.id
   });
   return {
     bytes,
     fileId,
-    fileKey: fileKeyForPath(filePath),
-    name: path.basename(filePath)
+    fileKey,
+    name: path.basename(filePath),
+    readOnly: false
   };
+}
+
+function findFileRecord(fileKey: string) {
+  for (const [fileId, record] of fileRecordsById) {
+    if (record.fileKey === fileKey) {
+      return { fileId, record };
+    }
+  }
+
+  return null;
+}
+
+function fileIsOwnedByAnotherWindow(
+  filePath: string,
+  ownerWebContentsId: number
+) {
+  const record = findFileRecord(fileKeyForPath(filePath))?.record;
+  return Boolean(record && record.ownerWebContentsId !== ownerWebContentsId);
+}
+
+function releaseFileRecordsForWindow(ownerWebContentsId: number) {
+  for (const [fileId, record] of fileRecordsById) {
+    if (record.ownerWebContentsId === ownerWebContentsId) {
+      fileRecordsById.delete(fileId);
+    }
+  }
 }
 
 async function readImageFile(filePath: string): Promise<DesktopImageFile | null> {

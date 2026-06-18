@@ -3,23 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "description": "A lightweight client-side PDF viewer and annotation tool written using Codex.",
-  "main": "dist-electron/electronapp/main.js",
+  "main": "out/electron/electronapp/main.js",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "node scripts/prepare-renderer-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/prepare-renderer-assets.mjs",
     "build": "tsc -b && vite build",
     "electron:build": "tsc -p tsconfig.electron.json && node scripts/copy-electron-preload.mjs",
-    "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron dist-electron/electronapp/main.js",
-    "electron:preview": "npm run desktop:build && electron dist-electron/electronapp/main.js",
-    "generate-icons": "node scripts/generate-electron-icon.mjs",
-    "desktop:build": "npm run generate-icons && npm run build && npm run electron:build",
-    "desktop:package:win": "npm run desktop:build && electron-builder --win portable --publish never",
-    "desktop:package:win:installer": "npm run desktop:build && electron-builder --win nsis --publish never",
-    "prepreview": "node scripts/copy-pdfjs-assets.mjs",
+    "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron out/electron/electronapp/main.js",
+    "electron:preview": "npm run desktop:build && electron out/electron/electronapp/main.js",
+    "desktop:build": "npm run build && npm run electron:build",
+    "desktop:package:win": "npm run desktop:build && electron-builder --win --publish never",
+    "prepreview": "node scripts/prepare-renderer-assets.mjs",
     "preview": "vite preview",
-    "copy-pdfjs-assets": "node scripts/copy-pdfjs-assets.mjs",
+    "prepare-assets": "node scripts/prepare-renderer-assets.mjs",
     "security:audit": "npm audit && npm audit signatures"
   },
   "dependencies": {
@@ -34,15 +32,25 @@
     "asar": true,
     "compression": "normal",
     "directories": {
-      "buildResources": "build",
-      "output": "release"
+      "buildResources": "src/electronapp/assets",
+      "output": "out/desktop"
     },
     "extraMetadata": {
       "dependencies": {}
     },
+    "extraResources": [
+      {
+        "from": "src/assets/icons/LUCIDE-LICENSE.txt",
+        "to": "licenses/LUCIDE-LICENSE.txt"
+      },
+      {
+        "from": "src/electronapp/assets/icon.png",
+        "to": "icon.png"
+      }
+    ],
     "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
+      "out/renderer/**/*",
+      "out/electron/**/*",
       "package.json",
       "!node_modules/**/*"
     ],
@@ -58,7 +66,13 @@
         "role": "Editor"
       }
     ],
-    "icon": "build/icon.ico",
+    "icon": "src/electronapp/assets/icon.ico",
+    "linux": {
+      "icon": "src/electronapp/assets/icon.png"
+    },
+    "mac": {
+      "icon": "src/electronapp/assets/icon.icns"
+    },
     "nsis": {
       "allowToChangeInstallationDirectory": true,
       "artifactName": "PDF-Annotator-${version}-win-${arch}-setup.${ext}",
@@ -69,13 +83,19 @@
       "artifactName": "PDF-Annotator-${version}-win-${arch}-portable.${ext}"
     },
     "win": {
-      "icon": "build/icon.ico",
+      "icon": "src/electronapp/assets/icon.ico",
       "target": [
         {
           "arch": [
             "x64"
           ],
           "target": "portable"
+        },
+        {
+          "arch": [
+            "x64"
+          ],
+          "target": "nsis"
         }
       ]
     }

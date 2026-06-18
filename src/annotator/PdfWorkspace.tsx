@@ -221,6 +221,7 @@ export type PdfWorkspaceProps = {
   pickMergePdfFile?: PdfMergeFilePicker;
   pickImageFile?: PdfImageFilePicker;
   printTarget?: PdfPrintTarget | null;
+  readOnlyMessage?: string;
   onSessionChange?: (session: PdfWorkspaceSession) => void;
   showCloseButton?: boolean;
   source: PdfWorkspaceSource;
@@ -247,6 +248,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       pickMergePdfFile,
       pickImageFile,
       printTarget = null,
+      readOnlyMessage,
       onSessionChange,
       showCloseButton = true,
       source,
@@ -378,16 +380,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     Boolean(pdfBytes) &&
     cleanWorkSignature.length > 0 &&
     currentWorkSignature !== cleanWorkSignature;
+  const hostReadOnly = !allowEditing;
   const fileReadOnly = readOnlyReason !== null && !editingEnabled;
-  const readOnly = fileReadOnly || !allowEditing;
+  const readOnly = fileReadOnly || hostReadOnly;
   const saveAvailable =
-    allowEditing && Boolean(saveTargetRef.current || saveAsTargetRef.current);
-  const saveAsAvailable = allowEditing && Boolean(saveAsTargetRef.current);
-  const downloadAvailable = allowEditing && Boolean(downloadTargetRef.current);
-  const printAvailable = allowEditing && Boolean(printTarget);
-  const mergePdfVisible = allowEditing && Boolean(pickMergePdfFile);
+    !hostReadOnly && Boolean(saveTargetRef.current || saveAsTargetRef.current);
+  const saveAsAvailable = !hostReadOnly && Boolean(saveAsTargetRef.current);
+  const downloadAvailable = !hostReadOnly && Boolean(downloadTargetRef.current);
+  const printAvailable = !hostReadOnly && Boolean(printTarget);
+  const mergePdfVisible = !hostReadOnly && Boolean(pickMergePdfFile);
   const imageAnnotationsVisible =
-    allowEditing && allowImageAnnotations && Boolean(pickImageFile);
+    !hostReadOnly && allowImageAnnotations && Boolean(pickImageFile);
   const availableToolDefinitions = useMemo(
     () =>
       imageAnnotationsVisible
@@ -3821,7 +3824,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         </div>
       ) : null}
 
-      {initialVisualReady && readOnly && readOnlyReason ? (
+      {initialVisualReady && readOnly && readOnlyMessage ? (
+        <ReadOnlyNotice message={readOnlyMessage} />
+      ) : initialVisualReady && readOnly && readOnlyReason ? (
         <ReadOnlyBanner
           onEnableEditing={handleEnableEditing}
           reason={readOnlyReason}
@@ -4015,6 +4020,14 @@ function ReadOnlyBanner({
       >
         Enable Editing
       </button>
+    </div>
+  );
+}
+
+function ReadOnlyNotice({ message }: { message: string }) {
+  return (
+    <div className="protected-pdf-banner ui-frame screen-only">
+      <span className="protected-pdf-banner-text">{message}</span>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-<img src="./public/title.svg" alt="PDF Annotator" width="400">
+<img src="./src/tabbedapp/assets/title.svg" alt="PDF Annotator" width="400">
 
 A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib, [Lucide icons](https://lucide.dev/) and Electron.
 
@@ -25,6 +25,9 @@ docker compose up
 Open `http://127.0.0.1:5173/`.
 
 The Docker dev container installs dependencies only when `package.json` or `package-lock.json` changes.
+
+Generated files are kept under ignored `out/renderer`, `out/electron` and `out/desktop` directories.
+Dependency-derived renderer assets are staged under the ignored `.generated` directory.
 
 ## Project Layers
 
@@ -64,7 +67,7 @@ Useful optional props:
 - `confirmDiscardChanges`, `initialSession`, `onSessionChange`
 - `onOpenExternalLink`
 - `pickImageFile`, `pickMergePdfFile`, `printTarget`
-- `allowEditing`, `allowImageAnnotations`, `showCloseButton`
+- `allowEditing`, `readOnlyMessage`, `allowImageAnnotations`, `showCloseButton`
 - `theme`, `className`, `style`
 
 Save and download capabilities live on `source`: `saveTarget`, `saveAsTarget`, `downloadTarget`.
@@ -105,6 +108,8 @@ Useful optional props:
 
 The ref exposes `openDocument()`, `openDocuments()`, `openSource()`, `focusHome()`, `getDocuments()`, `closeAllDocuments()` and `confirmWindowClose()`.
 
+Individual `PdfHostDocument` values can set `readOnly` and `readOnlyMessage` without changing other tabs.
+
 ## Desktop
 
 Electron reuses `TabbedPdfShell` and provides native file dialogs, verified save/write operations, external-link opening and window-close confirmation through a sandboxed preload bridge.
@@ -112,7 +117,6 @@ Electron reuses `TabbedPdfShell` and provides native file dialogs, verified save
 ```powershell
 docker compose exec app npm run desktop:build
 docker compose exec app npm run desktop:package:win
-docker compose exec app npm run desktop:package:win:installer
 ```
 
 The renderer has Node integration disabled, context isolation enabled, sandboxing enabled, and no direct filesystem paths exposed to React.

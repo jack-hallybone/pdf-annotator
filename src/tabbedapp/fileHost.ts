@@ -9,6 +9,8 @@ import type {
 
 export type PdfHostDocument = {
   fileKey?: string;
+  readOnly?: boolean;
+  readOnlyMessage?: string;
   source: PdfWorkspaceSourceInput;
   title?: string;
 };
