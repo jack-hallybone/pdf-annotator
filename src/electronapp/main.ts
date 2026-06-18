@@ -110,6 +110,16 @@ async function createMainWindow() {
     ...(existsSync(appIconPath) ? { icon: appIconPath } : {}),
     show: false,
     title: 'PDF Annotator',
+    ...(process.platform === 'win32'
+      ? {
+          titleBarOverlay: {
+            color: '#ffffff',
+            height: 40,
+            symbolColor: '#171c1c'
+          },
+          titleBarStyle: 'hidden' as const
+        }
+      : {}),
     webPreferences: {
       allowRunningInsecureContent: false,
       contextIsolation: true,
@@ -160,7 +170,8 @@ async function createMainWindow() {
 
     event.preventDefault();
     if (state.closeRequestPending) {
-      void confirmForceClose(window);
+      window.show();
+      window.focus();
       return;
     }
 
@@ -600,8 +611,10 @@ function requestRendererCloseConfirmation(window: BrowserWindow) {
   window.focus();
   window.webContents.send(electronIpcChannels.requestClose);
   state.closeRequestTimer = setTimeout(() => {
-    state.closeRequestPending = false;
     state.closeRequestTimer = null;
+    if (state.closeRequestPending && !window.isDestroyed()) {
+      void confirmForceClose(window);
+    }
   }, closeConfirmationTimeoutMs);
   state.closeRequestTimer.unref?.();
 }
@@ -616,7 +629,7 @@ async function confirmForceClose(window: BrowserWindow) {
     cancelId: 0,
     defaultId: 0,
     detail:
-      'PDF Annotator is still checking whether files have unsaved changes.',
+      'PDF Annotator did not respond while checking for unsaved changes.',
     message: 'Close without waiting?',
     noLink: true,
     title: 'PDF Annotator',
@@ -628,6 +641,11 @@ async function confirmForceClose(window: BrowserWindow) {
     state.closeRequestPending = false;
     state.closeConfirmed = true;
     window.close();
+    return;
+  }
+
+  if (!window.isDestroyed()) {
+    windowStateFor(window).closeRequestPending = false;
   }
 }
 

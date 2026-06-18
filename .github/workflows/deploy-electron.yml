@@ -1,4 +1,4 @@
-name: Build Desktop App
+name: Build electronapp
 
 on:
   push:

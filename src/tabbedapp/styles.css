@@ -47,6 +47,22 @@ button {
   position: relative;
 }
 
+.tabbedapp-shell--desktop-titlebar {
+  grid-template-rows: 2.5rem minmax(0, 1fr);
+}
+
+.tabbedapp-shell--desktop-titlebar .tabbedapp-tabbar {
+  -webkit-app-region: drag;
+  padding-right: 8.75rem;
+}
+
+.tabbedapp-shell--desktop-titlebar .tabbedapp-home-tab,
+.tabbedapp-shell--desktop-titlebar .tabbedapp-tabs,
+.tabbedapp-shell--desktop-titlebar .tabbedapp-tabbar-actions,
+.tabbedapp-shell--desktop-titlebar .tabbedapp-tab-context-menu {
+  -webkit-app-region: no-drag;
+}
+
 .tabbedapp-hidden-input {
   display: none;
 }

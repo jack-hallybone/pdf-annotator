@@ -1,8 +1,8 @@
 <img src="./public/title.svg" alt="PDF Annotator" width="400">
 
-A lightweight, local PDF reader and annotator built with React, PDF.js, pdf-lib and Electron.
+A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib, [Lucide icons](https://lucide.dev/) and Electron.
 
-[Try out the demo on Github Pages](https://jackhallybone.github.io/pdf-annotator/)
+[Try out the web version](https://jackhallybone.github.io/pdf-annotator/) :rocket:
 
 The whole project, except this first section of the readme, has been written by Codex :sparkles:
 
@@ -25,14 +25,6 @@ docker compose up
 Open `http://127.0.0.1:5173/`.
 
 The Docker dev container installs dependencies only when `package.json` or `package-lock.json` changes.
-
-Useful commands:
-
-```powershell
-docker compose exec app npm run build
-docker compose exec app npm run electron:build
-docker compose exec app npm run security:audit
-```
 
 ## Project Layers
 

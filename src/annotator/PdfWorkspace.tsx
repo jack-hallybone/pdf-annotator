@@ -584,7 +584,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       print: handlePrint,
       releaseRenderResources,
       save: handleSave,
-      saveAs: handleSaveAs,
+      saveAs: saveAsDocument,
       snapshot: createWorkspaceSession
     }),
     [
@@ -598,7 +598,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       handleDownload,
       handlePrint,
       handleSave,
-      handleSaveAs,
+      saveAsDocument,
       hasUnsavedChanges,
       pdfBytes,
       pdfFingerprint,
@@ -2781,7 +2781,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function handleSaveAs(suggestedName = fileName) {
+  async function handleSaveAs() {
+    return saveAsDocument(fileName);
+  }
+
+  async function saveAsDocument(suggestedName = fileName) {
     if (!pdfBytes || !beginBusyOperation()) {
       return false;
     }

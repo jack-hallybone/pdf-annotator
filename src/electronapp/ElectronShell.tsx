@@ -43,6 +43,7 @@ export function ElectronShell() {
 
   return (
     <TabbedPdfShell
+      className="tabbedapp-shell--desktop-titlebar"
       enableCloseTabShortcut
       fileAdapter={electronFileAdapter}
       newTabMenuActions={[

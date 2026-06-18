@@ -1,8 +1,8 @@
 {
-  "name": "lightweight-pdf-annotator",
+  "name": "pdf-annotator",
   "private": true,
   "version": "0.1.0",
-  "description": "A local-first lightweight PDF reader and annotator MVP.",
+  "description": "A lightweight client-side PDF viewer and annotation tool written using Codex.",
   "main": "dist-electron/electronapp/main.js",
   "type": "module",
   "scripts": {
@@ -30,7 +30,7 @@
     "react-dom": "19.2.7"
   },
   "build": {
-    "appId": "io.github.jackhallybone.pdf-annotator",
+    "appId": "3a6c822e-7fd1-4890-931c-e8fe2cb39ac7.pdf-annotator",
     "asar": true,
     "compression": "normal",
     "directories": {
