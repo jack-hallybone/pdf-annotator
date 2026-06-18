@@ -1,9 +1,6 @@
-name: Build electronapp
+name: Build Electron Apps
 
 on:
-  push:
-    branches:
-      - electron
   workflow_dispatch:
 
 permissions:
