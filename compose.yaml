@@ -16,7 +16,12 @@ services:
       - "127.0.0.1:5173:5173"
       - "127.0.0.1:4173:4173"
 
-    command: sh -c "npm ci --ignore-scripts && VITE_HOST=0.0.0.0 npm run dev"
+    command: >
+      sh -c "deps_hash=$$(sha256sum package.json package-lock.json | sha256sum | cut -d ' ' -f 1);
+      if [ ! -f node_modules/.install-hash ] || [ \"$$(cat node_modules/.install-hash)\" != \"$$deps_hash\" ];
+      then npm ci --ignore-scripts && printf '%s' \"$$deps_hash\" > node_modules/.install-hash;
+      fi;
+      VITE_HOST=0.0.0.0 npm run dev"
 
 volumes:
   node_modules:

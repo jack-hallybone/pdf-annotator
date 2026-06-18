@@ -1,6 +1,8 @@
 import type {
   PdfDownloadTarget,
   PdfImageFilePicker,
+  PdfMergeFilePicker,
+  PdfPrintTarget,
   PdfSaveAsTarget,
   PdfWorkspaceSourceInput
 } from '../annotator';
@@ -29,6 +31,8 @@ export type PdfHostAdapter = {
   pdfDocumentsFromFileInput?: (files: File[]) => PdfHostDocument[];
   pickPdfDocuments: () => Promise<PdfHostPickResult>;
   pickImageFile?: PdfImageFilePicker;
+  pickMergePdfFile?: PdfMergeFilePicker;
   downloadTarget?: PdfDownloadTarget | null;
+  printTarget?: PdfPrintTarget | null;
   saveAsTarget?: PdfSaveAsTarget | null;
 };

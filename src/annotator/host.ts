@@ -13,13 +13,15 @@ export type PdfPrintTarget = {
 };
 
 export type PdfSaveAsResult = {
+  bytes: Uint8Array;
+  fileKey?: string;
   fileName?: string;
   saveTarget?: PdfSaveTarget | null;
 };
 
 export type PdfSaveAsTarget = {
   saveAs: (
-    bytes: Uint8Array,
+    createBytes: () => Promise<Uint8Array>,
     suggestedName: string
   ) => Promise<PdfSaveAsResult | null | undefined>;
 };
@@ -36,11 +38,21 @@ export type PdfExternalLinkOpener = (
 
 export type PdfImageFilePicker = () => Promise<File | null | undefined>;
 
+export type PdfMergeFile = {
+  bytes: Uint8Array;
+  name: string;
+};
+
+export type PdfMergeFilePicker = () => Promise<
+  PdfMergeFile | null | undefined
+>;
+
 type PdfWorkspaceSourceBase = {
   initialAnnotations?: PdfAnnotation[];
   markDirty?: boolean;
   name: string;
   downloadTarget?: PdfDownloadTarget | null;
+  fileKey?: string;
   saveAsTarget?: PdfSaveAsTarget | null;
   saveTarget?: PdfSaveTarget | null;
   sourceId: string;

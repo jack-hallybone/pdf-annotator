@@ -6,11 +6,13 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState
 } from 'react';
 import type {
   ChangeEvent as ReactChangeEvent,
+  CSSProperties,
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
   RefCallback
@@ -50,6 +52,8 @@ import {
 } from '../pdfTemplates';
 import type { PdfTemplateKind } from '../pdfTemplates';
 import { warmPdfRuntimeCaches } from '../pdfRuntime';
+import { appThemeStyle } from '../theme';
+import type { AppTheme } from '../theme';
 
 export type TabbedPdfTemplateAction = {
   kind: PdfTemplateKind;
@@ -139,11 +143,13 @@ type RenameDialogState = {
 
 export type TabbedPdfWorkspaceOptions = Pick<
   PdfWorkspaceProps,
+  | 'allowEditing'
+  | 'allowImageAnnotations'
   | 'confirmDiscardChanges'
   | 'onOpenExternalLink'
   | 'pickImageFile'
+  | 'pickMergePdfFile'
   | 'printTarget'
-  | 'showDownloadButton'
 >;
 
 export type TabbedPdfHomeRenderProps = {
@@ -171,11 +177,13 @@ export type TabbedPdfShellProps = {
   confirmCloseDocuments?: (
     request: TabbedPdfCloseDocumentsRequest
   ) => boolean | Promise<boolean>;
+  enableCloseTabShortcut?: boolean;
   fileAdapter: PdfHostAdapter;
   initialDocuments?: PdfHostDocument[];
   newTabMenuActions?: TabbedPdfMenuAction[];
   onDocumentsChange?: (documents: TabbedPdfDocumentSummary[]) => void;
   renderHome?: (props: TabbedPdfHomeRenderProps) => ReactNode;
+  theme?: AppTheme;
   workspaceOptions?: TabbedPdfWorkspaceOptions;
 };
 
@@ -187,11 +195,13 @@ export const TabbedPdfShell = forwardRef<
 >(function TabbedPdfShell({
   className,
   confirmCloseDocuments,
+  enableCloseTabShortcut = false,
   fileAdapter,
   initialDocuments = [],
   newTabMenuActions = [],
   onDocumentsChange,
   renderHome,
+  theme,
   workspaceOptions = DEFAULT_WORKSPACE_OPTIONS
 }: TabbedPdfShellProps, ref) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -223,6 +233,10 @@ export const TabbedPdfShell = forwardRef<
     activeDocumentId !== null && busyDocumentIds.has(activeDocumentId);
   const shellLocked = shellCommandBusy || activeWorkspaceBusy;
   const shellLockedRef = useLatestRef(shellLocked);
+  const shellStyle = useMemo(
+    () => appThemeStyle(theme) as CSSProperties,
+    [theme]
+  );
   const closeConfirmationResolverRef = useRef<
     ((decision: CloseDocumentsDecision) => void) | null
   >(null);
@@ -344,6 +358,32 @@ export const TabbedPdfShell = forwardRef<
   useEffect(() => {
     onDocumentsChange?.(documentSummaries());
   }, [activeDocumentId, documents, onDocumentsChange]);
+
+  useEffect(() => {
+    if (!enableCloseTabShortcut) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (
+        !(event.ctrlKey || event.metaKey) ||
+        event.key.toLowerCase() !== 'w'
+      ) {
+        return;
+      }
+
+      const activeDocumentId = activeDocumentIdRef.current;
+      if (!activeDocumentId) {
+        return;
+      }
+
+      event.preventDefault();
+      void closeDocument(activeDocumentId);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [enableCloseTabShortcut]);
 
   useEffect(() => {
     document.title = documents.some((document) => document.hasUnsavedChanges)
@@ -588,6 +628,7 @@ export const TabbedPdfShell = forwardRef<
       ...sourceInput,
       downloadTarget:
         sourceInput.downloadTarget ?? fileAdapter.downloadTarget ?? null,
+      fileKey: sourceInput.fileKey,
       saveAsTarget: sourceInput.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
     };
     openTabbedDocuments([
@@ -654,6 +695,7 @@ export const TabbedPdfShell = forwardRef<
       const sourceWithHostTargets = {
         ...source,
         downloadTarget: source.downloadTarget ?? fileAdapter.downloadTarget ?? null,
+        fileKey: source.fileKey ?? fileKey,
         saveAsTarget: source.saveAsTarget ?? fileAdapter.saveAsTarget ?? null
       };
       return {
@@ -1421,6 +1463,22 @@ export const TabbedPdfShell = forwardRef<
       tabContextMenuDocument.id === activeDocumentId &&
       workspaceRefs.current.has(tabContextMenuDocument.id)
   );
+  const currentPrintTarget =
+    workspaceOptions.printTarget ?? fileAdapter.printTarget ?? null;
+  const currentMergePdfPicker =
+    workspaceOptions.pickMergePdfFile ??
+    fileAdapter.pickMergePdfFile ??
+    undefined;
+  const tabContextMenuCanSave = tabContextMenuDocument
+    ? documentCanSave(tabContextMenuDocument)
+    : false;
+  const tabContextMenuCanSaveAs = tabContextMenuDocument
+    ? documentCanSaveAs(tabContextMenuDocument)
+    : false;
+  const tabContextMenuCanDownload = tabContextMenuDocument
+    ? documentCanDownload(tabContextMenuDocument)
+    : false;
+  const tabContextMenuCanPrint = Boolean(currentPrintTarget);
   const tabSeparatorClass = (
     leftId: 'home' | string,
     rightId: string | null
@@ -1445,7 +1503,13 @@ export const TabbedPdfShell = forwardRef<
       .filter(Boolean)
       .join(' ');
   };
-  const showDropPanel = dragActive && (activeDocument || !renderHome);
+  const homeProps = {
+    createTemplateDocument,
+    dragActive,
+    openPdfDocuments: handleOpenPdfRequest,
+    templateActions: TEMPLATE_ACTIONS
+  };
+  const showDropPanel = dragActive && Boolean(activeDocument);
 
   return (
     <main
@@ -1455,6 +1519,7 @@ export const TabbedPdfShell = forwardRef<
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
       onDrop={(event) => void handleDrop(event)}
+      style={shellStyle}
     >
       {fileAdapter.fileInput &&
       fileAdapter.pdfDocumentsFromFileInput ? (
@@ -1630,18 +1695,13 @@ export const TabbedPdfShell = forwardRef<
             workspaceOptions={{
               ...workspaceOptions,
               pickImageFile:
-                workspaceOptions.pickImageFile ?? fileAdapter.pickImageFile
+                workspaceOptions.pickImageFile ?? fileAdapter.pickImageFile,
+              pickMergePdfFile: currentMergePdfPicker,
+              printTarget: currentPrintTarget
             }}
           />
         ) : (
-          renderHome?.({
-            createTemplateDocument,
-            dragActive,
-            openPdfDocuments: handleOpenPdfRequest,
-            templateActions: TEMPLATE_ACTIONS
-          }) ?? (
-            <DefaultHomePanel />
-          )
+          renderHome?.(homeProps) ?? <DefaultHomePanel {...homeProps} />
         )}
       </section>
 
@@ -1682,33 +1742,40 @@ export const TabbedPdfShell = forwardRef<
             <span>Create A4 Cornell note for file</span>
           </button>
           <span className="tabbedapp-context-menu-separator" />
-          <button
-            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
-            onClick={() =>
-              void runWorkspaceCommand(tabContextMenuDocument.id, 'save')
-            }
-            role="menuitem"
-            type="button"
-          >
-            <Save size={15} />
-            <span>Save</span>
-          </button>
-          <button
-            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
-            onClick={() =>
-              void runWorkspaceCommand(tabContextMenuDocument.id, 'saveAs')
-            }
-            role="menuitem"
-            type="button"
-          >
-            <SaveAll size={15} />
-            <span>Save As...</span>
-          </button>
-          {workspaceOptions.showDownloadButton !== false ? (
+          {tabContextMenuCanSave ? (
             <button
               disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
               onClick={() =>
-                void runWorkspaceCommand(tabContextMenuDocument.id, 'downloadCopy')
+                void runWorkspaceCommand(tabContextMenuDocument.id, 'save')
+              }
+              role="menuitem"
+              type="button"
+            >
+              <Save size={15} />
+              <span>Save</span>
+            </button>
+          ) : null}
+          {tabContextMenuCanSaveAs ? (
+            <button
+              disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
+              onClick={() =>
+                void runWorkspaceCommand(tabContextMenuDocument.id, 'saveAs')
+              }
+              role="menuitem"
+              type="button"
+            >
+              <SaveAll size={15} />
+              <span>Save As...</span>
+            </button>
+          ) : null}
+          {tabContextMenuCanDownload ? (
+            <button
+              disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
+              onClick={() =>
+                void runWorkspaceCommand(
+                  tabContextMenuDocument.id,
+                  'downloadCopy'
+                )
               }
               role="menuitem"
               type="button"
@@ -1717,17 +1784,19 @@ export const TabbedPdfShell = forwardRef<
               <span>Download a copy</span>
             </button>
           ) : null}
-          <button
-            disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
-            onClick={() =>
-              void runWorkspaceCommand(tabContextMenuDocument.id, 'print')
-            }
-            role="menuitem"
-            type="button"
-          >
-            <Printer size={15} />
-            <span>Print</span>
-          </button>
+          {tabContextMenuCanPrint ? (
+            <button
+              disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
+              onClick={() =>
+                void runWorkspaceCommand(tabContextMenuDocument.id, 'print')
+              }
+              role="menuitem"
+              type="button"
+            >
+              <Printer size={15} />
+              <span>Print</span>
+            </button>
+          ) : null}
           <span className="tabbedapp-context-menu-separator" />
           <button
             disabled={shellLocked}
@@ -1855,8 +1924,57 @@ function CornellTemplateIcon({ size }: { size: number }) {
   );
 }
 
-function DefaultHomePanel() {
-  return <div className="tabbedapp-default-home" />;
+function DefaultHomePanel({
+  createTemplateDocument,
+  dragActive,
+  openPdfDocuments,
+  templateActions
+}: TabbedPdfHomeRenderProps) {
+  return (
+    <div className="tabbedapp-home-panel">
+      <section className="tabbedapp-home-card" aria-label="PDF Annotator home">
+        <h1 className="tabbedapp-home-title">
+          <img
+            alt="PDF Annotator"
+            className="tabbedapp-home-title-image"
+            src={`${import.meta.env.BASE_URL}title.svg`}
+          />
+        </h1>
+        <div className="tabbedapp-home-action-frame">
+          {dragActive ? (
+            <div aria-live="polite" className="tabbedapp-home-drop-message">
+              <FolderOpen size={22} />
+              <span>Drop PDFs to open</span>
+            </div>
+          ) : (
+            <div className="tabbedapp-home-action-stack">
+              <button
+                className="tabbedapp-home-open-button"
+                onClick={() => void openPdfDocuments()}
+                type="button"
+              >
+                <FolderOpen size={22} />
+                Open PDFs
+              </button>
+              <div className="tabbedapp-home-template-grid">
+                {templateActions.map(({ kind, label, renderIcon }) => (
+                  <button
+                    className="tabbedapp-home-template-button"
+                    key={kind}
+                    onClick={() => void createTemplateDocument(kind)}
+                    type="button"
+                  >
+                    {renderIcon(18)}
+                    <span>{label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function CloseDocumentsDialog({
@@ -1984,10 +2102,12 @@ function DocumentTabContent({
       onDocumentTitleChange={handleTitleChange}
       onOpenExternalLink={workspaceOptions.onOpenExternalLink}
       pickImageFile={workspaceOptions.pickImageFile}
+      pickMergePdfFile={workspaceOptions.pickMergePdfFile}
       printTarget={workspaceOptions.printTarget}
       ref={onRegisterWorkspaceRef(document.id)}
+      allowEditing={workspaceOptions.allowEditing}
+      allowImageAnnotations={workspaceOptions.allowImageAnnotations}
       showCloseButton={false}
-      showDownloadButton={workspaceOptions.showDownloadButton}
       source={document.source}
     />
   );
@@ -1999,10 +2119,12 @@ function applySessionToDocument(
 ): TabbedPdfDocument {
   return {
     ...document,
+    fileKey: session.fileKey ?? document.fileKey,
     hasUnsavedChanges: session.hasUnsavedChanges,
     session,
     source: {
       kind: 'bytes',
+      fileKey: session.fileKey ?? document.source.fileKey,
       saveTarget:
         session.readOnlyReason && session.editingEnabled
           ? null
@@ -2016,6 +2138,26 @@ function applySessionToDocument(
     },
     title: session.fileName
   };
+}
+
+function documentCanSave(document: TabbedPdfDocument) {
+  return documentCanSaveAs(document) || Boolean(documentSaveTarget(document));
+}
+
+function documentCanSaveAs(document: TabbedPdfDocument) {
+  return Boolean(documentSaveAsTarget(document));
+}
+
+function documentCanDownload(document: TabbedPdfDocument) {
+  return Boolean(document.session?.downloadTarget ?? document.source.downloadTarget);
+}
+
+function documentSaveTarget(document: TabbedPdfDocument) {
+  return document.session?.saveTarget ?? document.source.saveTarget ?? null;
+}
+
+function documentSaveAsTarget(document: TabbedPdfDocument) {
+  return document.session?.saveAsTarget ?? document.source.saveAsTarget ?? null;
 }
 
 function nextDocumentId(

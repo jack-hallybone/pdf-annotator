@@ -1,12 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { AppWindow } from 'lucide-react';
-import { BrowserHome } from '../browserapp/BrowserHome';
 import { TabbedPdfShell } from '../tabbedapp';
 import type { TabbedPdfShellHandle } from '../tabbedapp';
 import {
   desktopDocumentsToHostDocuments,
-  electronFileAdapter,
-  electronPrintTarget
+  electronFileAdapter
 } from './electronFileAdapter';
 
 export function ElectronShell() {
@@ -45,6 +43,7 @@ export function ElectronShell() {
 
   return (
     <TabbedPdfShell
+      enableCloseTabShortcut
       fileAdapter={electronFileAdapter}
       newTabMenuActions={[
         {
@@ -54,11 +53,8 @@ export function ElectronShell() {
         }
       ]}
       ref={shellRef}
-      renderHome={(props) => <BrowserHome {...props} />}
       workspaceOptions={{
-        onOpenExternalLink: (url) => bridge.openExternalLink(url),
-        printTarget: electronPrintTarget(),
-        showDownloadButton: false
+        onOpenExternalLink: (url) => bridge.openExternalLink(url)
       }}
     />
   );

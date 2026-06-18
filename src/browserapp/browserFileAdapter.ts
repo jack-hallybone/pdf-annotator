@@ -1,15 +1,20 @@
-import { createPdfFileLoader } from '../annotator';
-import type { PdfDownloadTarget, PdfSaveTarget } from '../annotator';
+import { createPdfFileLoader, readPdfFile } from '../annotator';
+import type {
+  PdfDownloadTarget,
+  PdfSaveAsTarget,
+  PdfSaveTarget
+} from '../annotator';
 import { uint8ArrayToArrayBuffer } from '../bytes';
 import { safePdfFileName } from '../fileNames';
 import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
+import { browserPrintTarget } from './browserPrintTarget';
 import {
   canPickLocalPdfFile,
   canSaveLocalPdfFileAs,
   localPdfFilesFromDrop,
+  pickLocalPdfSaveFile,
   pickLocalImageFile,
   pickLocalPdfFiles,
-  savePdfAsLocalFile,
   savePdfToLocalFile
 } from './localFileAccess';
 import type { LocalPdfFileHandle } from './localFileAccess';
@@ -34,7 +39,9 @@ export const browserFileAdapter: PdfHostAdapter = {
     const pickedFiles = await pickLocalPdfFiles();
     return { documents: browserFilesToHostDocuments(pickedFiles) };
   },
+  pickMergePdfFile: browserPickMergePdfFile,
   pickImageFile: browserPickImageFile,
+  printTarget: browserPrintTarget(),
   async pdfDocumentsFromDrop(dataTransfer) {
     try {
       const localFiles = await localPdfFilesFromDrop(dataTransfer);
@@ -60,6 +67,19 @@ async function browserPickImageFile() {
   return pickImageFileWithInput();
 }
 
+async function browserPickMergePdfFile() {
+  const files = canPickLocalPdfFile()
+    ? await pickLocalPdfFiles({ multiple: false })
+    : filesToBrowserFiles(await pickPdfFilesWithInput({ multiple: false }));
+  const file = files.find(({ file }) => isPdfFile(file))?.file;
+  return file
+    ? {
+        bytes: await readPdfFile(file),
+        name: file.name
+      }
+    : null;
+}
+
 function browserFilesToHostDocuments(
   files: BrowserPdfFile[]
 ): PdfHostDocument[] {
@@ -69,6 +89,7 @@ function browserFilesToHostDocuments(
       fileKey: pdfFileKey(file),
       source: {
         kind: 'loader',
+        fileKey: pdfFileKey(file),
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
@@ -83,45 +104,69 @@ function filesToBrowserFiles(files: FileList | File[]) {
 }
 
 function pickImageFileWithInput() {
-  return new Promise<File | null>((resolve) => {
+  return pickFilesWithInput({
+    accept: 'image/png,image/jpeg,image/webp',
+    multiple: false
+  }).then((files) => files[0] ?? null);
+}
+
+function pickPdfFilesWithInput({ multiple }: { multiple: boolean }) {
+  return pickFilesWithInput({ accept: 'application/pdf', multiple });
+}
+
+function pickFilesWithInput({
+  accept,
+  multiple
+}: {
+  accept: string;
+  multiple: boolean;
+}) {
+  return new Promise<File[]>((resolve) => {
     const input = document.createElement('input');
-    input.accept = 'image/png,image/jpeg,image/webp';
+    input.accept = accept;
+    input.multiple = multiple;
     input.type = 'file';
     input.style.display = 'none';
 
-    function cleanup(file: File | null) {
+    function cleanup(files: File[]) {
       window.setTimeout(() => {
         input.remove();
-        resolve(file);
+        resolve(files);
       }, 0);
     }
 
     input.addEventListener(
       'change',
-      () => cleanup(input.files?.[0] ?? null),
+      () => cleanup(Array.from(input.files ?? [])),
       { once: true }
     );
-    input.addEventListener('cancel', () => cleanup(null), { once: true });
+    input.addEventListener('cancel', () => cleanup([]), { once: true });
 
     document.body.append(input);
     input.click();
   });
 }
 
-function browserFileSaveAsTarget() {
+function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
   if (!canSaveLocalPdfFileAs()) {
     return null;
   }
 
   return {
-    async saveAs(bytes: Uint8Array, suggestedName: string) {
-      const handle = await savePdfAsLocalFile(bytes, suggestedName);
-      return handle
-        ? {
-            fileName: handle.name,
-            saveTarget: browserFileSaveTarget(handle)
-          }
-        : null;
+    async saveAs(createBytes, suggestedName: string) {
+      const handle = await pickLocalPdfSaveFile(suggestedName);
+      if (!handle) {
+        return null;
+      }
+
+      const bytes = await createBytes();
+      await savePdfToLocalFile(handle, bytes);
+      return {
+        bytes,
+        fileKey: await pdfFileKeyForHandle(handle),
+        fileName: handle.name,
+        saveTarget: browserFileSaveTarget(handle)
+      };
     }
   };
 }
@@ -169,4 +214,12 @@ function pdfFileKey(file: File) {
     String(file.size),
     String(file.lastModified)
   ].join('\u001f');
+}
+
+async function pdfFileKeyForHandle(handle: LocalPdfFileHandle) {
+  try {
+    return pdfFileKey(await handle.getFile());
+  } catch {
+    return ['local-handle', handle.name].join('\u001f');
+  }
 }

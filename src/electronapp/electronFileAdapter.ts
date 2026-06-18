@@ -1,6 +1,5 @@
 import { readPdfFile } from '../annotator';
 import type {
-  PdfDownloadTarget,
   PdfPrintTarget,
   PdfSaveAsTarget,
   PdfSaveTarget
@@ -14,11 +13,11 @@ export function hasDesktopBridge() {
 }
 
 export const electronFileAdapter: PdfHostAdapter = {
-  downloadTarget: electronDownloadTarget(),
   fileInput: {
     accept: 'application/pdf',
     multiple: true
   },
+  printTarget: electronPrintTarget(),
   saveAsTarget: electronSaveAsTarget(),
   async pickPdfDocuments() {
     const bridge = requireDesktopBridge();
@@ -27,6 +26,7 @@ export const electronFileAdapter: PdfHostAdapter = {
     };
   },
   pickImageFile: electronPickImageFile,
+  pickMergePdfFile: electronPickMergePdfFile,
   async pdfDocumentsFromDrop(dataTransfer) {
     return filesToUnsavedHostDocuments(Array.from(dataTransfer.files ?? []));
   },
@@ -42,7 +42,7 @@ export function desktopDocumentsToHostDocuments(
     fileKey: document.fileKey,
     source: {
       bytes: document.bytes,
-      downloadTarget: electronFileAdapter.downloadTarget ?? null,
+      fileKey: document.fileKey,
       name: document.name,
       saveAsTarget: electronFileAdapter.saveAsTarget ?? null,
       saveTarget: electronSaveTarget(document.fileId)
@@ -58,6 +58,7 @@ function filesToUnsavedHostDocuments(files: File[]): PdfHostDocument[] {
       kind: 'loader',
       loadBytes: () => readPdfFile(file),
       name: file.name,
+      fileKey: browserFileKey(file),
       saveAsTarget: electronFileAdapter.saveAsTarget ?? null
     },
     title: file.name
@@ -72,25 +73,21 @@ function electronSaveTarget(fileId: string): PdfSaveTarget {
 
 function electronSaveAsTarget(): PdfSaveAsTarget {
   return {
-    async saveAs(bytes, suggestedName) {
+    async saveAs(createBytes, suggestedName) {
+      const bytes = await createBytes();
       const result = await requireDesktopBridge().savePdfAs(
         bytes,
         suggestedName
       );
       return result
         ? {
+            bytes,
+            fileKey: result.fileKey,
             fileName: result.name,
             saveTarget: electronSaveTarget(result.fileId)
           }
         : null;
     }
-  };
-}
-
-function electronDownloadTarget(): PdfDownloadTarget {
-  return {
-    download: (bytes, suggestedName) =>
-      requireDesktopBridge().downloadPdf(bytes, suggestedName)
   };
 }
 
@@ -107,6 +104,16 @@ async function electronPickImageFile() {
     ? new File([uint8ArrayToArrayBuffer(image.bytes)], image.name, {
         type: image.mimeType
       })
+    : null;
+}
+
+async function electronPickMergePdfFile() {
+  const [document] = await requireDesktopBridge().pickPdfFiles();
+  return document
+    ? {
+        bytes: document.bytes,
+        name: document.name
+      }
     : null;
 }
 

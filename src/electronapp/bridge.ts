@@ -13,6 +13,7 @@ export type DesktopImageFile = {
 
 export type DesktopSaveAsResult = {
   fileId: string;
+  fileKey: string;
   name: string;
 };
 

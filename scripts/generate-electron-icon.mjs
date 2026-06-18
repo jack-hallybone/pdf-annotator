@@ -5,6 +5,7 @@ import { join } from 'node:path';
 const iconSizes = [16, 24, 32, 48, 64, 128, 256];
 const outputDir = 'build';
 const outputPath = join(outputDir, 'icon.ico');
+const faviconPath = join('public', 'favicon.svg');
 const supersample = 4;
 const crcTable = Array.from({ length: 256 }, (_, index) => {
   let value = index;
@@ -16,6 +17,7 @@ const crcTable = Array.from({ length: 256 }, (_, index) => {
 
 mkdirSync(outputDir, { recursive: true });
 writeFileSync(outputPath, createIco(iconSizes));
+writeFileSync(faviconPath, highlighterSvg());
 
 function createIco(sizes) {
   const images = sizes.map((size) => encodePng(size, drawIcon(size)));
@@ -60,11 +62,6 @@ function drawIcon(size) {
 }
 
 function pixelColor(x, y) {
-  if (!insideRoundedRect(x, y, 0, 0, 24, 24, 5)) {
-    return [255, 255, 255, 0];
-  }
-
-  let color = [255, 255, 255, 255];
   const chisel = [
     [9, 11],
     [3, 17],
@@ -74,11 +71,11 @@ function pixelColor(x, y) {
   ];
 
   if (insidePolygon(x, y, chisel)) {
-    color = [255, 254, 78, 255];
+    return [255, 254, 78, 255];
   }
 
   if (distanceToPolyline(x, y, [...chisel, chisel[0]]) <= 0.9) {
-    color = [23, 28, 28, 255];
+    return [23, 28, 28, 255];
   }
 
   const body = [
@@ -92,10 +89,10 @@ function pixelColor(x, y) {
     [14, 4]
   ];
   if (distanceToPolyline(x, y, body) <= 0.85) {
-    color = [23, 28, 28, 255];
+    return [23, 28, 28, 255];
   }
 
-  return color;
+  return [255, 255, 255, 0];
 }
 
 function downsample(source, sourceSize, targetSize) {
@@ -197,14 +194,6 @@ function writePixel(pixels, width, x, y, color) {
   pixels[offset + 3] = Math.round(color[3]);
 }
 
-function insideRoundedRect(x, y, left, top, width, height, radius) {
-  const right = left + width;
-  const bottom = top + height;
-  const nearestX = clamp(x, left + radius, right - radius);
-  const nearestY = clamp(y, top + radius, bottom - radius);
-  return distance(x, y, nearestX, nearestY) <= radius;
-}
-
 function insidePolygon(x, y, polygon) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
@@ -251,4 +240,33 @@ function distance(x1, y1, x2, y2) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function highlighterSvg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!--
+    Highlighter icon from Lucide.
+    ISC License. Copyright (c) 2026 Lucide Icons and Contributors.
+    Permission to use, copy, modify, and/or distribute this software for any
+    purpose with or without fee is hereby granted, provided that the above
+    copyright notice and this permission notice appear in all copies.
+  -->
+  <path
+    d="m9 11-6 6v3h9l3-3"
+    fill="#FFFE4E"
+    stroke="#171C1C"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+  />
+  <path
+    d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"
+    fill="none"
+    stroke="#171C1C"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="2"
+  />
+</svg>
+`;
 }

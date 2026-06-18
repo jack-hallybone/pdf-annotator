@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { browserFileAdapter } from './browserFileAdapter';
 import { TabbedPdfShell } from '../tabbedapp';
 import type { TabbedPdfDocumentSummary } from '../tabbedapp';
-import { BrowserHome } from './BrowserHome';
 
 export function BrowserShell() {
   const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
@@ -25,7 +24,6 @@ export function BrowserShell() {
     <TabbedPdfShell
       fileAdapter={browserFileAdapter}
       onDocumentsChange={setDocuments}
-      renderHome={(props) => <BrowserHome {...props} />}
     />
   );
 }
