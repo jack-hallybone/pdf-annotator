@@ -27,6 +27,7 @@ type DocumentSidebarProps = {
   activePageIndex: number;
   annotationsByPage: Map<number, PdfAnnotation[]>;
   busy: boolean;
+  canMergePdf?: boolean;
   onAddPage: (
     pageIndex?: number,
     position?: 'before' | 'after',
@@ -54,6 +55,7 @@ export function DocumentSidebar({
   activePageIndex,
   annotationsByPage,
   busy,
+  canMergePdf = false,
   onAddPage,
   onClose,
   onDeletePage,
@@ -164,7 +166,7 @@ export function DocumentSidebar({
             thumbnailWidth={thumbnailWidth}
           />
         ))}
-        {pages.length > 0 ? (
+        {canMergePdf && pages.length > 0 ? (
           <button
             className="merge-pdf-button ui-button"
             disabled={busy || readOnly}

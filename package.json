@@ -1,17 +1,23 @@
 {
-  "name": "lightweight-pdf-annotator",
+  "name": "pdf-annotator",
   "private": true,
   "version": "0.1.0",
-  "description": "A local-first lightweight PDF reader and annotator MVP.",
+  "description": "A lightweight client-side PDF viewer and annotation tool written using Codex.",
+  "main": "out/electron/electronapp/main.js",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "predev": "node scripts/prepare-renderer-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/prepare-renderer-assets.mjs",
     "build": "tsc -b && vite build",
-    "prepreview": "node scripts/copy-pdfjs-assets.mjs",
+    "electron:build": "tsc -p tsconfig.electron.json && node scripts/copy-electron-preload.mjs",
+    "electron:dev": "npm run electron:build && ELECTRON_RENDERER_URL=http://127.0.0.1:5173 electron out/electron/electronapp/main.js",
+    "electron:preview": "npm run desktop:build && electron out/electron/electronapp/main.js",
+    "desktop:build": "npm run build && npm run electron:build",
+    "desktop:package:win": "npm run desktop:build && electron-builder --win --publish never",
+    "prepreview": "node scripts/prepare-renderer-assets.mjs",
     "preview": "vite preview",
-    "copy-pdfjs-assets": "node scripts/copy-pdfjs-assets.mjs",
+    "prepare-assets": "node scripts/prepare-renderer-assets.mjs",
     "security:audit": "npm audit && npm audit signatures"
   },
   "dependencies": {
@@ -21,10 +27,86 @@
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
+  "build": {
+    "appId": "3a6c822e-7fd1-4890-931c-e8fe2cb39ac7.pdf-annotator",
+    "asar": true,
+    "compression": "normal",
+    "directories": {
+      "buildResources": "src/electronapp/assets",
+      "output": "out/desktop"
+    },
+    "extraMetadata": {
+      "dependencies": {}
+    },
+    "extraResources": [
+      {
+        "from": "src/assets/icons/LUCIDE-LICENSE.txt",
+        "to": "licenses/LUCIDE-LICENSE.txt"
+      },
+      {
+        "from": "src/electronapp/assets/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "files": [
+      "out/renderer/**/*",
+      "out/electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "npmRebuild": false,
+    "productName": "PDF Annotator",
+    "publish": null,
+    "fileAssociations": [
+      {
+        "description": "PDF document",
+        "ext": "pdf",
+        "icon": "icon.ico",
+        "name": "PDF document",
+        "role": "Editor"
+      }
+    ],
+    "icon": "src/electronapp/assets/icon.ico",
+    "linux": {
+      "icon": "src/electronapp/assets/icon.png"
+    },
+    "mac": {
+      "icon": "src/electronapp/assets/icon.icns"
+    },
+    "nsis": {
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "PDF-Annotator-${version}-win-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": true
+    },
+    "portable": {
+      "artifactName": "PDF-Annotator-${version}-win-${arch}-portable.${ext}"
+    },
+    "win": {
+      "icon": "src/electronapp/assets/icon.ico",
+      "target": [
+        {
+          "arch": [
+            "x64"
+          ],
+          "target": "portable"
+        },
+        {
+          "arch": [
+            "x64"
+          ],
+          "target": "nsis"
+        }
+      ]
+    }
+  },
   "devDependencies": {
+    "@types/node": "^25.9.3",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "electron": "^42.4.1",
+    "electron-builder": "^26.15.3",
     "typescript": "6.0.3",
     "vite": "8.0.16"
   }

@@ -3,11 +3,15 @@ import './styles.css';
 export { PdfWorkspace as PdfAnnotatorWorkspace, PdfWorkspace } from './PdfWorkspace';
 export { attachPdfSourceId } from './host';
 export { createPdfFileLoader, readPdfFile } from './pdfFile';
+export type { AppTheme } from '../theme';
 export type {
   PdfExternalLinkContext,
   PdfExternalLinkOpener,
   PdfImageFilePicker,
   PdfDownloadTarget,
+  PdfMergeFile,
+  PdfMergeFilePicker,
+  PdfPrintTarget,
   PdfSaveAsResult,
   PdfSaveAsTarget,
   PdfSaveTarget,

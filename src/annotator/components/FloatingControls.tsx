@@ -23,7 +23,8 @@ import {
 import {
   toolAccent,
   toolHasSettings,
-  tools
+  tools,
+  type ToolDefinition
 } from '../toolConfig';
 import type { Tool, ToolPresetMap, ToolSettings } from '../types';
 import { ToolSettingsEditor } from './ToolSettingsEditor';
@@ -44,6 +45,7 @@ type FloatingToolDockProps = {
   onToggleSettings: (toolKey: string) => void;
   settings: ToolSettings;
   settingsToolKey: string | null;
+  toolDefinitions?: ToolDefinition[];
   toolPresets: ToolPresetMap;
 };
 
@@ -58,6 +60,7 @@ export function FloatingToolDock({
   onToggleSettings,
   settings,
   settingsToolKey,
+  toolDefinitions = tools,
   toolPresets
 }: FloatingToolDockProps) {
   const dockRef = useRef<HTMLDivElement>(null);
@@ -68,7 +71,7 @@ export function FloatingToolDock({
       className={`${FLOATING_FRAME_CLASS} tool-dock`}
       ref={dockRef}
     >
-      {tools.map(({ icon: Icon, key, label, preset, tool }) => {
+      {toolDefinitions.map(({ icon: Icon, key, label, preset, tool }) => {
         const buttonPreset = toolPresets[key] ?? preset;
         const accent = toolAccent(tool, settings, buttonPreset);
         const active = activeTool === tool && activeToolKey === key;
@@ -359,10 +362,10 @@ export function FloatingZoomControls({
 type FloatingDocumentControlsProps = {
   busy: boolean;
   onClosePdf: () => void;
-  onDownload: () => void;
-  onPrint: () => void;
-  onSave: () => void;
-  onSaveAs: () => void;
+  onDownload?: () => void;
+  onPrint?: () => void;
+  onSave?: () => void;
+  onSaveAs?: () => void;
   saveLabel: string;
   showCloseButton?: boolean;
   onToggleAnnotations: () => void;
@@ -390,18 +393,26 @@ export function FloatingDocumentControls({
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}
       </IconButton>
-      <IconButton disabled={busy} label={saveLabel} onClick={onSave}>
-        <Save size={16} />
-      </IconButton>
-      <IconButton disabled={busy} label="Save As..." onClick={onSaveAs}>
-        <SaveAll size={16} />
-      </IconButton>
-      <IconButton disabled={busy} label="Download a copy" onClick={onDownload}>
-        <Download size={16} />
-      </IconButton>
-      <IconButton disabled={busy} label="Print" onClick={onPrint}>
-        <Printer size={16} />
-      </IconButton>
+      {onSave ? (
+        <IconButton disabled={busy} label={saveLabel} onClick={onSave}>
+          <Save size={16} />
+        </IconButton>
+      ) : null}
+      {onSaveAs ? (
+        <IconButton disabled={busy} label="Save As..." onClick={onSaveAs}>
+          <SaveAll size={16} />
+        </IconButton>
+      ) : null}
+      {onDownload ? (
+        <IconButton disabled={busy} label="Download a copy" onClick={onDownload}>
+          <Download size={16} />
+        </IconButton>
+      ) : null}
+      {onPrint ? (
+        <IconButton disabled={busy} label="Print" onClick={onPrint}>
+          <Printer size={16} />
+        </IconButton>
+      ) : null}
       {showCloseButton ? (
         <IconButton disabled={busy} label="Close" onClick={onClosePdf}>
           <X size={16} />

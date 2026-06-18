@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "isolatedModules": true,
+    "lib": ["ES2022", "DOM"],
+    "module": "NodeNext",
+    "moduleDetection": "force",
+    "moduleResolution": "NodeNext",
+    "noEmit": false,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "outDir": "./out/electron",
+    "rootDir": "./src",
+    "skipLibCheck": true,
+    "strict": true,
+    "target": "ES2022",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.electron.tsbuildinfo"
+  },
+  "include": [
+    "src/electronapp/bridge.ts",
+    "src/electronapp/ipc.ts",
+    "src/electronapp/main.ts",
+    "src/fileNames.ts"
+  ]
+}

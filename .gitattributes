@@ -13,11 +13,12 @@
 *.tsx text eol=lf
 *.yaml text eol=lf
 LICENSE* text eol=lf
-public/pdfjs/LICENSE text eol=lf
-public/pdfjs/**/LICENSE* text eol=lf
 
 *.bcmap binary
+*.icns binary
 *.icc binary
+*.ico binary
 *.pfb binary
+*.png binary
 *.ttf binary
 *.wasm binary

@@ -55,11 +55,12 @@ import {
 } from './imageImport';
 import type { PreparedImageStamp } from './imageImport';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
-import { readPdfFile } from './pdfFile';
 import type {
   PdfDownloadTarget,
   PdfExternalLinkOpener,
   PdfImageFilePicker,
+  PdfMergeFilePicker,
+  PdfPrintTarget,
   PdfSaveAsTarget,
   PdfSaveTarget,
   PdfWorkspaceSource
@@ -97,10 +98,10 @@ import {
 } from './viewerConfig';
 import { safePdfFileName } from '../fileNames';
 import { uint8ArrayToArrayBuffer } from '../bytes';
+import { appThemeStyle } from '../theme';
+import type { AppTheme } from '../theme';
 
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
-const PRINT_FRAME_FALLBACK_MS = 4000;
-const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
 const RENDER_RESOURCE_RELEASE_DELAY_MS = 500;
 const MAX_HISTORY_ENTRIES = 20;
 const MAX_DOCUMENT_HISTORY_ENTRIES = 5;
@@ -143,6 +144,7 @@ export type PdfWorkspaceSession = {
   cleanWorkSignature: string;
   editingEnabled?: boolean;
   fileName: string;
+  fileKey?: string;
   hasUnsavedChanges: boolean;
   importedAnnotationPageIndexes: number[];
   managedAnnotationPageIndexes: number[];
@@ -201,6 +203,8 @@ type PasswordRequest = {
 };
 
 export type PdfWorkspaceProps = {
+  allowEditing?: boolean;
+  allowImageAnnotations?: boolean;
   className?: string;
   confirmDiscardChanges?: (
     session: PdfWorkspaceSession
@@ -214,16 +218,22 @@ export type PdfWorkspaceProps = {
   onDocumentTitleChange?: (title: string) => void;
   onBusyChange?: (busy: boolean) => void;
   onOpenExternalLink?: PdfExternalLinkOpener;
+  pickMergePdfFile?: PdfMergeFilePicker;
   pickImageFile?: PdfImageFilePicker;
+  printTarget?: PdfPrintTarget | null;
+  readOnlyMessage?: string;
   onSessionChange?: (session: PdfWorkspaceSession) => void;
   showCloseButton?: boolean;
   source: PdfWorkspaceSource;
   style?: CSSProperties;
+  theme?: AppTheme;
 };
 
 export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   function PdfWorkspace(
     {
+      allowEditing = true,
+      allowImageAnnotations = true,
       className = DEFAULT_WORKSPACE_CLASS,
       confirmDiscardChanges,
       enableGlobalShortcuts = true,
@@ -235,15 +245,18 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       onDocumentTitleChange,
       onBusyChange,
       onOpenExternalLink,
+      pickMergePdfFile,
       pickImageFile,
+      printTarget = null,
+      readOnlyMessage,
       onSessionChange,
       showCloseButton = true,
       source,
-      style
+      style,
+      theme
     },
     ref
   ) {
-  const mergeFileInputRef = useRef<HTMLInputElement>(null);
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const pagesLayerRef = useRef<HTMLDivElement | null>(null);
   const lastUndoCommitTimeRef = useRef(0);
@@ -287,12 +300,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const initialAnnotationsReadyRef = useRef(false);
   const initialVisualReadyRef = useRef(false);
   const afterInitialVisualReadyRef = useRef<Array<() => void>>([]);
-  const printBlobUrlRef = useRef<string | null>(null);
-  const printFrameRef = useRef<HTMLIFrameElement | null>(null);
   const externalLinkOpenButtonRef = useRef<HTMLButtonElement | null>(null);
   const downloadTargetRef = useRef<PdfDownloadTarget | null>(null);
   const saveAsTargetRef = useRef<PdfSaveAsTarget | null>(null);
   const saveTargetRef = useRef<PdfSaveTarget | null>(null);
+  const fileKeyRef = useRef<string | null>(source.fileKey ?? null);
   const sourceLoadRef = useRef<string | null>(null);
   const workspaceSourceIdRef = useRef(source.sourceId);
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
@@ -368,7 +380,24 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     Boolean(pdfBytes) &&
     cleanWorkSignature.length > 0 &&
     currentWorkSignature !== cleanWorkSignature;
-  const readOnly = readOnlyReason !== null && !editingEnabled;
+  const hostReadOnly = !allowEditing;
+  const fileReadOnly = readOnlyReason !== null && !editingEnabled;
+  const readOnly = fileReadOnly || hostReadOnly;
+  const saveAvailable =
+    !hostReadOnly && Boolean(saveTargetRef.current || saveAsTargetRef.current);
+  const saveAsAvailable = !hostReadOnly && Boolean(saveAsTargetRef.current);
+  const downloadAvailable = !hostReadOnly && Boolean(downloadTargetRef.current);
+  const printAvailable = !hostReadOnly && Boolean(printTarget);
+  const mergePdfVisible = !hostReadOnly && Boolean(pickMergePdfFile);
+  const imageAnnotationsVisible =
+    !hostReadOnly && allowImageAnnotations && Boolean(pickImageFile);
+  const availableToolDefinitions = useMemo(
+    () =>
+      imageAnnotationsVisible
+        ? tools
+        : tools.filter((item) => item.tool !== 'imageStamp'),
+    [imageAnnotationsVisible]
+  );
   const workspaceTitle =
     pages.length > 0
       ? `${hasUnsavedChanges ? '*' : ''}${fileName}`
@@ -376,11 +405,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const workspaceStyle = useMemo(
     () =>
       ({
+        ...appThemeStyle(theme),
         ...style,
         '--pdfa-scrollbar-block': `${scrollbarGutter.block}px`,
         '--pdfa-scrollbar-inline': `${scrollbarGutter.inline}px`
       }) as CSSProperties,
-    [scrollbarGutter.block, scrollbarGutter.inline, style]
+    [scrollbarGutter.block, scrollbarGutter.inline, style, theme]
   );
   activePageIndexRef.current = activePageIndex;
   annotationsRef.current = annotations;
@@ -468,6 +498,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       cleanWorkSignature,
       editingEnabled,
       fileName,
+      fileKey: fileKeyRef.current ?? undefined,
       hasUnsavedChanges,
       importedAnnotationPageIndexes: Array.from(
         importedAnnotationPagesRef.current
@@ -545,7 +576,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     pdfDocRef.current = null;
     loadGenerationRef.current += 1;
     clearRenderCache({ clearState: true });
-    cleanupPrintResources();
     await cancelLoadingTask();
     await destroyPdfDocument(currentPdfDoc);
   }
@@ -557,7 +587,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       print: handlePrint,
       releaseRenderResources,
       save: handleSave,
-      saveAs: handleSaveAs,
+      saveAs: saveAsDocument,
       snapshot: createWorkspaceSession
     }),
     [
@@ -567,10 +597,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       cleanWorkSignature,
       editingEnabled,
       fileName,
+      fileKeyRef.current,
       handleDownload,
       handlePrint,
       handleSave,
-      handleSaveAs,
+      saveAsDocument,
       hasUnsavedChanges,
       pdfBytes,
       pdfFingerprint,
@@ -615,6 +646,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     cleanWorkSignature,
     editingEnabled,
     fileName,
+    fileKeyRef.current,
     hasUnsavedChanges,
     onSessionChange,
     pdfBytes,
@@ -664,7 +696,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [readOnly]);
+  }, [imageAnnotationsVisible, readOnly]);
 
   useLayoutEffect(() => {
     mountedRef.current = true;
@@ -682,7 +714,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         sourceLoadRef.current = null;
         loadGenerationRef.current += 1;
         clearRenderCache({ clearState: false });
-        cleanupPrintResources();
         void cancelLoadingTask();
         void destroyPdfDocument(currentPdfDoc);
       }, RENDER_RESOURCE_RELEASE_DELAY_MS);
@@ -823,25 +854,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     } else {
       window.setTimeout(cleanup, 0);
     }
-  }
-
-  function revokePrintBlobUrl() {
-    if (printBlobUrlRef.current) {
-      URL.revokeObjectURL(printBlobUrlRef.current);
-      printBlobUrlRef.current = null;
-    }
-  }
-
-  function removePrintFrame() {
-    if (printFrameRef.current) {
-      printFrameRef.current.remove();
-      printFrameRef.current = null;
-    }
-  }
-
-  function cleanupPrintResources() {
-    removePrintFrame();
-    revokePrintBlobUrl();
   }
 
   useEffect(() => {
@@ -1041,13 +1053,21 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      if (
+        saveAvailable &&
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === 's'
+      ) {
         event.preventDefault();
         void handleSave();
         return;
       }
 
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
+      if (
+        printAvailable &&
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === 'p'
+      ) {
         event.preventDefault();
         void handlePrint();
         return;
@@ -1095,8 +1115,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     focusedAnnotationId,
     hasUnsavedChanges,
     pages.length,
+    printAvailable,
     readOnly,
     redoStack,
+    saveAvailable,
     selectedAnnotationIds,
     undoStack
   ]);
@@ -1504,6 +1526,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     downloadTargetRef.current = null;
     saveAsTargetRef.current = null;
     saveTargetRef.current = null;
+    fileKeyRef.current = null;
     passwordProtectedLoadRef.current = false;
     setPdfBytes(null);
     setPdfFingerprint('');
@@ -1525,8 +1548,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setEditingEnabled(false);
     setTrustedExternalLinkKeys([]);
     setSidebarOpen(false);
-    cleanupPrintResources();
-
     if (clearFileInfo) {
       setFileName('document.pdf');
       if (manageDocumentTitle) {
@@ -1695,23 +1716,24 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     const currentPdfDoc = pdfDoc;
     pdfDocRef.current = null;
     loadGenerationRef.current += 1;
-    cleanupPrintResources();
     onClose();
     await cancelLoadingTask();
     await destroyPdfDocument(currentPdfDoc);
   }
 
   async function handlePrint() {
-    if (!pdfBytes || pages.length === 0 || !beginBusyOperation()) {
+    if (
+      !pdfBytes ||
+      pages.length === 0 ||
+      !printTarget ||
+      !beginBusyOperation()
+    ) {
       return;
     }
 
     try {
       const printableBytes = await printablePdfBytes();
-      void printPdfInFrame(printableBytes, printableName(fileName))
-        .catch((error) => {
-          console.error(error);
-        });
+      await printTarget.print(printableBytes, printableName(fileName));
     } catch (error) {
       console.error(error);
     } finally {
@@ -1776,6 +1798,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       downloadTarget: session.downloadTarget ?? source.downloadTarget ?? null,
       saveTarget: session.saveTarget ?? source.saveTarget ?? null,
       saveAsTarget: session.saveAsTarget ?? source.saveAsTarget ?? null,
+      fileKey: session.fileKey ?? source.fileKey,
       sourceId: session.sourceId
     });
   }
@@ -1806,6 +1829,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       await loadPdfBytes(bytes, nextSource.name, {
         initialAnnotations: nextSource.initialAnnotations,
         downloadTarget: nextSource.downloadTarget ?? null,
+        fileKey: nextSource.fileKey,
         saveAsTarget: nextSource.saveAsTarget ?? null,
         saveTarget: nextSource.saveTarget ?? null,
         sourceId: nextSource.sourceId
@@ -1847,6 +1871,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       initialAnnotations?: PdfAnnotation[];
       restoredSession?: PdfWorkspaceSession | null;
       downloadTarget?: PdfDownloadTarget | null;
+      fileKey?: string;
       saveAsTarget?: PdfSaveAsTarget | null;
       saveTarget?: PdfSaveTarget | null;
       sourceId?: string;
@@ -1938,6 +1963,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       });
       setPages(initialPages);
       setFileName(name);
+      fileKeyRef.current =
+        restoredSession?.fileKey ?? options.fileKey ?? null;
       downloadTargetRef.current = options.downloadTarget ?? null;
       saveAsTargetRef.current = options.saveAsTarget ?? null;
       const nextSaveTarget =
@@ -2058,8 +2085,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     loadingPagesRef.current.clear();
     pageAccessClockRef.current = 0;
     pageAccessOrderRef.current.clear();
-    cleanupPrintResources();
-
     let pendingPdf: PDFDocumentProxy | null = null;
     structureReloadInProgressRef.current = true;
     try {
@@ -2195,8 +2220,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     loadingPagesRef.current.clear();
     pageAccessClockRef.current = 0;
     pageAccessOrderRef.current.clear();
-    cleanupPrintResources();
-
     let pendingPdf: PDFDocumentProxy | null = null;
     structureReloadInProgressRef.current = true;
     setWorkspaceBusy(true);
@@ -2522,29 +2545,30 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function handleMergeFileChange(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-    const file = event.target.files?.[0];
+  async function handleMergePdf() {
     if (
       busyRef.current ||
       readOnly ||
-      !file ||
+      !mergePdfVisible ||
+      !pickMergePdfFile ||
       !pdfBytes ||
       pages.length === 0 ||
       !beginBusyOperation()
     ) {
-      event.target.value = '';
       return;
     }
 
     finishAnnotationEdit();
     const undoEntry = documentHistoryEntry();
     try {
-      const mergeBytes = await readPdfFile(file);
+      const mergeFile = await pickMergePdfFile();
+      if (!mergeFile) {
+        return;
+      }
+
       const { bytes: nextBytes } = await mergePdfAfterPage(
         pdfBytes,
-        mergeBytes,
+        mergeFile.bytes,
         pages.length - 1
       );
       const replaced = await replacePdfAfterStructureEdit(nextBytes, {
@@ -2561,7 +2585,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
     } finally {
       finishBusyOperation();
-      event.target.value = '';
     }
   }
 
@@ -2720,17 +2743,20 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     try {
-      const savedBytes = await currentPdfOutputBytes();
       const saveTarget = saveTargetRef.current;
 
       if (saveTarget) {
+        const savedBytes = await currentPdfOutputBytes();
         try {
           await saveTarget.save(savedBytes);
           markCurrentWorkClean(savedBytes);
           return true;
         } catch (error) {
           console.error(error);
-          const saveAsResult = await savePdfAs(savedBytes);
+          const saveAsResult = await savePdfAs(
+            () => Promise.resolve(savedBytes),
+            fileName
+          );
           if (saveAsResult === 'saved') {
             return true;
           }
@@ -2741,11 +2767,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         }
       }
 
-      const saveAsResult = await savePdfAs(savedBytes);
+      const saveAsResult = await savePdfAs(currentPdfOutputBytes, fileName);
       if (saveAsResult === 'saved') {
         return true;
       }
       if (saveAsResult === 'unavailable') {
+        const savedBytes = await currentPdfOutputBytes();
         await downloadPdfBytes(savedBytes, annotatedName(fileName));
       }
       return false;
@@ -2757,19 +2784,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function handleSaveAs(suggestedName = fileName) {
+  async function handleSaveAs() {
+    return saveAsDocument(fileName);
+  }
+
+  async function saveAsDocument(suggestedName = fileName) {
     if (!pdfBytes || !beginBusyOperation()) {
       return false;
     }
 
     try {
-      const savedBytes = await currentPdfOutputBytes();
-      const saveAsResult = await savePdfAs(savedBytes, suggestedName);
+      const saveAsResult = await savePdfAs(
+        currentPdfOutputBytes,
+        suggestedName
+      );
       if (saveAsResult === 'saved') {
         return true;
-      }
-      if (saveAsResult === 'unavailable') {
-        await downloadPdfBytes(savedBytes, annotatedName(fileName));
       }
       return false;
     } catch (error) {
@@ -2780,7 +2810,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function savePdfAs(bytes: Uint8Array, suggestedName = fileName) {
+  async function savePdfAs(
+    createBytes: () => Promise<Uint8Array>,
+    suggestedName = fileName
+  ) {
     const saveAsTarget = saveAsTargetRef.current;
     if (!saveAsTarget) {
       return 'unavailable' as const;
@@ -2788,7 +2821,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     let result;
     try {
-      result = await saveAsTarget.saveAs(bytes, safePdfFileName(suggestedName));
+      result = await saveAsTarget.saveAs(
+        createBytes,
+        safePdfFileName(suggestedName)
+      );
     } catch (error) {
       console.error(error);
       return 'unavailable' as const;
@@ -2798,10 +2834,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     saveTargetRef.current = result.saveTarget ?? null;
+    fileKeyRef.current = result.fileKey ?? fileKeyRef.current;
     if (result.fileName) {
       setFileName(result.fileName);
     }
-    markCurrentWorkClean(bytes);
+    markCurrentWorkClean(result.bytes);
     return 'saved' as const;
   }
 
@@ -2904,151 +2941,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       : writePdfAnnotations(pdfBytes, []);
   }
 
-  function createPrintBlobUrl(bytes: Uint8Array) {
-    const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
-      type: 'application/pdf'
-    });
-    const url = URL.createObjectURL(blob);
-    cleanupPrintResources();
-    printBlobUrlRef.current = url;
-    window.setTimeout(() => {
-      if (printBlobUrlRef.current === url) {
-        revokePrintBlobUrl();
-      }
-    }, PRINT_BLOB_REVOKE_MS);
-
-    return url;
-  }
-
-  function printPdfInFrame(bytes: Uint8Array, outputName: string) {
-    const url = createPrintBlobUrl(bytes);
-    const frame = document.createElement('iframe');
-    frame.title = 'Printable PDF';
-    frame.setAttribute('aria-hidden', 'true');
-    Object.assign(frame.style, {
-      border: '0',
-      bottom: '0',
-      height: '1px',
-      opacity: '0',
-      pointerEvents: 'none',
-      position: 'fixed',
-      right: '0',
-      width: '1px'
-    });
-    printFrameRef.current = frame;
-
-    return new Promise<void>((resolve) => {
-      let printRequested = false;
-      let settled = false;
-      const fallbackTimer = window.setTimeout(
-        fallbackToTabOrDownload,
-        PRINT_FRAME_FALLBACK_MS
-      );
-
-      function finish() {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        window.clearTimeout(fallbackTimer);
-        resolve();
-      }
-
-      function fallbackToTabOrDownload() {
-        if (settled) {
-          return;
-        }
-
-        removePrintFrame();
-        if (!openPrintablePdfInTab(url)) {
-          void downloadPdfBytes(bytes, outputName);
-        }
-        finish();
-      }
-
-      const requestFramePrint = () => {
-        if (printRequested || settled) {
-          return;
-        }
-
-        printRequested = true;
-        try {
-          const frameWindow = frame.contentWindow;
-          if (!frameWindow) {
-            throw new Error('Print frame is not available.');
-          }
-
-          frameWindow.addEventListener('afterprint', cleanupPrintResources, {
-            once: true
-          });
-          frameWindow.focus();
-          frameWindow.print();
-          finish();
-        } catch {
-          fallbackToTabOrDownload();
-        }
-      };
-
-      frame.addEventListener(
-        'load',
-        () => window.setTimeout(requestFramePrint, 250),
-        { once: true }
-      );
-      frame.addEventListener(
-        'error',
-        () => {
-          fallbackToTabOrDownload();
-        },
-        { once: true }
-      );
-
-      frame.src = url;
-      document.body.append(frame);
-    });
-  }
-
-  function openPrintablePdfInTab(url: string) {
-    const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!printWindow) {
-      return false;
-    }
-
-    try {
-      printWindow.opener = null;
-    } catch {
-      // The fallback tab can still be printed manually.
-    }
-
-    let printRequested = false;
-    const requestPrint = () => {
-      if (printRequested) {
-        return;
-      }
-
-      printRequested = true;
-      try {
-        printWindow.focus();
-        printWindow.print();
-      } catch {
-        // The PDF tab remains usable even if automatic print is blocked.
-      }
-    };
-
-    try {
-      printWindow.addEventListener(
-        'load',
-        () => window.setTimeout(requestPrint, 250),
-        { once: true }
-      );
-    } catch {
-      // The timeout fallback below still leaves the PDF tab available.
-    }
-
-    window.setTimeout(requestPrint, 1500);
-    return true;
-  }
-
   function handleAddAnnotation(annotation: PdfAnnotation) {
     if (readOnly || busyRef.current) {
       return;
@@ -3078,7 +2970,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 
   async function handlePickImageFile() {
-    if (!pickImageFile) {
+    if (!imageAnnotationsVisible || !pickImageFile) {
       return;
     }
 
@@ -3099,15 +2991,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return;
     }
 
-    const image = await prepareImageStampFromClipboardItems(
-      clipboardData.items
-    ).catch((error) => {
-      console.error(error);
-      return null;
-    });
-    if (image) {
-      addPreparedImageAnnotationFromData(image);
-      return;
+    if (imageAnnotationsVisible) {
+      const image = await prepareImageStampFromClipboardItems(
+        clipboardData.items
+      ).catch((error) => {
+        console.error(error);
+        return null;
+      });
+      if (image) {
+        addPreparedImageAnnotationFromData(image);
+        return;
+      }
     }
 
     const text = clipboardData.getData('text/plain');
@@ -3119,7 +3013,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   async function addPreparedImageAnnotation(
     prepareImage: () => Promise<PreparedImageStamp>
   ) {
-    if (readOnly || busyRef.current || !beginBusyOperation()) {
+    if (
+      readOnly ||
+      !imageAnnotationsVisible ||
+      busyRef.current ||
+      !beginBusyOperation()
+    ) {
       return;
     }
 
@@ -3135,7 +3034,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 
   function addPreparedImageAnnotationFromData(preparedImage: PreparedImageStamp) {
-    if (readOnly) {
+    if (readOnly || !imageAnnotationsVisible) {
       return;
     }
 
@@ -3885,23 +3784,16 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       data-busy={busy ? 'true' : undefined}
       style={workspaceStyle}
     >
-      <input
-        accept="application/pdf"
-        className="pdfa-hidden-input"
-        onChange={handleMergeFileChange}
-        ref={mergeFileInputRef}
-        type="file"
-      />
-
       {initialVisualReady && pages.length > 0 ? (
         <DocumentSidebar
           activePageIndex={activePageIndex}
           annotationsByPage={annotationsByPage}
           busy={busy}
+          canMergePdf={mergePdfVisible}
           onAddPage={handleAddPage}
           onClose={() => setSidebarOpen(false)}
           onDeletePage={handleDeletePage}
-          onMergePdf={() => mergeFileInputRef.current?.click()}
+          onMergePdf={() => void handleMergePdf()}
           onRotatePage={handleRotatePage}
           onSelectPage={handleSelectPage}
           onThumbnailPageLoad={handleThumbnailPageLoad}
@@ -3932,7 +3824,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         </div>
       ) : null}
 
-      {initialVisualReady && readOnly && readOnlyReason ? (
+      {initialVisualReady && readOnly && readOnlyMessage ? (
+        <ReadOnlyNotice message={readOnlyMessage} />
+      ) : initialVisualReady && readOnly && readOnlyReason ? (
         <ReadOnlyBanner
           onEnableEditing={handleEnableEditing}
           reason={readOnlyReason}
@@ -4019,6 +3913,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
               }
               settings={toolSettings}
               settingsToolKey={settingsToolKey}
+              toolDefinitions={availableToolDefinitions}
               toolPresets={toolPresets}
             />
           ) : null}
@@ -4026,10 +3921,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           <FloatingDocumentControls
             busy={busy}
             onClosePdf={handleClosePdf}
-            onDownload={handleDownload}
-            onPrint={handlePrint}
-            onSave={handleSave}
-            onSaveAs={handleSaveAs}
+            onDownload={downloadAvailable ? handleDownload : undefined}
+            onPrint={printAvailable ? handlePrint : undefined}
+            onSave={saveAvailable ? handleSave : undefined}
+            onSaveAs={saveAsAvailable ? handleSaveAs : undefined}
             saveLabel="Save"
             onToggleAnnotations={handleToggleAnnotations}
             showCloseButton={showCloseButton}
@@ -4125,6 +4020,14 @@ function ReadOnlyBanner({
       >
         Enable Editing
       </button>
+    </div>
+  );
+}
+
+function ReadOnlyNotice({ message }: { message: string }) {
+  return (
+    <div className="protected-pdf-banner ui-frame screen-only">
+      <span className="protected-pdf-banner-text">{message}</span>
     </div>
   );
 }

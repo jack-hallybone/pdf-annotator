@@ -1,29 +1,20 @@
-<img src="./public/title.svg" alt="PDF Annotator" width="400">
+<img src="./src/tabbedapp/assets/title.svg" alt="PDF Annotator" width="400">
 
-A lightweight, local-first PDF reader and annotator built with PDF.js, pdf-lib and React.
+A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib, [Lucide icons](https://lucide.dev/) and Electron.
 
-----
+[Try out the web version](https://jackhallybone.github.io/pdf-annotator/) :rocket:
 
-The idea is to create a lightweight and fast tool using [PDF.js](https://mozilla.github.io/pdf.js/) and [pdf-lib](https://pdf-lib.js.org/) for reading PDFs, and making highlight and freehand annotations.
-
-It also includes some basic document management operations: add blank page, delete page and merge.
-
-Local files can be opened, edited and modifications saved back to the original file or downloaded as a copy.
-
-[Try it out](https://jackhallybone.github.io/pdf-annotator/)
-
-*All the code in the repo except what is above here has been written by [Codex](https://openai.com/codex/).*
-
+The whole project, except this first section of the readme, has been written by Codex :sparkles:
 
 ## What It Does
 
-PDF Annotator opens local PDFs, displays them crisply, and saves interoperable annotations back into the PDF. It supports text highlights, freehand ink, freehand highlights, text notes, sticky notes, page add/delete/merge/rotate, printing, Save/Save As, and downloading a copy.
+PDF Annotator opens local PDFs, displays them crisply, and saves interoperable annotations back into the PDF. Editable annotations include text highlights, freehand ink, freehand highlights, text annotations, sticky notes and image stamps. Other annotation types from external tools are preserved and shown read-only where PDF.js can render them.
 
-Supported annotations are imported as editable where possible. Other annotations from external PDF tools are shown as read-only annotation content and preserved on save unless the user edits supported annotations on that page.
+It also supports page add/delete/rotate/merge, blank/lined/Cornell templates, printing, Save, Save As and Download copy.
 
 ## Privacy
 
-The app runs client-side. PDF bytes, filenames, annotations and passwords are not uploaded by this app. Browser file handles are scoped to the user-selected file, kept in memory for the current session, and save writes are verified after writing. External PDF links use the app confirmation flow before opening.
+The app is client-side. This project does not upload PDFs, filenames, annotations or passwords. Browser file handles are limited to user-selected files, kept in memory for the current session, and writes are verified after saving. External PDF links are confirmed before opening.
 
 ## Development
 
@@ -33,123 +24,99 @@ docker compose up
 
 Open `http://127.0.0.1:5173/`.
 
-Useful commands inside the container:
+The Docker dev container installs dependencies only when `package.json` or `package-lock.json` changes.
 
-```powershell
-docker compose exec app npm run build
-docker compose exec app npm run security:audit
-```
+Generated files are kept under ignored `out/renderer`, `out/electron` and `out/desktop` directories.
+Dependency-derived renderer assets are staged under the ignored `.generated` directory.
 
-## Reusable Components
+## Project Layers
 
-This repo has two reusable layers:
+- `src/annotator`: reusable single-PDF workspace component.
+- `src/tabbedapp`: reusable multi-PDF tab shell.
+- `src/browserapp`: browser/GitHub Pages host wiring.
+- `src/electronapp`: Electron host wiring.
 
-- `src/annotator`: `PdfWorkspace`, a single-PDF viewer/editor component.
-- `src/tabbedapp`: `TabbedPdfShell`, a multi-document tab shell that hosts `PdfWorkspace`.
+The reusable layers expose capabilities upward. A button appears only when the host supplies the matching callback or target, for example `printTarget`, `pickMergePdfFile`, `pickImageFile`, `saveAsTarget` or `downloadTarget`.
 
-`src/browserapp` is the GitHub Pages/browser integration. It wires the reusable shell to browser file picking, drag/drop, templates and the landing page.
+## `PdfWorkspace`
 
-### PdfWorkspace
-
-Use `PdfWorkspace` when another app already owns document selection and only needs one PDF workspace.
+Use this when a host app already owns document selection and wants one PDF viewer/editor.
 
 ```tsx
-import { useState } from 'react';
 import { PdfWorkspace, readPdfFile } from './annotator';
-import type { PdfWorkspaceSource } from './annotator';
 
-export function PdfView() {
-  const [source, setSource] = useState<PdfWorkspaceSource | null>(null);
+const bytes = await readPdfFile(file);
 
-  async function openFile(file: File) {
-    setSource({
-      bytes: await readPdfFile(file),
-      name: file.name,
-      sourceId: file.name
-    });
+<PdfWorkspace
+  source={{ bytes, name: file.name, sourceId: file.name }}
+  onClose={() => setOpen(false)}
+  onOpenExternalLink={(url) =>
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
-
-  return source ? (
-    <PdfWorkspace
-      source={source}
-      onClose={() => setSource(null)}
-      onOpenExternalLink={(url) =>
-        window.open(url, '_blank', 'noopener,noreferrer')
-      }
-    />
-  ) : (
-    <input
-      accept="application/pdf"
-      type="file"
-      onChange={(event) => {
-        const file = event.target.files?.[0];
-        if (file) void openFile(file);
-      }}
-    />
-  );
-}
+  theme={{ accent: '#cc41bf' }}
+/>;
 ```
 
-Key props:
+Required props:
 
-- `source`: PDF bytes or a loader, with `name` and optional save/download targets.
-- `onClose`: called when the workspace close button is pressed.
-- `confirmDiscardChanges`: host-provided unsaved-close confirmation.
-- `onOpenExternalLink`: host-provided external link opener.
-- `initialSession` / `onSessionChange`: restore and observe workspace state.
-- `showCloseButton`, `className`, `style`: integration and layout controls.
+- `source`: PDF bytes or a loader, plus `name` and `sourceId`.
+- `onClose`: called by the workspace close button.
 
-The component ref exposes document commands for host shells: `save()`, `saveAs()`, `downloadCopy()`, `print()`, `snapshot()` and `releaseRenderResources()`.
+Useful optional props:
 
-Override component styling with CSS variables:
+- `confirmDiscardChanges`, `initialSession`, `onSessionChange`
+- `onOpenExternalLink`
+- `pickImageFile`, `pickMergePdfFile`, `printTarget`
+- `allowEditing`, `readOnlyMessage`, `allowImageAnnotations`, `showCloseButton`
+- `theme`, `className`, `style`
 
-```css
-.pdf-annotator {
-  --pdfa-bg: #f3f3f3;
-  --pdfa-ui: #ffffff;
-  --pdfa-ink: #171c1c;
-  --pdfa-accent: #cc41bf;
-}
-```
+Save and download capabilities live on `source`: `saveTarget`, `saveAsTarget`, `downloadTarget`.
 
-### TabbedPdfShell
+The ref exposes `save()`, `saveAs()`, `downloadCopy()`, `print()`, `snapshot()` and `releaseRenderResources()`.
 
-Use `TabbedPdfShell` when an app needs Chrome-style PDF tabs and workspace lifecycle handling.
+## `TabbedPdfShell`
+
+Use this when a host app wants Chrome-style tabs around `PdfWorkspace`.
 
 ```tsx
-import { useRef } from 'react';
 import { TabbedPdfShell } from './tabbedapp';
-import type { TabbedPdfShellHandle } from './tabbedapp';
-
-const shellRef = useRef<TabbedPdfShellHandle>(null);
 
 <TabbedPdfShell
-  ref={shellRef}
   fileAdapter={myFileAdapter}
-  renderHome={({ openPdfDocuments, templateActions }) => (
-    <HomePage
-      onOpen={openPdfDocuments}
-      templateActions={templateActions}
-    />
-  )}
   workspaceOptions={{ onOpenExternalLink: openInHostBrowser }}
 />;
-
-shellRef.current?.openSource({
-  kind: 'loader',
-  loadBytes: () => loadPdfBytes(),
-  name: 'paper.pdf'
-});
-
-const canCloseWindow = await shellRef.current?.closeAllDocuments();
 ```
 
-Key props:
+Required props:
 
-- `fileAdapter`: host file picking, drag/drop, Save As and download behavior.
-- `renderHome`: optional home tab renderer supplied by the host app.
-- `workspaceOptions`: selected `PdfWorkspace` options passed to each tab.
-- `confirmCloseDocuments`: optional host override for dirty-tab confirmation; otherwise the shell shows its built-in modal.
-- `initialDocuments` / `onDocumentsChange`: restore and observe open tabs.
+- `fileAdapter`: host file operations and optional capabilities.
 
-Tabbed hosts should snapshot hidden workspaces and call `releaseRenderResources()` so inactive tabs keep unsaved edits without keeping PDF.js render resources alive. Desktop wrappers can call `closeAllDocuments()` during native window close; it shows the shell's dirty-close modal and resolves `false` if the user cancels. The built-in tab menu routes active-tab Save, Save As, Download copy and Print commands through the mounted `PdfWorkspace`.
+Useful optional props:
+
+- `renderHome`: override the built-in Open/New home tab.
+- `workspaceOptions`: props passed to each `PdfWorkspace`.
+- `initialDocuments`, `onDocumentsChange`
+- `confirmCloseDocuments`
+- `enableCloseTabShortcut`, `newTabMenuActions`, `theme`
+
+`fileAdapter` can provide:
+
+- `pickPdfDocuments`
+- `pdfDocumentsFromDrop`, `pdfDocumentsFromFileInput`, `fileInput`
+- `pickImageFile`, `pickMergePdfFile`
+- `saveAsTarget`, `downloadTarget`, `printTarget`
+
+The ref exposes `openDocument()`, `openDocuments()`, `openSource()`, `focusHome()`, `getDocuments()`, `closeAllDocuments()` and `confirmWindowClose()`.
+
+Individual `PdfHostDocument` values can set `readOnly` and `readOnlyMessage` without changing other tabs.
+
+## Desktop
+
+Electron reuses `TabbedPdfShell` and provides native file dialogs, verified save/write operations, external-link opening and window-close confirmation through a sandboxed preload bridge.
+
+```powershell
+docker compose exec app npm run desktop:build
+docker compose exec app npm run desktop:package:win
+```
+
+The renderer has Node integration disabled, context isolation enabled, sandboxing enabled, and no direct filesystem paths exposed to React.

@@ -101,7 +101,7 @@ export function toolAccent(
       return 'var(--app-foreground)';
     case 'eraser':
     case 'lasso':
-      return 'var(--app-foreground)';
+      return 'var(--app-accent)';
     case 'select':
       return 'var(--app-foreground)';
   }

@@ -91,6 +91,10 @@ function normalizeBasePath(value: string | undefined) {
 
 export default defineConfig({
   base,
+  publicDir: '.generated/renderer-assets',
+  build: {
+    outDir: 'out/renderer'
+  },
   plugins: [react(), {
     name: 'local-security-headers',
     configureServer: applyHeaders(devSecurityHeaders),

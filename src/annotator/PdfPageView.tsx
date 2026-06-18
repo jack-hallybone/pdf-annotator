@@ -1052,6 +1052,12 @@ function PdfPageViewComponent({
       onEnsureAnnotationsVisible();
     }
 
+    if (isPrimaryButton && (tool === 'freeText' || tool === 'stickyNote')) {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     if (
       isPrimaryButton &&
       event.target === event.currentTarget &&
@@ -1125,6 +1131,13 @@ function PdfPageViewComponent({
     }
 
     const isPrimaryButton = event.button === 0;
+    if (isPrimaryButton && (tool === 'freeText' || tool === 'stickyNote')) {
+      event.preventDefault();
+      onEnsureAnnotationsVisible();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+
     if (isPrimaryButton && tool === 'select' && isTextLayerTarget(event.target)) {
       return;
     }
@@ -1378,6 +1391,18 @@ function PdfPageViewComponent({
           contents: joinTextLayerSegments(selectedTextRects)
         });
       }
+      return;
+    }
+
+    if (tool === 'freeText' || tool === 'stickyNote') {
+      releasePointer(event, event.pointerId);
+      const origin = clientPointToViewportPoint(
+        event.clientX,
+        event.clientY,
+        event.currentTarget.getBoundingClientRect(),
+        viewport
+      );
+      addTextOrNoteAnnotationAtViewportPoint(origin);
       return;
     }
 
@@ -1653,52 +1678,59 @@ function PdfPageViewComponent({
     }
 
     if (tool === 'freeText' || tool === 'stickyNote') {
-      const origin = eventToViewportPoint(event, viewport);
-      const textHeight = Math.max(84, toolSettings.textFontSize * scale * 4);
-      const textLineHeight =
-        toolSettings.textFontSize * scale * FREE_TEXT_LINE_HEIGHT;
-      const noteSize = 28;
-      const rect =
-        tool === 'freeText'
-          ? viewportRectToPdfRect(
-              origin.x,
-              origin.y - textLineHeight / 2,
-              260,
-              textHeight,
-              viewport
-            )
-          : viewportRectToPdfRect(
-              origin.x - noteSize / 2,
-              origin.y - noteSize / 2,
-              noteSize,
-              noteSize,
-              viewport
-            );
-
-      const annotation: PdfAnnotation =
-        tool === 'freeText'
-          ? {
-              id: crypto.randomUUID(),
-              kind: 'freeText',
-              pageIndex,
-              rect,
-              text: '',
-              fontSize: toolSettings.textFontSize,
-              color: toolSettings.textColor,
-              opacity: toolSettings.textOpacity
-            }
-          : {
-              id: crypto.randomUUID(),
-              kind: 'stickyNote',
-              pageIndex,
-              rect,
-              text: '',
-              color: toolSettings.noteColor
-            };
-
-      onAddAnnotation(annotation);
-      onToolChange('select');
+      addTextOrNoteAnnotationAtViewportPoint(eventToViewportPoint(event, viewport));
     }
+  }
+
+  function addTextOrNoteAnnotationAtViewportPoint(origin: PdfPoint) {
+    if (tool !== 'freeText' && tool !== 'stickyNote') {
+      return;
+    }
+
+    const textHeight = Math.max(84, toolSettings.textFontSize * scale * 4);
+    const textLineHeight =
+      toolSettings.textFontSize * scale * FREE_TEXT_LINE_HEIGHT;
+    const noteSize = 28;
+    const rect =
+      tool === 'freeText'
+        ? viewportRectToPdfRect(
+            origin.x,
+            origin.y - textLineHeight / 2,
+            260,
+            textHeight,
+            viewport
+          )
+        : viewportRectToPdfRect(
+            origin.x - noteSize / 2,
+            origin.y - noteSize / 2,
+            noteSize,
+            noteSize,
+            viewport
+          );
+
+    const annotation: PdfAnnotation =
+      tool === 'freeText'
+        ? {
+            id: crypto.randomUUID(),
+            kind: 'freeText',
+            pageIndex,
+            rect,
+            text: '',
+            fontSize: toolSettings.textFontSize,
+            color: toolSettings.textColor,
+            opacity: toolSettings.textOpacity
+          }
+        : {
+            id: crypto.randomUUID(),
+            kind: 'stickyNote',
+            pageIndex,
+            rect,
+            text: '',
+            color: toolSettings.noteColor
+          };
+
+    onAddAnnotation(annotation);
+    onToolChange('select');
   }
 
   function beginMoveAnnotation(
@@ -1709,6 +1741,8 @@ function PdfPageViewComponent({
       return;
     }
 
+    event.preventDefault();
+    event.stopPropagation();
     const captureTarget = event.currentTarget.ownerSVGElement ?? event.currentTarget;
     beginMoveAnnotationAtPoint({
       annotationId,
@@ -2175,7 +2209,7 @@ function PdfPageViewComponent({
 
     renderPdfPathCanvas({
       canvas: eraserCanvasRef.current,
-      color: SELECTION_ACCENT,
+      color: resolvedAccentColor(pageRef.current),
       displaySize,
       opacity: 0.35,
       path,
@@ -2657,6 +2691,7 @@ function AnnotationShape({
         return;
       }
 
+      event.preventDefault();
       if (!selected) {
         onSelect();
       }
@@ -2779,6 +2814,9 @@ function AnnotationShape({
               <AutoFocusTextarea
                 autoFocus={focused}
                 className="free-text-editor"
+                ignoreInitialBlurMs={
+                  focused && annotation.text.trim().length === 0 ? 750 : 0
+                }
                 onChange={(event) =>
                   onUpdate((current) =>
                     current.kind === 'freeText'
@@ -2888,6 +2926,9 @@ function AnnotationShape({
               autoFocus={focused}
               color={annotation.color}
               editable={selected || focused}
+              ignoreInitialBlurMs={
+                focused && annotation.text.trim().length === 0 ? 750 : 0
+              }
               onBlur={focused ? () => onFocusEnd(annotation.id) : undefined}
               onFocus={
                 focused && annotation.text.trim().length === 0
@@ -3613,6 +3654,17 @@ function renderPdfPathCanvas({
   context.lineWidth = Math.max(0.25, width);
   drawInkCanvasPath(context, path, viewport, false, width);
   context.globalAlpha = 1;
+}
+
+function resolvedAccentColor(element: Element | null) {
+  const source = element ?? document.documentElement;
+  return (
+    getComputedStyle(source).getPropertyValue('--pdfa-accent').trim() ||
+    getComputedStyle(document.documentElement)
+      .getPropertyValue('--app-accent')
+      .trim() ||
+    '#cc41bf'
+  );
 }
 
 function eraseInkCanvasPaths({

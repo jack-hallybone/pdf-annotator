@@ -1,6 +1,7 @@
 import './styles.css';
 
 export { TabbedPdfShell } from './TabbedPdfShell';
+export type { AppTheme } from '../theme';
 export type {
   TabbedPdfCloseDocumentsRequest,
   TabbedPdfDocumentSummary,

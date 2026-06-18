@@ -93,14 +93,16 @@ export function canSaveLocalPdfFileAs() {
   return typeof localWindow().showSaveFilePicker === 'function';
 }
 
-export async function pickLocalPdfFiles() {
+export async function pickLocalPdfFiles({
+  multiple = true
+}: { multiple?: boolean } = {}) {
   const picker = localWindow().showOpenFilePicker;
   if (!picker) {
     return [];
   }
 
   try {
-    const handles = await picker(pdfPickerOptions);
+    const handles = await picker({ ...pdfPickerOptions, multiple });
     return localPdfFilesFromHandles(handles);
   } catch (error) {
     if (isPickerAbort(error)) {
@@ -156,22 +158,17 @@ export async function savePdfToLocalFile(
   }
 }
 
-export async function savePdfAsLocalFile(
-  bytes: Uint8Array,
-  suggestedName: string
-) {
+export async function pickLocalPdfSaveFile(suggestedName: string) {
   const picker = localWindow().showSaveFilePicker;
   if (!picker) {
     return null;
   }
 
   try {
-    const handle = await picker({
+    return await picker({
       ...pdfPickerOptions,
       suggestedName
     });
-    await savePdfToLocalFile(handle, bytes);
-    return handle;
   } catch (error) {
     if (isPickerAbort(error)) {
       return null;

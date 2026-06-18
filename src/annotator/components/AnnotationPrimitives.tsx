@@ -10,6 +10,7 @@ export const TEXT_HIGHLIGHT_STYLE = { mixBlendMode: 'multiply' as const };
 
 type AutoFocusTextareaProps = {
   autoFocus?: boolean;
+  ignoreInitialBlurMs?: number;
   onBlur?: () => void;
   onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
   onFocus?: () => void;
@@ -21,6 +22,7 @@ type AutoFocusTextareaProps = {
 
 export function AutoFocusTextarea({
   autoFocus = false,
+  ignoreInitialBlurMs = 0,
   onBlur,
   onChange,
   onFocus,
@@ -30,6 +32,7 @@ export function AutoFocusTextarea({
   value
 }: AutoFocusTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusStartedAtRef = useRef(0);
 
   useEffect(() => {
     if (!autoFocus) {
@@ -38,6 +41,7 @@ export function AutoFocusTextarea({
 
     const focusTextarea = () => {
       const textarea = textareaRef.current;
+      focusStartedAtRef.current ||= performance.now();
       textarea?.focus({ preventScroll: true });
       textarea?.setSelectionRange(textarea.value.length, textarea.value.length);
     };
@@ -50,7 +54,22 @@ export function AutoFocusTextarea({
   return (
     <textarea
       className={className}
-      onBlur={onBlur}
+      onBlur={() => {
+        const elapsed = performance.now() - focusStartedAtRef.current;
+        if (ignoreInitialBlurMs > 0 && elapsed < ignoreInitialBlurMs) {
+          window.requestAnimationFrame(() => {
+            const textarea = textareaRef.current;
+            textarea?.focus({ preventScroll: true });
+            textarea?.setSelectionRange(
+              textarea.value.length,
+              textarea.value.length
+            );
+          });
+          return;
+        }
+
+        onBlur?.();
+      }}
       onChange={onChange}
       onFocus={onFocus}
       onClick={(event) => event.stopPropagation()}
@@ -68,6 +87,7 @@ type NotePopoverProps = {
   autoFocus?: boolean;
   color?: [number, number, number];
   editable?: boolean;
+  ignoreInitialBlurMs?: number;
   onBlur?: () => void;
   onFocus?: () => void;
   onTextChange?: (text: string) => void;
@@ -80,6 +100,7 @@ export function NotePopover({
   autoFocus = false,
   color,
   editable = false,
+  ignoreInitialBlurMs = 0,
   onBlur,
   onFocus,
   onTextChange,
@@ -120,6 +141,7 @@ export function NotePopover({
         <AutoFocusTextarea
           autoFocus={autoFocus}
           className="note-popover note-popover-editor"
+          ignoreInitialBlurMs={ignoreInitialBlurMs}
           onChange={(event) => onTextChange?.(event.target.value)}
           onBlur={onBlur}
           onFocus={onFocus}
