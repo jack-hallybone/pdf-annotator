@@ -2209,7 +2209,7 @@ function PdfPageViewComponent({
 
     renderPdfPathCanvas({
       canvas: eraserCanvasRef.current,
-      color: SELECTION_ACCENT,
+      color: resolvedAccentColor(pageRef.current),
       displaySize,
       opacity: 0.35,
       path,
@@ -3654,6 +3654,17 @@ function renderPdfPathCanvas({
   context.lineWidth = Math.max(0.25, width);
   drawInkCanvasPath(context, path, viewport, false, width);
   context.globalAlpha = 1;
+}
+
+function resolvedAccentColor(element: Element | null) {
+  const source = element ?? document.documentElement;
+  return (
+    getComputedStyle(source).getPropertyValue('--pdfa-accent').trim() ||
+    getComputedStyle(document.documentElement)
+      .getPropertyValue('--app-accent')
+      .trim() ||
+    '#cc41bf'
+  );
 }
 
 function eraseInkCanvasPaths({
