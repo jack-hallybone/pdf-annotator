@@ -18,6 +18,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src"],
-  "exclude": ["src/electronapp/main.ts"]
+  "include": ["src"]
 }

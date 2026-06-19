@@ -12,6 +12,7 @@ import {
   canPickLocalPdfFile,
   canSaveLocalPdfFileAs,
   localPdfFilesFromDrop,
+  localPdfFilesFromHandles,
   pickLocalPdfSaveFile,
   pickLocalImageFile,
   pickLocalPdfFiles,
@@ -59,6 +60,12 @@ export const browserFileAdapter: PdfHostAdapter = {
   }
 };
 
+export async function browserFileHandlesToHostDocuments(
+  handles: LocalPdfFileHandle[]
+) {
+  return browserFilesToHostDocuments(await localPdfFilesFromHandles(handles));
+}
+
 async function browserPickImageFile() {
   if (canPickLocalPdfFile()) {
     return pickLocalImageFile();
@@ -93,7 +100,7 @@ function browserFilesToHostDocuments(
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
-        saveTarget: handle ? browserFileSaveTarget(handle) : null
+        saveTarget: handle ? browserFileSaveTarget(handle, file) : null
       },
       title: file.name
     }));
@@ -159,24 +166,70 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
         return null;
       }
 
+      const saveTarget = browserFileSaveTarget(handle, await handle.getFile());
       const bytes = await createBytes();
-      await savePdfToLocalFile(handle, bytes);
+      await saveTarget.save(bytes);
       return {
         bytes,
         fileKey: await pdfFileKeyForHandle(handle),
         fileName: handle.name,
-        saveTarget: browserFileSaveTarget(handle)
+        saveTarget
       };
     }
   };
 }
 
 function browserFileSaveTarget(
-  fileHandle: LocalPdfFileHandle
+  fileHandle: LocalPdfFileHandle,
+  initialFile: File
 ): PdfSaveTarget {
+  let expectedVersion = pdfFileVersion(initialFile);
+  const lockName = `pdf-annotator:file-write:${fileHandle.name
+    .normalize('NFC')
+    .toLocaleLowerCase()}`;
+
   return {
-    save: (bytes) => savePdfToLocalFile(fileHandle, bytes)
+    async save(bytes) {
+      await withBrowserFileLock(lockName, async () => {
+        const currentFile = await fileHandle.getFile();
+        if (!samePdfFileVersion(expectedVersion, pdfFileVersion(currentFile))) {
+          throw new Error(
+            'The PDF changed outside this window. Use Save As to avoid overwriting newer changes.'
+          );
+        }
+
+        await savePdfToLocalFile(fileHandle, bytes);
+        expectedVersion = pdfFileVersion(await fileHandle.getFile());
+      });
+    }
   };
+}
+
+type BrowserLockManager = {
+  request: <T>(
+    name: string,
+    options: { mode: 'exclusive' },
+    callback: () => Promise<T>
+  ) => Promise<T>;
+};
+
+function withBrowserFileLock<T>(name: string, task: () => Promise<T>) {
+  const locks = (navigator as Navigator & { locks?: BrowserLockManager }).locks;
+  return locks ? locks.request(name, { mode: 'exclusive' }, task) : task();
+}
+
+function pdfFileVersion(file: File) {
+  return { lastModified: file.lastModified, size: file.size };
+}
+
+function samePdfFileVersion(
+  expected: ReturnType<typeof pdfFileVersion>,
+  current: ReturnType<typeof pdfFileVersion>
+) {
+  return (
+    expected.lastModified === current.lastModified &&
+    expected.size === current.size
+  );
 }
 
 function browserFileDownloadTarget(): PdfDownloadTarget {

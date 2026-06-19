@@ -14,7 +14,7 @@ const sharedSecurityHeaders = {
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Permissions-Policy':
-    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), clipboard-read=(), clipboard-write=(self)',
+    'accelerometer=(), bluetooth=(), browsing-topics=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), publickey-credentials-get=(), serial=(), usb=(), clipboard-read=(), clipboard-write=(self)',
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY'
@@ -29,8 +29,11 @@ const baseContentSecurityPolicy = [
   "frame-src 'self' blob:",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
+  "manifest-src 'self'",
+  "media-src 'none'",
   "style-src 'self' 'unsafe-inline'",
-  "worker-src 'self' blob:"
+  "worker-src 'self' blob:",
+  "script-src-attr 'none'"
 ];
 
 function contentSecurityPolicy({

@@ -1,22 +1,43 @@
 {
+  "id": "./",
   "name": "PDF Annotator",
   "short_name": "PDF Annotator",
+  "description": "A lightweight client-side PDF viewer and annotation tool",
+  "lang": "en-GB",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F3F3F3",
+  "theme_color": "#FFFFFF",
+  "categories": ["productivity", "utilities"],
   "icons": [
     {
       "src": "web-app-manifest-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     },
     {
       "src": "web-app-manifest-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "any maskable"
     }
   ],
-  "theme_color": "#FFFE4E",
-  "background_color": "#ffffff",
-  "display": "standalone",
-  "start_url": "./"
+  "file_handlers": [
+    {
+      "action": "./",
+      "name": "PDF document",
+      "accept": {
+        "application/pdf": [".pdf"]
+      },
+      "launch_type": "single-client"
+    }
+  ],
+  "launch_handler": {
+    "client_mode": ["focus-existing", "auto"]
+  },
+  "prefer_related_applications": false
 }

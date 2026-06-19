@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const generatedRoot = join(root, '.generated', 'renderer-assets');
 const browserAssetsRoot = join(root, 'src', 'browserapp', 'assets');
-const sharedIconPath = join(root, 'src', 'assets', 'icons', 'highlighter.svg');
 const pdfjsSourceRoot = join(root, 'node_modules', 'pdfjs-dist');
 const pdfjsTargetRoot = join(generatedRoot, 'pdfjs');
 const assetDirs = [
@@ -20,7 +19,6 @@ const unusedWasmAssets = ['quickjs-eval.js', 'quickjs-eval.wasm'];
 rmSync(generatedRoot, { force: true, recursive: true });
 mkdirSync(generatedRoot, { recursive: true });
 cpSync(browserAssetsRoot, generatedRoot, { recursive: true });
-cpSync(sharedIconPath, join(generatedRoot, 'favicon.svg'));
 mkdirSync(pdfjsTargetRoot, { recursive: true });
 
 for (const [sourceDir, targetDir] of assetDirs) {

@@ -15,7 +15,6 @@
 LICENSE* text eol=lf
 
 *.bcmap binary
-*.icns binary
 *.icc binary
 *.ico binary
 *.pfb binary

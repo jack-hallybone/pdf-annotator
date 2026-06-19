@@ -1,10 +1,33 @@
-import { useEffect, useState } from 'react';
-import { browserFileAdapter } from './browserFileAdapter';
+import { useEffect, useRef, useState } from 'react';
 import { TabbedPdfShell } from '../tabbedapp';
-import type { TabbedPdfDocumentSummary } from '../tabbedapp';
+import type {
+  TabbedPdfDocumentSummary,
+  TabbedPdfShellHandle
+} from '../tabbedapp';
+import {
+  browserFileAdapter,
+  browserFileHandlesToHostDocuments
+} from './browserFileAdapter';
+import {
+  registerBrowserServiceWorker,
+  setPwaFileLaunchHandler
+} from './pwa';
 
 export function BrowserShell() {
+  const shellRef = useRef<TabbedPdfShellHandle>(null);
   const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
+
+  useEffect(() => registerBrowserServiceWorker(), []);
+
+  useEffect(
+    () =>
+      setPwaFileLaunchHandler(async (handles) => {
+        const launchedDocuments =
+          await browserFileHandlesToHostDocuments(handles);
+        shellRef.current?.openDocuments(launchedDocuments);
+      }),
+    []
+  );
 
   useEffect(() => {
     if (!documents.some((document) => document.hasUnsavedChanges)) {
@@ -24,6 +47,7 @@ export function BrowserShell() {
     <TabbedPdfShell
       fileAdapter={browserFileAdapter}
       onDocumentsChange={setDocuments}
+      ref={shellRef}
     />
   );
 }

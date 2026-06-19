@@ -245,6 +245,7 @@ export const TabbedPdfShell = forwardRef<
   >(null);
   const documentsRef = useLatestRef(documents);
   const nextCloseConfirmationIdRef = useRef(0);
+  const pendingHostDocumentsRef = useRef<PdfHostDocument[]>([]);
 
   function visibleDocumentIds() {
     return activeDocumentIdRef.current ? [activeDocumentIdRef.current] : [];
@@ -329,10 +330,10 @@ export const TabbedPdfShell = forwardRef<
     confirmWindowClose,
     focusHome: selectHome,
     getDocuments: documentSummaries,
-    openDocument: (document) => openHostDocuments([document]),
-    openDocuments: openHostDocuments,
+    openDocument: (document) => openImperativeDocuments([document]),
+    openDocuments: openImperativeDocuments,
     openSource: (source, options = {}) =>
-      openHostDocuments([
+      openImperativeDocuments([
         {
           fileKey: options.fileKey,
           source,
@@ -340,6 +341,15 @@ export const TabbedPdfShell = forwardRef<
         }
       ])
   }));
+
+  useEffect(() => {
+    if (shellLocked || pendingHostDocumentsRef.current.length === 0) {
+      return;
+    }
+
+    const pendingDocuments = pendingHostDocumentsRef.current.splice(0);
+    openHostDocuments(pendingDocuments);
+  }, [shellLocked]);
 
   useEffect(() => {
     if (initialDocumentsOpenedRef.current || initialDocuments.length === 0) {
@@ -646,6 +656,15 @@ export const TabbedPdfShell = forwardRef<
         title: sourceWithHostTargets.name
       }
     ]);
+  }
+
+  function openImperativeDocuments(hostDocuments: PdfHostDocument[]) {
+    if (shellLockedRef.current) {
+      pendingHostDocumentsRef.current.push(...hostDocuments);
+      return;
+    }
+
+    openHostDocuments(hostDocuments);
   }
 
   function openHostDocuments(hostDocuments: PdfHostDocument[]) {

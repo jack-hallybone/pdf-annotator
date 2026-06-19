@@ -97,11 +97,9 @@ export function toolAccent(
       return rgbToHex(settings.textColor);
     case 'stickyNote':
       return rgbToHex(settings.noteColor);
-    case 'imageStamp':
-      return 'var(--app-foreground)';
     case 'eraser':
     case 'lasso':
-      return 'var(--app-accent)';
+    case 'imageStamp':
     case 'select':
       return 'var(--app-foreground)';
   }

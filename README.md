@@ -1,6 +1,6 @@
 <img src="./src/tabbedapp/assets/title.svg" alt="PDF Annotator" width="400">
 
-A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib, [Lucide icons](https://lucide.dev/) and Electron.
+A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib and [Lucide icons](https://lucide.dev/).
 
 [Try out the web version](https://jackhallybone.github.io/pdf-annotator/) :rocket:
 
@@ -14,7 +14,7 @@ It also supports page add/delete/rotate/merge, blank/lined/Cornell templates, pr
 
 ## Privacy
 
-The app is client-side. This project does not upload PDFs, filenames, annotations or passwords. Browser file handles are limited to user-selected files, kept in memory for the current session, and writes are verified after saving. External PDF links are confirmed before opening.
+The app is client-side. This project does not upload PDFs, filenames, annotations or passwords. Browser file handles are limited to user-selected files and kept in memory for the current session. Writes are serialised across app windows, checked for external changes and verified byte-for-byte after saving. PDF scripting and XFA are disabled, the offline cache contains only static app assets, and external PDF links are confirmed before opening.
 
 ## Development
 
@@ -26,15 +26,18 @@ Open `http://127.0.0.1:5173/`.
 
 The Docker dev container installs dependencies only when `package.json` or `package-lock.json` changes.
 
-Generated files are kept under ignored `out/renderer`, `out/electron` and `out/desktop` directories.
+Generated files are kept under the ignored `out/renderer` directory.
 Dependency-derived renderer assets are staged under the ignored `.generated` directory.
+
+## Browser PWA
+
+The production browser build is an installable PWA with offline app assets. Installed Chrome and Edge desktop apps can register as a PDF file handler: opening a PDF launches the app or adds it to the existing window as a new internal tab. Other browsers retain the normal Open and drag-and-drop flows. User PDF contents are never placed in the offline cache.
 
 ## Project Layers
 
 - `src/annotator`: reusable single-PDF workspace component.
 - `src/tabbedapp`: reusable multi-PDF tab shell.
 - `src/browserapp`: browser/GitHub Pages host wiring.
-- `src/electronapp`: Electron host wiring.
 
 The reusable layers expose capabilities upward. A button appears only when the host supplies the matching callback or target, for example `printTarget`, `pickMergePdfFile`, `pickImageFile`, `saveAsTarget` or `downloadTarget`.
 
@@ -109,14 +112,3 @@ Useful optional props:
 The ref exposes `openDocument()`, `openDocuments()`, `openSource()`, `focusHome()`, `getDocuments()`, `closeAllDocuments()` and `confirmWindowClose()`.
 
 Individual `PdfHostDocument` values can set `readOnly` and `readOnlyMessage` without changing other tabs.
-
-## Desktop
-
-Electron reuses `TabbedPdfShell` and provides native file dialogs, verified save/write operations, external-link opening and window-close confirmation through a sandboxed preload bridge.
-
-```powershell
-docker compose exec app npm run desktop:build
-docker compose exec app npm run desktop:package:win
-```
-
-The renderer has Node integration disabled, context isolation enabled, sandboxing enabled, and no direct filesystem paths exposed to React.

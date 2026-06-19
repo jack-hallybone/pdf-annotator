@@ -241,14 +241,29 @@ async function localPdfHandlesFromItems(items: DataTransferItem[]) {
   return handles;
 }
 
-async function localPdfFilesFromHandles(handles: LocalPdfFileHandle[]) {
-  const files = await Promise.all(
-    handles.map(async (handle) => ({
+export async function localPdfFilesFromHandles(
+  handles: LocalPdfFileHandle[]
+) {
+  const files = await Promise.allSettled(
+    handles.filter(isPdfFileHandle).map(async (handle) => ({
       file: await handle.getFile(),
       handle
     }))
   );
-  return files.filter(({ file }) => isPdfFile(file));
+  const readableFiles = files.flatMap((result) =>
+    result.status === 'fulfilled' && isPdfFile(result.value.file)
+      ? [result.value]
+      : []
+  );
+
+  if (readableFiles.length === 0) {
+    const failedRead = files.find((result) => result.status === 'rejected');
+    if (failedRead?.status === 'rejected') {
+      throw failedRead.reason;
+    }
+  }
+
+  return readableFiles;
 }
 
 async function requestReadWritePermission(handle: LocalPdfFileHandle) {

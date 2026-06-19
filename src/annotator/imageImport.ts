@@ -14,6 +14,9 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 ]);
 const MAX_IMAGE_DIMENSION = 1800;
 const MAX_IMAGE_PIXELS = 2_400_000;
+const MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024;
+const MAX_SOURCE_IMAGE_DIMENSION = 12_000;
+const MAX_SOURCE_IMAGE_PIXELS = 40_000_000;
 
 export async function prepareImageStampFromFile(file: File) {
   if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
@@ -49,8 +52,26 @@ export async function prepareImageStampFromClipboardItems(
 }
 
 async function prepareImageStampBlob(blob: Blob): Promise<PreparedImageStamp> {
+  if (blob.size === 0) {
+    throw new Error('The image is empty.');
+  }
+  if (blob.size > MAX_SOURCE_IMAGE_BYTES) {
+    throw new Error('Images larger than 32 MB are not supported.');
+  }
+
   const bitmap = await createImageBitmap(blob);
   try {
+    if (
+      !Number.isFinite(bitmap.width) ||
+      !Number.isFinite(bitmap.height) ||
+      bitmap.width < 1 ||
+      bitmap.height < 1 ||
+      Math.max(bitmap.width, bitmap.height) > MAX_SOURCE_IMAGE_DIMENSION ||
+      bitmap.width * bitmap.height > MAX_SOURCE_IMAGE_PIXELS
+    ) {
+      throw new Error('The image dimensions are too large to import safely.');
+    }
+
     const dimensions = boundedImageDimensions(bitmap.width, bitmap.height);
     const canvas = document.createElement('canvas');
     canvas.width = dimensions.width;
