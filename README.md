@@ -2,7 +2,7 @@
 
 A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib and [Lucide icons](https://lucide.dev/).
 
-[Try out the web version](https://jackhallybone.github.io/pdf-annotator/) :rocket:
+[Try out the web version](https://jack-hallybone.github.io/pdf-annotator/) :rocket:
 
 The whole project, except this first section of the readme, has been written by Codex :sparkles:
 
