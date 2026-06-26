@@ -16,7 +16,7 @@ const assetDirs = [
 const licenseFiles = ['LICENSE', 'NOTICE'];
 const unusedWasmAssets = ['quickjs-eval.js', 'quickjs-eval.wasm'];
 
-rmSync(generatedRoot, { force: true, recursive: true });
+removePath(generatedRoot);
 mkdirSync(generatedRoot, { recursive: true });
 cpSync(browserAssetsRoot, generatedRoot, { recursive: true });
 mkdirSync(pdfjsTargetRoot, { recursive: true });
@@ -29,7 +29,7 @@ for (const [sourceDir, targetDir] of assetDirs) {
     throw new Error(`Missing PDF.js asset directory: ${source}`);
   }
 
-  rmSync(target, { force: true, recursive: true });
+  removePath(target);
   cpSync(source, target, { recursive: true });
 }
 
@@ -40,10 +40,19 @@ for (const file of licenseFiles) {
   if (existsSync(source)) {
     cpSync(source, target);
   } else {
-    rmSync(target, { force: true });
+    removePath(target);
   }
 }
 
 for (const asset of unusedWasmAssets) {
-  rmSync(join(pdfjsTargetRoot, 'wasm', asset), { force: true });
+  removePath(join(pdfjsTargetRoot, 'wasm', asset));
+}
+
+function removePath(path) {
+  rmSync(path, {
+    force: true,
+    maxRetries: 5,
+    recursive: true,
+    retryDelay: 100
+  });
 }

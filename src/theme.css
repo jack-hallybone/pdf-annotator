@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light dark;
   --app-canvas: #f3f3f3;
   --app-canvas-rgb: 243 243 243;
   --app-surface: #ffffff;
@@ -9,4 +10,18 @@
   --app-accent: #cc41bf;
   --app-accent-rgb: 204 65 191;
   --app-danger-rgb: 230 45 42;
+  --app-shadow-rgb: 23 28 28;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --app-canvas: #171c1c;
+    --app-canvas-rgb: 23 28 28;
+    --app-surface: #242a2a;
+    --app-surface-rgb: 36 42 42;
+    --app-page: #ffffff;
+    --app-foreground: #f3f3f3;
+    --app-foreground-rgb: 243 243 243;
+    --app-shadow-rgb: 0 0 0;
+  }
 }

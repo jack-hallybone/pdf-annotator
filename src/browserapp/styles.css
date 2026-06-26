@@ -1,0 +1,181 @@
+@import "../theme.css";
+
+.browserapp-home-panel {
+  box-sizing: border-box;
+  display: grid;
+  height: 100%;
+  overflow: auto;
+  padding: 2rem 1rem;
+  place-items: center;
+}
+
+.browserapp-home-card {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  width: min(92vw, 31rem);
+}
+
+.browserapp-home-title {
+  margin: 0;
+  width: 100%;
+}
+
+.browserapp-home-title-image {
+  display: block;
+  height: auto;
+  margin: 0 auto;
+  width: min(80vw, 24rem);
+}
+
+.browserapp-home-action-frame,
+.browserapp-install-card {
+  background: var(--app-surface);
+  border: 1px solid rgb(var(--app-foreground-rgb) / 0.12);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgb(var(--app-shadow-rgb) / 0.05);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.browserapp-home-action-frame {
+  padding: 0.5rem;
+}
+
+.browserapp-home-action-stack,
+.browserapp-home-drop-message {
+  min-height: 9rem;
+}
+
+.browserapp-home-drop-message {
+  align-items: center;
+  color: var(--app-foreground);
+  display: grid;
+  font-size: 0.875rem;
+  font-weight: 500;
+  gap: 0.625rem;
+  grid-auto-flow: column;
+  justify-content: center;
+  place-items: center;
+}
+
+.browserapp-home-open-button,
+.browserapp-home-template-button,
+.browserapp-install-button {
+  align-items: center;
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--app-foreground);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-weight: 500;
+  justify-content: center;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+
+.browserapp-home-open-button:hover:not(:disabled),
+.browserapp-home-template-button:hover:not(:disabled),
+.browserapp-install-button:hover:not(:disabled) {
+  background: var(--app-canvas);
+}
+
+.browserapp-home-open-button:focus-visible,
+.browserapp-home-template-button:focus-visible,
+.browserapp-install-button:focus-visible,
+.browserapp-home-credit:focus-visible {
+  box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.32);
+  outline: none;
+}
+
+.browserapp-home-open-button {
+  font-size: 1rem;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  width: 100%;
+}
+
+.browserapp-home-template-grid {
+  border-top: 1px solid rgb(var(--app-foreground-rgb) / 0.12);
+  display: grid;
+  gap: 0.25rem;
+  grid-template-columns: 1fr;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.browserapp-home-template-button {
+  flex-direction: column;
+  font-size: 0.875rem;
+  gap: 0.5rem;
+  min-height: 4rem;
+  padding: 0.75rem;
+}
+
+.browserapp-install-card {
+  align-items: center;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0.875rem;
+}
+
+.browserapp-install-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.browserapp-install-copy h2,
+.browserapp-install-copy p {
+  margin: 0;
+}
+
+.browserapp-install-copy h2 {
+  color: var(--app-foreground);
+  font-size: 0.875rem;
+  font-weight: 650;
+}
+
+.browserapp-install-copy p {
+  color: rgb(var(--app-foreground-rgb) / 0.74);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.browserapp-install-copy a,
+.browserapp-home-credit {
+  color: inherit;
+  text-decoration-color: rgb(var(--app-foreground-rgb) / 0.32);
+  text-underline-offset: 0.18em;
+}
+
+.browserapp-install-button {
+  border-color: rgb(var(--app-foreground-rgb) / 0.14);
+  font-size: 0.875rem;
+  gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+}
+
+.browserapp-home-credit {
+  border-radius: 4px;
+  color: rgb(var(--app-foreground-rgb) / 0.58);
+  font-size: 0.75rem;
+  padding: 0.125rem 0.25rem;
+}
+
+@media (min-width: 640px) {
+  .browserapp-home-template-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .browserapp-install-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

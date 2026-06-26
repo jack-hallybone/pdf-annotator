@@ -22,11 +22,12 @@ export type {
 } from './host';
 export type {
   PdfWorkspaceDocumentHistorySnapshot,
+  PdfWorkspaceCloseRequest,
   PdfWorkspaceHandle,
   PdfWorkspaceHistoryEntry,
   PdfWorkspaceProps,
   PdfWorkspaceReadOnlyReason,
-  PdfWorkspaceSession,
+  PdfWorkspaceTabCacheSession,
   PdfWorkspaceViewPosition
 } from './PdfWorkspace';
 export type {

@@ -4,7 +4,6 @@ import {
   type RefObject,
   forwardRef,
   useCallback,
-  useDeferredValue,
   useEffect,
   useImperativeHandle,
   useId,
@@ -108,6 +107,8 @@ const MAX_DOCUMENT_HISTORY_ENTRIES = 5;
 const PDF_PROTECTION_SCAN_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKSPACE_CLASS = 'pdf-annotator--fullscreen';
 
+// In-memory undo/redo only. This contains full PDF bytes and must not be
+// persisted, logged or sent outside the host app.
 export type PdfWorkspaceDocumentHistorySnapshot = {
   activePageIndex: number;
   annotations: PdfAnnotation[];
@@ -124,6 +125,11 @@ export type PdfWorkspaceDocumentHistorySnapshot = {
   viewPosition?: PdfWorkspaceViewPosition;
 };
 
+export type PdfWorkspaceCloseRequest = {
+  fileName: string;
+  hasUnsavedChanges: boolean;
+};
+
 export type PdfWorkspaceHistoryEntry =
   | {
       annotations: PdfAnnotation[];
@@ -134,7 +140,9 @@ export type PdfWorkspaceHistoryEntry =
       snapshot: PdfWorkspaceDocumentHistorySnapshot;
     };
 
-export type PdfWorkspaceSession = {
+// In-memory tab offload only. This contains full PDF bytes, annotation state and
+// host save targets, so it is intentionally not suitable for browser storage.
+export type PdfWorkspaceTabCacheSession = {
   activePageIndex: number;
   activeToolKey: string;
   annotations: PdfAnnotation[];
@@ -178,12 +186,14 @@ export type PdfWorkspaceViewPosition = {
 };
 
 export type PdfWorkspaceHandle = {
+  // Captures a sensitive in-memory session for tab offloading. Hosts should keep
+  // this short-lived and private, then discard it when the tab is closed.
+  captureSessionForTabCache: () => PdfWorkspaceTabCacheSession | null;
   downloadCopy: () => Promise<void>;
   print: () => Promise<void>;
   releaseRenderResources: () => Promise<void>;
   save: () => Promise<boolean>;
   saveAs: (suggestedName?: string) => Promise<boolean>;
-  snapshot: () => PdfWorkspaceSession | null;
 };
 
 type PendingExternalLink = {
@@ -207,11 +217,11 @@ export type PdfWorkspaceProps = {
   allowImageAnnotations?: boolean;
   className?: string;
   confirmDiscardChanges?: (
-    session: PdfWorkspaceSession
+    request: PdfWorkspaceCloseRequest
   ) => boolean | Promise<boolean>;
   enableGlobalShortcuts?: boolean;
   enableWheelZoom?: boolean;
-  initialSession?: PdfWorkspaceSession | null;
+  initialSession?: PdfWorkspaceTabCacheSession | null;
   manageDocumentTitle?: boolean;
   onClose: () => void;
   onDirtyChange?: (hasUnsavedChanges: boolean) => void;
@@ -222,7 +232,6 @@ export type PdfWorkspaceProps = {
   pickImageFile?: PdfImageFilePicker;
   printTarget?: PdfPrintTarget | null;
   readOnlyMessage?: string;
-  onSessionChange?: (session: PdfWorkspaceSession) => void;
   showCloseButton?: boolean;
   source: PdfWorkspaceSource;
   style?: CSSProperties;
@@ -249,7 +258,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       pickImageFile,
       printTarget = null,
       readOnlyMessage,
-      onSessionChange,
       showCloseButton = true,
       source,
       style,
@@ -362,7 +370,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     () => annotations.filter(hasAnnotationContent),
     [annotations]
   );
-  const deferredPersistedAnnotations = useDeferredValue(persistedAnnotations);
   const annotationsByPage = useMemo(
     () =>
       groupAnnotationsByPageStable(
@@ -372,8 +379,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     [annotations]
   );
   const currentWorkSignature = useMemo(
-    () => createWorkSignature(pdfFingerprint, deferredPersistedAnnotations),
-    [deferredPersistedAnnotations, pdfFingerprint]
+    () => createWorkSignature(pdfFingerprint, persistedAnnotations),
+    [persistedAnnotations, pdfFingerprint]
   );
   const [cleanWorkSignature, setCleanWorkSignature] = useState('');
   const hasUnsavedChanges =
@@ -481,7 +488,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     afterInitialVisualReadyRef.current.push(callback);
   }
 
-  function createWorkspaceSession(): PdfWorkspaceSession | null {
+  function createWorkspaceSession(): PdfWorkspaceTabCacheSession | null {
     if (!pdfBytes) {
       return null;
     }
@@ -583,12 +590,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   useImperativeHandle(
     ref,
     () => ({
+      captureSessionForTabCache: createWorkspaceSession,
       downloadCopy: handleDownload,
       print: handlePrint,
       releaseRenderResources,
       save: handleSave,
-      saveAs: saveAsDocument,
-      snapshot: createWorkspaceSession
+      saveAs: saveAsDocument
     }),
     [
       activePageIndex,
@@ -629,40 +636,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     },
     [onBusyChange]
   );
-
-  useEffect(() => {
-    if (!onSessionChange) {
-      return;
-    }
-
-    const session = createWorkspaceSession();
-    if (session) {
-      onSessionChange(session);
-    }
-  }, [
-    activePageIndex,
-    activeToolKey,
-    annotations,
-    cleanWorkSignature,
-    editingEnabled,
-    fileName,
-    fileKeyRef.current,
-    hasUnsavedChanges,
-    onSessionChange,
-    pdfBytes,
-    pdfFingerprint,
-    readOnlyReason,
-    redoStack,
-    scale,
-    showAnnotations,
-    sidebarOpen,
-    sidebarWidth,
-    tool,
-    toolPresets,
-    toolSettings,
-    trustedExternalLinkKeys,
-    undoStack
-  ]);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -1691,10 +1664,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return true;
     }
 
-    const session = createWorkspaceSession();
-    if (confirmDiscardChanges && session) {
+    if (confirmDiscardChanges) {
       try {
-        return await confirmDiscardChanges(session);
+        return await confirmDiscardChanges({
+          fileName,
+          hasUnsavedChanges
+        });
       } catch (error) {
         console.error(error);
         return false;
@@ -1790,7 +1765,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function restoreWorkspaceSession(session: PdfWorkspaceSession) {
+  async function restoreWorkspaceSession(session: PdfWorkspaceTabCacheSession) {
     await loadPdfBytes(session.pdfBytes, session.fileName, {
       activePage: session.viewPosition?.pageIndex ?? session.activePageIndex,
       clearWorkingAnnotations: false,
@@ -1869,7 +1844,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       activePage?: number;
       clearWorkingAnnotations?: boolean;
       initialAnnotations?: PdfAnnotation[];
-      restoredSession?: PdfWorkspaceSession | null;
+      restoredSession?: PdfWorkspaceTabCacheSession | null;
       downloadTarget?: PdfDownloadTarget | null;
       fileKey?: string;
       saveAsTarget?: PdfSaveAsTarget | null;
@@ -2938,7 +2913,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     return showAnnotations
       ? currentPdfOutputBytes()
-      : writePdfAnnotations(pdfBytes, []);
+      : writePdfAnnotations(pdfBytes, [], {
+          removeUnmatchedSupportedAnnotations: true
+        });
   }
 
   function handleAddAnnotation(annotation: PdfAnnotation) {

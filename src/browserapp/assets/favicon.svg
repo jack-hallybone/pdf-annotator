@@ -1,4 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <style>
+    path[stroke="#171C1C"] { stroke: #171C1C; }
+    path[fill="#FFFE4E"] { fill: #FFFE4E; }
+    @media (prefers-color-scheme: dark) {
+      path[stroke="#171C1C"] { stroke: #F3F3F3; }
+      path[fill="#FFFE4E"] { fill: #F0822B; }
+    }
+  </style>
   <!--
     Highlighter icon from Lucide.
     ISC License. Copyright (c) 2026 Lucide Icons and Contributors.

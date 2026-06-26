@@ -42,7 +42,7 @@ import type {
   PdfAnnotation,
   PdfWorkspaceHandle,
   PdfWorkspaceProps,
-  PdfWorkspaceSession,
+  PdfWorkspaceTabCacheSession,
   PdfWorkspaceSourceInput,
   PdfWorkspaceSource
 } from '../annotator';
@@ -54,7 +54,6 @@ import type { PdfTemplateKind } from '../pdfTemplates';
 import { warmPdfRuntimeCaches } from '../pdfRuntime';
 import { appThemeStyle } from '../theme';
 import type { AppTheme } from '../theme';
-import titleImageUrl from './assets/title.svg?url';
 
 export type TabbedPdfTemplateAction = {
   kind: PdfTemplateKind;
@@ -92,7 +91,7 @@ type TabbedPdfDocument = {
   id: string;
   readOnly?: boolean;
   readOnlyMessage?: string;
-  session: PdfWorkspaceSession | null;
+  session: PdfWorkspaceTabCacheSession | null;
   source: PdfWorkspaceSource;
   title: string;
 };
@@ -115,7 +114,7 @@ type CloseDocumentsDecision = 'cancel' | 'discard' | 'save';
 
 type SessionUpdate = {
   documentId: string;
-  session: PdfWorkspaceSession;
+  session: PdfWorkspaceTabCacheSession;
 };
 
 type TabContextMenuState = {
@@ -564,7 +563,8 @@ export const TabbedPdfShell = forwardRef<
   function captureMountedSessions(documentIds = visibleDocumentIds()) {
     const updates: SessionUpdate[] = [];
     for (const documentId of new Set(documentIds)) {
-      const session = workspaceRefs.current.get(documentId)?.snapshot();
+      const session =
+        workspaceRefs.current.get(documentId)?.captureSessionForTabCache();
       if (session) {
         updates.push({ documentId, session });
       }
@@ -769,7 +769,8 @@ export const TabbedPdfShell = forwardRef<
       return false;
     }
 
-    const session = workspaceRefs.current.get(documentId)?.snapshot();
+    const session =
+      workspaceRefs.current.get(documentId)?.captureSessionForTabCache();
     const currentDocuments = documentsRef.current;
     const documentIndex = currentDocuments.findIndex(
       (item) => item.id === documentId
@@ -1728,7 +1729,7 @@ export const TabbedPdfShell = forwardRef<
             }}
           />
         ) : (
-          renderHome?.(homeProps) ?? <DefaultHomePanel {...homeProps} />
+          renderHome?.(homeProps) ?? null
         )}
       </section>
 
@@ -1951,59 +1952,6 @@ function CornellTemplateIcon({ size }: { size: number }) {
   );
 }
 
-function DefaultHomePanel({
-  createTemplateDocument,
-  dragActive,
-  openPdfDocuments,
-  templateActions
-}: TabbedPdfHomeRenderProps) {
-  return (
-    <div className="tabbedapp-home-panel">
-      <section className="tabbedapp-home-card" aria-label="PDF Annotator home">
-        <h1 className="tabbedapp-home-title">
-          <img
-            alt="PDF Annotator"
-            className="tabbedapp-home-title-image"
-            src={titleImageUrl}
-          />
-        </h1>
-        <div className="tabbedapp-home-action-frame">
-          {dragActive ? (
-            <div aria-live="polite" className="tabbedapp-home-drop-message">
-              <FolderOpen size={22} />
-              <span>Drop PDFs to open</span>
-            </div>
-          ) : (
-            <div className="tabbedapp-home-action-stack">
-              <button
-                className="tabbedapp-home-open-button"
-                onClick={() => void openPdfDocuments()}
-                type="button"
-              >
-                <FolderOpen size={22} />
-                Open PDFs
-              </button>
-              <div className="tabbedapp-home-template-grid">
-                {templateActions.map(({ kind, label, renderIcon }) => (
-                  <button
-                    className="tabbedapp-home-template-button"
-                    key={kind}
-                    onClick={() => void createTemplateDocument(kind)}
-                    type="button"
-                  >
-                    {renderIcon(18)}
-                    <span>{label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function CloseDocumentsDialog({
   onCancel,
   onDiscard,
@@ -2145,7 +2093,7 @@ function DocumentTabContent({
 
 function applySessionToDocument(
   document: TabbedPdfDocument,
-  session: PdfWorkspaceSession
+  session: PdfWorkspaceTabCacheSession
 ): TabbedPdfDocument {
   return {
     ...document,

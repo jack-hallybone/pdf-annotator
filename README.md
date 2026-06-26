@@ -1,4 +1,4 @@
-<img src="./src/tabbedapp/assets/title.svg" alt="PDF Annotator" width="400">
+<img src="./src/browserapp/assets/title.svg" alt="PDF Annotator" width="400">
 
 A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib and [Lucide icons](https://lucide.dev/).
 
@@ -14,7 +14,7 @@ It also supports page add/delete/rotate/merge, blank/lined/Cornell templates, pr
 
 ## Privacy
 
-The app is client-side. This project does not upload PDFs, filenames, annotations or passwords. Browser file handles are limited to user-selected files and kept in memory for the current session. Writes are serialised across app windows, checked for external changes and verified byte-for-byte after saving. PDF scripting and XFA are disabled, the offline cache contains only static app assets, and external PDF links are confirmed before opening.
+The app is client-side. This project does not upload PDFs, filenames, annotations or passwords. Browser file handles are limited to user-selected files and kept in memory for the current session. Saves use the browser File System Access write stream, are serialised across app windows, checked for external changes and verified byte-for-byte after saving. PDF scripting and XFA are disabled, the offline cache contains only static app assets, and external PDF links are confirmed before opening.
 
 ## Development
 
@@ -33,13 +33,17 @@ Dependency-derived renderer assets are staged under the ignored `.generated` dir
 
 The production browser build is an installable PWA with offline app assets. Installed Chrome and Edge desktop apps can register as a PDF file handler: opening a PDF launches the app or adds it to the existing window as a new internal tab. Other browsers retain the normal Open and drag-and-drop flows. User PDF contents are never placed in the offline cache.
 
+The service worker is generated at build time as `out/renderer/sw.js` by `scripts/generate-service-worker.mjs`; it is not kept as a source file.
+
+SVG favicons adapt to light/dark mode. Installed PWA and Apple touch icons are solid-background PNGs because desktop and mobile launchers do not reliably support colour-scheme-specific app icons.
+
 ## Project Layers
 
 - `src/annotator`: reusable single-PDF workspace component.
 - `src/tabbedapp`: reusable multi-PDF tab shell.
 - `src/browserapp`: browser/GitHub Pages host wiring.
 
-The reusable layers expose capabilities upward. A button appears only when the host supplies the matching callback or target, for example `printTarget`, `pickMergePdfFile`, `pickImageFile`, `saveAsTarget` or `downloadTarget`.
+The reusable layers expose capabilities upward. `PdfWorkspace` owns PDF rendering, annotation editing and PDF mutation. `TabbedPdfShell` owns tab lifecycle and passes host capabilities through. `browserapp` owns browser/PWA file access. A button appears only when the host supplies the matching callback or target, for example `printTarget`, `pickMergePdfFile`, `pickImageFile`, `saveAsTarget` or `downloadTarget`.
 
 ## `PdfWorkspace`
 
@@ -67,7 +71,7 @@ Required props:
 
 Useful optional props:
 
-- `confirmDiscardChanges`, `initialSession`, `onSessionChange`
+- `confirmDiscardChanges`, `initialSession`
 - `onOpenExternalLink`
 - `pickImageFile`, `pickMergePdfFile`, `printTarget`
 - `allowEditing`, `readOnlyMessage`, `allowImageAnnotations`, `showCloseButton`
@@ -75,7 +79,9 @@ Useful optional props:
 
 Save and download capabilities live on `source`: `saveTarget`, `saveAsTarget`, `downloadTarget`.
 
-The ref exposes `save()`, `saveAs()`, `downloadCopy()`, `print()`, `snapshot()` and `releaseRenderResources()`.
+The ref exposes `save()`, `saveAs()`, `downloadCopy()`, `print()`, `releaseRenderResources()` and `captureSessionForTabCache()`.
+
+`captureSessionForTabCache()` is for short-lived in-memory tab offloading only. It contains full PDF bytes and annotation state, so host apps should not log it, send it over a network, or persist it to browser storage.
 
 ## `TabbedPdfShell`
 

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { TabbedPdfShell } from '../tabbedapp';
 import type {
   TabbedPdfDocumentSummary,
   TabbedPdfShellHandle
 } from '../tabbedapp';
+import { BrowserHome } from './BrowserHome';
 import {
   browserFileAdapter,
   browserFileHandlesToHostDocuments
@@ -12,12 +13,59 @@ import {
   registerBrowserServiceWorker,
   setPwaFileLaunchHandler
 } from './pwa';
+import './styles.css';
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{
+    outcome: 'accepted' | 'dismissed';
+    platform: string;
+  }>;
+};
 
 export function BrowserShell() {
   const shellRef = useRef<TabbedPdfShellHandle>(null);
   const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
+  const [installPrompt, setInstallPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [installedAsApp, setInstalledAsApp] = useState(isPwaDisplayMode);
 
   useEffect(() => registerBrowserServiceWorker(), []);
+
+  useEffect(() => {
+    const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+    const updateInstalledState = () => setInstalledAsApp(isPwaDisplayMode());
+
+    updateInstalledState();
+    standaloneMedia.addEventListener('change', updateInstalledState);
+    return () =>
+      standaloneMedia.removeEventListener('change', updateInstalledState);
+  }, []);
+
+  useEffect(() => {
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      setInstallPrompt(event as BeforeInstallPromptEvent);
+    }
+
+    function handleAppInstalled() {
+      setInstallPrompt(null);
+      setInstalledAsApp(true);
+    }
+
+    window.addEventListener(
+      'beforeinstallprompt',
+      handleBeforeInstallPrompt
+    );
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener(
+        'beforeinstallprompt',
+        handleBeforeInstallPrompt
+      );
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
 
   useEffect(
     () =>
@@ -43,11 +91,44 @@ export function BrowserShell() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [documents]);
 
+  const installApp = useCallback(async () => {
+    const prompt = installPrompt;
+    if (!prompt) {
+      return;
+    }
+
+    setInstallPrompt(null);
+    await prompt.prompt();
+    await prompt.userChoice.catch(() => undefined);
+  }, [installPrompt]);
+
   return (
     <TabbedPdfShell
       fileAdapter={browserFileAdapter}
       onDocumentsChange={setDocuments}
       ref={shellRef}
+      renderHome={(props) => (
+        <BrowserHome
+          {...props}
+          canHandlePdfLaunches={canHandlePwaFileLaunches()}
+          installedAsApp={installedAsApp}
+          onInstall={
+            installPrompt && !installedAsApp ? installApp : undefined
+          }
+        />
+      )}
     />
   );
+}
+
+function isPwaDisplayMode() {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+    Boolean((navigator as Navigator & { standalone?: boolean }).standalone)
+  );
+}
+
+function canHandlePwaFileLaunches() {
+  return 'launchQueue' in window;
 }

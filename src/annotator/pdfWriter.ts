@@ -166,6 +166,7 @@ export async function writePdfAnnotations(
   bytes: Uint8Array,
   annotations: PdfAnnotation[],
   options: {
+    removeUnmatchedSupportedAnnotations?: boolean;
     replaceAnnotationSourceIds?: Iterable<string>;
     replacePageIndexes?: Iterable<number>;
   } = {}
@@ -177,11 +178,16 @@ export async function writePdfAnnotations(
   const replaceAnnotationSourceIds = options.replaceAnnotationSourceIds
     ? sourceIdKeySet(options.replaceAnnotationSourceIds)
     : null;
-  if (replaceAnnotationSourceIds === null || replaceAnnotationSourceIds.size > 0) {
+  if (
+    options.removeUnmatchedSupportedAnnotations ||
+    (replaceAnnotationSourceIds && replaceAnnotationSourceIds.size > 0)
+  ) {
     removeSupportedExistingAnnotations(
       pdfDoc,
       replacePageIndexes,
-      replaceAnnotationSourceIds
+      options.removeUnmatchedSupportedAnnotations
+        ? null
+        : replaceAnnotationSourceIds
     );
   }
 
@@ -1050,6 +1056,9 @@ function sourceIdKeySet(sourceIds: Iterable<string>) {
   const keys = new Set<string>();
   for (const sourceId of sourceIds) {
     for (const key of sourceIdKeys(sourceId)) {
+      if (isUnsafeFallbackSourceIdPart(key)) {
+        continue;
+      }
       keys.add(key);
     }
   }
@@ -1091,6 +1100,10 @@ function sourceIdKeys(sourceId: string): string[] {
 function isFallbackSourceIdPart(sourceId: string) {
   const normalized = sourceId.trim().toLowerCase();
   return normalized.startsWith('geom:') || normalized.startsWith('page:');
+}
+
+function isUnsafeFallbackSourceIdPart(sourceId: string) {
+  return sourceId.trim().toLowerCase().startsWith('page:');
 }
 
 function addAnnotation(page: PDFPage, object: Record<string, unknown>) {
