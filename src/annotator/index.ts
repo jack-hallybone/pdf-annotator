@@ -26,10 +26,10 @@ export type {
   PdfWorkspaceHandle,
   PdfWorkspaceHistoryEntry,
   PdfWorkspaceProps,
-  PdfWorkspaceReadOnlyReason,
   PdfWorkspaceTabCacheSession,
   PdfWorkspaceViewPosition
 } from './PdfWorkspace';
+export type { PdfWorkspaceReadOnlyReason } from './pdfProtection';
 export type {
   FreeTextAnnotation,
   ImageStampAnnotation,

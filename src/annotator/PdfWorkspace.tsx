@@ -33,6 +33,12 @@ import {
 import { annotationBounds, moveAnnotation } from './annotationGeometry';
 import { DocumentSidebar } from './components/DocumentSidebar';
 import {
+  ReadOnlyBanner,
+  ReadOnlyNotice,
+  WorkspaceNoticeStack,
+  type WorkspaceNotice
+} from './components/WorkspaceNotices';
+import {
   FloatingDocumentControls,
   FloatingHistoryControls,
   FloatingToolDock,
@@ -54,6 +60,10 @@ import {
 } from './imageImport';
 import type { PreparedImageStamp } from './imageImport';
 import { PDFJS_DOCUMENT_OPTIONS } from './pdfRender';
+import {
+  detectReadOnlyReason,
+  type PdfWorkspaceReadOnlyReason
+} from './pdfProtection';
 import type {
   PdfDownloadTarget,
   PdfExternalLinkOpener,
@@ -104,7 +114,6 @@ const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const RENDER_RESOURCE_RELEASE_DELAY_MS = 500;
 const MAX_HISTORY_ENTRIES = 20;
 const MAX_DOCUMENT_HISTORY_ENTRIES = 5;
-const PDF_PROTECTION_SCAN_BYTES = 4 * 1024 * 1024;
 const DEFAULT_WORKSPACE_CLASS = 'pdf-annotator--fullscreen';
 
 // In-memory undo/redo only. This contains full PDF bytes and must not be
@@ -200,11 +209,6 @@ type PendingExternalLink = {
   trustKey: string;
   url: string;
 };
-
-export type PdfWorkspaceReadOnlyReason =
-  | 'PDF/A compliant'
-  | 'password protected'
-  | 'signed/certified';
 
 type PasswordRequest = {
   failed: boolean;
@@ -309,6 +313,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const initialVisualReadyRef = useRef(false);
   const afterInitialVisualReadyRef = useRef<Array<() => void>>([]);
   const externalLinkOpenButtonRef = useRef<HTMLButtonElement | null>(null);
+  const noticeIdRef = useRef(0);
+  const noticeTimersRef = useRef<Map<number, number>>(new Map());
   const downloadTargetRef = useRef<PdfDownloadTarget | null>(null);
   const saveAsTargetRef = useRef<PdfSaveAsTarget | null>(null);
   const saveTargetRef = useRef<PdfSaveTarget | null>(null);
@@ -359,6 +365,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [pageMenuIndex, setPageMenuIndex] = useState<number | null>(null);
   const [pendingExternalLink, setPendingExternalLink] =
     useState<PendingExternalLink | null>(null);
+  const [workspaceNotices, setWorkspaceNotices] = useState<WorkspaceNotice[]>(
+    []
+  );
   const [trustedExternalLinkKeys, setTrustedExternalLinkKeys] = useState<
     string[]
   >([]);
@@ -626,9 +635,44 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     ]
   );
 
+  function dismissWorkspaceNotice(id: number) {
+    const timer = noticeTimersRef.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      noticeTimersRef.current.delete(id);
+    }
+    setWorkspaceNotices((current) =>
+      current.filter((notice) => notice.id !== id)
+    );
+  }
+
+  function showWorkspaceNotice(message: string, durationMs = 10000) {
+    const id = noticeIdRef.current + 1;
+    noticeIdRef.current = id;
+    setWorkspaceNotices((current) => [...current, { id, message }]);
+
+    const timer = window.setTimeout(() => {
+      noticeTimersRef.current.delete(id);
+      setWorkspaceNotices((current) =>
+        current.filter((notice) => notice.id !== id)
+      );
+    }, durationMs);
+    noticeTimersRef.current.set(id, timer);
+  }
+
   useEffect(() => {
     pdfDocRef.current = pdfDoc;
   }, [pdfDoc]);
+
+  useEffect(
+    () => () => {
+      for (const timer of noticeTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      noticeTimersRef.current.clear();
+    },
+    []
+  );
 
   useEffect(
     () => () => {
@@ -2737,6 +2781,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           }
           if (saveAsResult === 'unavailable') {
             await downloadPdfBytes(savedBytes, annotatedName(fileName));
+            showWorkspaceNotice('Failed to save. Downloaded a copy instead.');
           }
           return false;
         }
@@ -3801,13 +3846,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         </div>
       ) : null}
 
-      {initialVisualReady && readOnly && readOnlyMessage ? (
-        <ReadOnlyNotice message={readOnlyMessage} />
-      ) : initialVisualReady && readOnly && readOnlyReason ? (
-        <ReadOnlyBanner
-          onEnableEditing={handleEnableEditing}
-          reason={readOnlyReason}
-        />
+      {initialVisualReady &&
+      (workspaceNotices.length > 0 ||
+        (readOnly && (readOnlyMessage || readOnlyReason))) ? (
+        <WorkspaceNoticeStack
+          notices={workspaceNotices}
+          onDismissNotice={dismissWorkspaceNotice}
+        >
+          {readOnly && readOnlyMessage ? (
+            <ReadOnlyNotice message={readOnlyMessage} />
+          ) : readOnly && readOnlyReason ? (
+            <ReadOnlyBanner
+              onEnableEditing={handleEnableEditing}
+              reason={readOnlyReason}
+            />
+          ) : null}
+        </WorkspaceNoticeStack>
       ) : null}
 
       <section
@@ -3978,37 +4032,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 );
 
-function ReadOnlyBanner({
-  onEnableEditing,
-  reason
-}: {
-  onEnableEditing: () => void;
-  reason: PdfWorkspaceReadOnlyReason;
-}) {
-  return (
-    <div className="protected-pdf-banner ui-frame screen-only">
-      <span className="protected-pdf-banner-text">
-        This {reason} file is open as read-only to protect the original.
-      </span>
-      <button
-        className="ui-button protected-pdf-edit-button"
-        onClick={onEnableEditing}
-        type="button"
-      >
-        Enable Editing
-      </button>
-    </div>
-  );
-}
-
-function ReadOnlyNotice({ message }: { message: string }) {
-  return (
-    <div className="protected-pdf-banner ui-frame screen-only">
-      <span className="protected-pdf-banner-text">{message}</span>
-    </div>
-  );
-}
-
 function PasswordUnlockForm({
   failed,
   inputRef,
@@ -4099,133 +4122,6 @@ function ExternalLinkDialog({
       </section>
     </div>
   );
-}
-
-async function detectReadOnlyReason(
-  bytes: Uint8Array,
-  pdfDoc: PDFDocumentProxy,
-  passwordProtected: boolean
-): Promise<PdfWorkspaceReadOnlyReason | null> {
-  if (passwordProtected) {
-    return 'password protected';
-  }
-
-  if (await pdfLooksPdfA(bytes, pdfDoc)) {
-    return 'PDF/A compliant';
-  }
-
-  if (pdfLooksSignedOrCertified(bytes)) {
-    return 'signed/certified';
-  }
-
-  return null;
-}
-
-async function pdfLooksPdfA(bytes: Uint8Array, pdfDoc: PDFDocumentProxy) {
-  if (
-    bytesContainPdfMarker(bytes, 'pdfaid:part', { caseInsensitive: true }) ||
-    bytesContainPdfMarker(bytes, 'pdfaid:conformance', {
-      caseInsensitive: true
-    }) ||
-    bytesContainPdfMarker(bytes, 'GTS_PDFA', { caseInsensitive: true }) ||
-    bytesContainPdfMarker(bytes, 'PDF/A', { caseInsensitive: true })
-  ) {
-    return true;
-  }
-
-  try {
-    const metadata = await (pdfDoc as any).getMetadata?.();
-    const rawMetadata =
-      metadata?.metadata?.getRaw?.() ??
-      metadata?.metadata?.get?.('pdfaid:part') ??
-      metadata?.metadata?.get?.('pdfaid:conformance') ??
-      '';
-    return typeof rawMetadata === 'string'
-      ? /pdfaid:part|pdfaid:conformance|pdf\/a/i.test(rawMetadata)
-      : false;
-  } catch {
-    return false;
-  }
-}
-
-function pdfLooksSignedOrCertified(bytes: Uint8Array) {
-  return (
-    bytesContainPdfMarker(bytes, '/ByteRange') ||
-    bytesContainPdfMarker(bytes, '/DocMDP') ||
-    bytesContainPdfMarker(bytes, '/SigFlags') ||
-    bytesContainPdfMarker(bytes, '/Type /Sig') ||
-    bytesContainPdfMarker(bytes, '/SubFilter /adbe.pkcs7', {
-      caseInsensitive: true
-    }) ||
-    bytesContainPdfMarker(bytes, '/SubFilter /ETSI.', {
-      caseInsensitive: true
-    })
-  );
-}
-
-function bytesContainPdfMarker(
-  bytes: Uint8Array,
-  pattern: string,
-  options: { caseInsensitive?: boolean } = {}
-) {
-  for (const [start, end] of pdfMarkerScanRanges(bytes.length)) {
-    if (bytesContainAscii(bytes, pattern, options, start, end)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function pdfMarkerScanRanges(length: number): Array<[number, number]> {
-  if (length <= PDF_PROTECTION_SCAN_BYTES * 2) {
-    return [[0, length]];
-  }
-
-  return [
-    [0, PDF_PROTECTION_SCAN_BYTES],
-    [length - PDF_PROTECTION_SCAN_BYTES, length]
-  ];
-}
-
-function bytesContainAscii(
-  bytes: Uint8Array,
-  pattern: string,
-  { caseInsensitive = false }: { caseInsensitive?: boolean } = {},
-  start = 0,
-  end = bytes.length
-) {
-  const needle = Array.from(pattern, (char) => char.charCodeAt(0));
-  const safeStart = clamp(Math.floor(start), 0, bytes.length);
-  const safeEnd = clamp(Math.floor(end), safeStart, bytes.length);
-  if (needle.length === 0 || safeEnd - safeStart < needle.length) {
-    return false;
-  }
-
-  for (let index = safeStart; index <= safeEnd - needle.length; index += 1) {
-    let matched = true;
-    for (let offset = 0; offset < needle.length; offset += 1) {
-      const byte = bytes[index + offset];
-      const expected = needle[offset];
-      if (
-        byte !== expected &&
-        (!caseInsensitive ||
-          asciiLower(byte) !== asciiLower(expected))
-      ) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function asciiLower(value: number) {
-  return value >= 65 && value <= 90 ? value + 32 : value;
 }
 
 function downloadPdf(bytes: Uint8Array, name: string) {

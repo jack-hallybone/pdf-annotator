@@ -923,7 +923,11 @@ function shouldRemoveExistingAnnotation(
     return false;
   }
 
-  return popupBelongsToSupportedAnnotation(annotation, supportedAnnotationRefs);
+  return popupBelongsToSupportedAnnotation(
+    annotation,
+    supportedAnnotationRefs,
+    replaceAnnotationSourceIds === null
+  );
 }
 
 function isRemovableAnnotationSubtype(
@@ -960,11 +964,16 @@ function shouldRemoveSupportedAnnotation(
 
 function popupBelongsToSupportedAnnotation(
   annotation: PDFDict,
-  supportedAnnotationRefs: Set<string>
+  supportedAnnotationRefs: Set<string>,
+  allowSubtypeFallback = false
 ) {
   const parent = annotation.get(PDFName.of('Parent'));
   if (parent instanceof PDFRef && supportedAnnotationRefs.has(parent.toString())) {
     return true;
+  }
+
+  if (!allowSubtypeFallback) {
+    return false;
   }
 
   const parentSubtype = annotationSubtype(

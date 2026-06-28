@@ -25,6 +25,7 @@ docker compose up
 Open `http://127.0.0.1:5173/`.
 
 The Docker dev container installs dependencies only when `package.json` or `package-lock.json` changes.
+Run `docker compose exec app npm test` for the protected-file and annotation round-trip fixture tests.
 
 Generated files are kept under the ignored `out/renderer` directory.
 Dependency-derived renderer assets are staged under the ignored `.generated` directory.

@@ -81,7 +81,7 @@ export function BrowserHome({
                     Install as a{' '}
                     <a
                       href="https://en.wikipedia.org/wiki/Progressive_web_app"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       target="_blank"
                     >
                       Progressive Web App
@@ -108,7 +108,7 @@ export function BrowserHome({
         <a
           className="browserapp-home-credit"
           href="https://jack-hallybone.github.io/"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           target="_blank"
         >
           Made by Jack and Codex
