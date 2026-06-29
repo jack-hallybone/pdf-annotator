@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  fingerprintPdfBytes,
   savePdfToLocalFile,
   type LocalPdfFileHandle
 } from '../src/browserapp/localFileAccess';
@@ -45,21 +46,42 @@ test('local save reports verification failure after a corrupt write', async () =
   assert.equal(handle.abortCount, 0);
 });
 
+test('local save rejects if the target content changed before overwrite', async () => {
+  const original = new Uint8Array([1, 2, 3]);
+  const handle = newMemoryPdfHandle({ initialBytes: original });
+  const expectedFingerprint = await fingerprintPdfBytes(original);
+
+  handle.replaceBytes(new Uint8Array([1, 9, 3]));
+
+  await assert.rejects(
+    () =>
+      savePdfToLocalFile(handle, new Uint8Array([4, 5, 6]), {
+        expectedCurrentFingerprint: expectedFingerprint
+      }),
+    /changed outside/
+  );
+  assert.deepEqual(await readHandleBytes(handle), new Uint8Array([1, 9, 3]));
+  assert.equal(handle.writeCount, 0);
+});
+
 type MemoryPdfHandle = LocalPdfFileHandle & {
   abortCount: number;
+  replaceBytes: (nextBytes: Uint8Array) => void;
   writeCount: number;
 };
 
 function newMemoryPdfHandle({
   corruptAfterClose = false,
   failWrite = false,
+  initialBytes = new Uint8Array(),
   requestPermission = 'granted'
 }: {
   corruptAfterClose?: boolean;
   failWrite?: boolean;
+  initialBytes?: Uint8Array;
   requestPermission?: PermissionState;
 } = {}): MemoryPdfHandle {
-  let bytes = new Uint8Array();
+  let bytes = initialBytes;
   const handle: MemoryPdfHandle = {
     abortCount: 0,
     async createWritable() {
@@ -91,6 +113,9 @@ function newMemoryPdfHandle({
     },
     async requestPermission() {
       return requestPermission;
+    },
+    replaceBytes(nextBytes) {
+      bytes = nextBytes;
     },
     writeCount: 0
   };

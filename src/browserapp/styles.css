@@ -167,7 +167,7 @@
   align-items: center;
   color: rgb(var(--app-foreground-rgb) / 0.58);
   display: grid;
-  gap: 0.25rem;
+  gap: 1.75rem;
   justify-items: center;
 }
 

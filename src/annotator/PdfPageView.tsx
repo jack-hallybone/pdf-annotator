@@ -2824,7 +2824,7 @@ function AnnotationShape({
                       : current
                   )
                 }
-                onBlur={focused ? () => onFocusEnd(annotation.id) : undefined}
+                onBlur={editable ? () => onFocusEnd(annotation.id) : undefined}
                 onFocus={
                   focused && annotation.text.trim().length === 0
                     ? undefined
@@ -2929,7 +2929,9 @@ function AnnotationShape({
               ignoreInitialBlurMs={
                 focused && annotation.text.trim().length === 0 ? 750 : 0
               }
-              onBlur={focused ? () => onFocusEnd(annotation.id) : undefined}
+              onBlur={
+                selected || focused ? () => onFocusEnd(annotation.id) : undefined
+              }
               onFocus={
                 focused && annotation.text.trim().length === 0
                   ? undefined

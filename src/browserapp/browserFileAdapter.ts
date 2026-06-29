@@ -11,6 +11,8 @@ import { browserPrintTarget } from './browserPrintTarget';
 import {
   canPickLocalPdfFile,
   canSaveLocalPdfFileAs,
+  fingerprintPdfBytes,
+  fingerprintPdfFile,
   localPdfFilesFromDrop,
   localPdfFilesFromHandles,
   pickLocalPdfSaveFile,
@@ -100,7 +102,7 @@ function browserFilesToHostDocuments(
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
-        saveTarget: handle ? browserFileSaveTarget(handle, file) : null
+        saveTarget: handle ? createBrowserPdfSaveTarget(handle, file) : null
       },
       title: file.name
     }));
@@ -161,13 +163,16 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
 
   return {
     async saveAs(createBytes, suggestedName: string) {
+      const bytes = await createBytes();
       const handle = await pickLocalPdfSaveFile(suggestedName);
       if (!handle) {
         return null;
       }
 
-      const saveTarget = browserFileSaveTarget(handle, await handle.getFile());
-      const bytes = await createBytes();
+      const saveTarget = createBrowserPdfSaveTarget(
+        handle,
+        await handle.getFile()
+      );
       await saveTarget.save(bytes);
       return {
         bytes,
@@ -179,11 +184,16 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
   };
 }
 
-function browserFileSaveTarget(
+export function createBrowserPdfSaveTarget(
   fileHandle: LocalPdfFileHandle,
   initialFile: File
 ): PdfSaveTarget {
   let expectedVersion = pdfFileVersion(initialFile);
+  let expectedFingerprint: Promise<string> | null = null;
+  const getExpectedFingerprint = () => {
+    expectedFingerprint ??= fingerprintPdfFile(initialFile);
+    return expectedFingerprint;
+  };
   const lockName = `pdf-annotator:file-write:${fileHandle.name
     .normalize('NFC')
     .toLocaleLowerCase()}`;
@@ -198,8 +208,11 @@ function browserFileSaveTarget(
           );
         }
 
-        await savePdfToLocalFile(fileHandle, bytes);
+        await savePdfToLocalFile(fileHandle, bytes, {
+          expectedCurrentFingerprint: await getExpectedFingerprint()
+        });
         expectedVersion = pdfFileVersion(await fileHandle.getFile());
+        expectedFingerprint = fingerprintPdfBytes(bytes);
       });
     }
   };
@@ -214,7 +227,10 @@ type BrowserLockManager = {
 };
 
 function withBrowserFileLock<T>(name: string, task: () => Promise<T>) {
-  const locks = (navigator as Navigator & { locks?: BrowserLockManager }).locks;
+  const locks =
+    typeof navigator === 'undefined'
+      ? undefined
+      : (navigator as Navigator & { locks?: BrowserLockManager }).locks;
   return locks ? locks.request(name, { mode: 'exclusive' }, task) : task();
 }
 

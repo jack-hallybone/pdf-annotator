@@ -85,7 +85,6 @@ export function pdfLooksSignedOrCertified(bytes: Uint8Array) {
     bytesContainPdfMarker(bytes, '/ByteRange') ||
     bytesContainPdfMarker(bytes, '/DocMDP') ||
     bytesContainPdfMarker(bytes, '/Perms') ||
-    bytesContainPdfMarker(bytes, '/Reference') ||
     bytesContainPdfMarker(bytes, '/SigFlags') ||
     bytesContainPdfMarker(bytes, '/Type /Sig') ||
     bytesContainPdfMarker(bytes, '/SubFilter /adbe.pkcs7', {

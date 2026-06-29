@@ -1,4 +1,4 @@
-const MAX_PDF_FILE_BYTES = 512 * 1024 * 1024;
+const MAX_PDF_FILE_BYTES = 128 * 1024 * 1024;
 const PDF_HEADER_SCAN_BYTES = 1024;
 
 export async function readPdfFile(file: File) {

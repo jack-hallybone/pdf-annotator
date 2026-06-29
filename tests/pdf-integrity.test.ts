@@ -1,4 +1,4 @@
-import assert from 'node:assert/strict';
+﻿import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   detectReadOnlyReason,
@@ -9,6 +9,7 @@ import {
   mergePdfAfterPage,
   removePage,
   rotatePageClockwise,
+  UnsupportedAnnotationTextError,
   writePdfAnnotations
 } from '../src/annotator/pdfWriter';
 import type { PdfAnnotation } from '../src/annotator/types';
@@ -100,6 +101,59 @@ test('adding an app note does not remove existing third-party annotations', asyn
   ]);
 });
 
+test('text annotations refuse unsupported characters before writing output', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const text: PdfAnnotation = {
+    color: [0.263, 0.58, 0.827],
+    fontSize: 12,
+    id: 'test-unicode-text',
+    kind: 'freeText',
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 72, x2: 220, y1: 720, y2: 750 },
+    text: 'Unsupported snowman \u2603'
+  };
+
+  await assert.rejects(
+    async () =>
+      writePdfAnnotations(bytes, [text], {
+        replaceAnnotationSourceIds: [text.id],
+        replacePageIndexes: [0]
+      }),
+    (error) =>
+      error instanceof UnsupportedAnnotationTextError &&
+      error.annotationId === text.id &&
+      error.pageIndex === 0 &&
+      error.characters.includes('\u2603')
+  );
+});
+
+test('sticky notes refuse unsupported characters before writing output', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const note: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: 'test-unicode-note',
+    kind: 'stickyNote',
+    pageIndex: 0,
+    rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+    text: 'Unsupported snowman \u2603'
+  };
+
+  await assert.rejects(
+    async () =>
+      writePdfAnnotations(bytes, [note], {
+        replaceAnnotationSourceIds: [note.id],
+        replacePageIndexes: [0]
+      }),
+    (error) =>
+      error instanceof UnsupportedAnnotationTextError &&
+      error.annotationId === note.id &&
+      error.annotationKind === 'stickyNote' &&
+      error.pageIndex === 0 &&
+      error.characters.includes('\u2603')
+  );
+});
+
 test('moved annotations are written on their new page only', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const highlight: PdfAnnotation = {
@@ -148,21 +202,16 @@ test('page mutation helpers keep expected page counts and rotations', async () =
   assert.equal((await loadTestPdf(rotated)).getPage(0).getRotation().angle, 90);
 });
 
-test('print-with-hidden-annotations removes supported annotations from output copy only', async () => {
+test('print-with-hidden-annotations removes all PDF annotations from output copy only', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const before = await annotationSummary(bytes);
   const output = await writePdfAnnotations(bytes, [], {
-    removeUnmatchedSupportedAnnotations: true
+    removeAllAnnotations: true
   });
   const after = await annotationSummary(output);
 
-  assert.equal(after.bySubtype.Highlight ?? 0, 0);
-  assert.equal(after.bySubtype.Ink ?? 0, 0);
-  assert.equal(after.bySubtype.FreeText ?? 0, 0);
-  assert.equal(after.bySubtype.Text ?? 0, 0);
-  assert.equal(after.bySubtype.Line, before.bySubtype.Line);
-  assert.equal(after.bySubtype.Square, before.bySubtype.Square);
-  assert.equal(after.bySubtype.Circle, before.bySubtype.Circle);
+  assert.ok(before.total > 0);
+  assert.equal(after.total, 0);
 });
 
 function assertExistingSubtypeCountsPreserved(

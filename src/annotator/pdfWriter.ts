@@ -51,6 +51,36 @@ const pdfSaveOptions = {
 };
 const freeTextFontResourceName = 'Helvetica';
 
+export class UnsupportedAnnotationTextError extends Error {
+  annotationId: string;
+  annotationKind: PdfAnnotation['kind'];
+  characters: string[];
+  pageIndex: number;
+
+  constructor({
+    annotationId,
+    annotationKind,
+    characters,
+    pageIndex
+  }: {
+    annotationId: string;
+    annotationKind: PdfAnnotation['kind'];
+    characters: string[];
+    pageIndex: number;
+  }) {
+    const label =
+      annotationKind === 'stickyNote' ? 'note annotation' : 'text annotation';
+    super(
+      `A ${label} on page ${pageIndex + 1} contains unsupported characters (${formatUnsupportedCharacters(characters)})`
+    );
+    this.annotationId = annotationId;
+    this.annotationKind = annotationKind;
+    this.characters = characters;
+    this.name = 'UnsupportedAnnotationTextError';
+    this.pageIndex = pageIndex;
+  }
+}
+
 function loadEditablePdf(bytes: Uint8Array) {
   return PDFDocument.load(bytes, pdfLoadOptions);
 }
@@ -166,11 +196,13 @@ export async function writePdfAnnotations(
   bytes: Uint8Array,
   annotations: PdfAnnotation[],
   options: {
+    removeAllAnnotations?: boolean;
     removeUnmatchedSupportedAnnotations?: boolean;
     replaceAnnotationSourceIds?: Iterable<string>;
     replacePageIndexes?: Iterable<number>;
   } = {}
 ) {
+  assertAnnotationsTextIsSupported(annotations);
   const pdfDoc = await loadEditablePdf(bytes);
   const replacePageIndexes = options.replacePageIndexes
     ? new Set(options.replacePageIndexes)
@@ -178,7 +210,9 @@ export async function writePdfAnnotations(
   const replaceAnnotationSourceIds = options.replaceAnnotationSourceIds
     ? sourceIdKeySet(options.replaceAnnotationSourceIds)
     : null;
-  if (
+  if (options.removeAllAnnotations) {
+    removeAllExistingAnnotations(pdfDoc);
+  } else if (
     options.removeUnmatchedSupportedAnnotations ||
     (replaceAnnotationSourceIds && replaceAnnotationSourceIds.size > 0)
   ) {
@@ -555,26 +589,66 @@ function imageStampAppearance(page: PDFPage, rect: PdfRect, imageRef: PDFRef) {
 }
 
 function encodedAppearanceText(font: PDFFont, text: string) {
-  try {
-    return font.encodeText(text).toString();
-  } catch {
-    return font
-      .encodeText(
-        Array.from(text)
-          .map((character) => (fontCanEncode(font, character) ? character : '?'))
-          .join('')
-      )
-      .toString();
+  return font.encodeText(text).toString();
+}
+
+export function assertAnnotationsTextIsSupported(annotations: PdfAnnotation[]) {
+  for (const annotation of annotations) {
+    const text = annotationTextContent(annotation);
+    if (!text || text.trim().length === 0) {
+      continue;
+    }
+
+    const unsupported = unsupportedAnnotationTextCharacters(text);
+    if (unsupported.length > 0) {
+      throw new UnsupportedAnnotationTextError({
+        annotationId: annotation.id,
+        annotationKind: annotation.kind,
+        characters: unsupported,
+        pageIndex: annotation.pageIndex
+      });
+    }
   }
 }
 
-function fontCanEncode(font: PDFFont, text: string) {
-  try {
-    font.encodeText(text);
-    return true;
-  } catch {
-    return false;
+function annotationTextContent(annotation: PdfAnnotation) {
+  switch (annotation.kind) {
+    case 'freeText':
+    case 'stickyNote':
+      return annotation.text;
+    case 'textHighlight':
+    case 'draw':
+    case 'freehandHighlight':
+      return annotation.contents;
+    case 'imageStamp':
+      return '';
   }
+}
+
+function unsupportedAnnotationTextCharacters(text: string) {
+  return Array.from(
+    new Set(
+      Array.from(text).filter(
+        (character) => !isSupportedAnnotationTextCharacter(character)
+      )
+    )
+  );
+}
+
+function isSupportedAnnotationTextCharacter(character: string) {
+  if (character === '\n' || character === '\r' || character === '\t') {
+    return true;
+  }
+
+  const codePoint = character.codePointAt(0);
+  return codePoint !== undefined && codePoint >= 0x20 && codePoint <= 0x7e;
+}
+
+function formatUnsupportedCharacters(characters: string[]) {
+  const visibleCharacters = characters.slice(0, 5).map((character) =>
+    JSON.stringify(character)
+  );
+  return `${visibleCharacters.join(', ')}${characters.length > 5 ? ', ...' : ''}`;
 }
 
 function filledRectOperators(rect: PdfRect, offsetX: number, offsetY: number) {
@@ -889,6 +963,12 @@ function removeSupportedExistingAnnotations(
         annots.remove(index);
       }
     }
+  }
+}
+
+function removeAllExistingAnnotations(pdfDoc: PDFDocument) {
+  for (const page of pdfDoc.getPages()) {
+    page.node.delete(PDFName.of('Annots'));
   }
 }
 

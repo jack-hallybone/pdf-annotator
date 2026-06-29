@@ -139,9 +139,19 @@ export async function localPdfFilesFromDrop(dataTransfer: DataTransfer) {
 
 export async function savePdfToLocalFile(
   handle: LocalPdfFileHandle,
-  bytes: Uint8Array
+  bytes: Uint8Array,
+  options: { expectedCurrentFingerprint?: string | null } = {}
 ) {
   await requestReadWritePermission(handle);
+
+  if (options.expectedCurrentFingerprint) {
+    const currentFingerprint = await fingerprintPdfFile(await handle.getFile());
+    if (currentFingerprint !== options.expectedCurrentFingerprint) {
+      throw new Error(
+        'The PDF changed outside this window. Use Save As to avoid overwriting newer changes.'
+      );
+    }
+  }
 
   const writable = await createWritable(handle);
   let closed = false;
@@ -156,6 +166,20 @@ export async function savePdfToLocalFile(
     }
     throw error;
   }
+}
+
+export async function fingerprintPdfFile(file: File) {
+  return fingerprintPdfBytes(new Uint8Array(await file.arrayBuffer()));
+}
+
+export async function fingerprintPdfBytes(bytes: Uint8Array) {
+  const subtle = globalThis.crypto?.subtle;
+  if (subtle) {
+    const digest = await subtle.digest('SHA-256', arrayBufferForBytes(bytes));
+    return hexBytes(new Uint8Array(digest));
+  }
+
+  return fullByteHash(bytes);
 }
 
 export async function pickLocalPdfSaveFile(suggestedName: string) {
@@ -318,6 +342,33 @@ function pdfBlob(bytes: Uint8Array) {
   return new Blob([uint8ArrayToArrayBuffer(bytes)], {
     type: 'application/pdf'
   });
+}
+
+function arrayBufferForBytes(bytes: Uint8Array): ArrayBuffer {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
+    return bytes.buffer;
+  }
+
+  return bytes.slice().buffer;
+}
+
+function hexBytes(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  );
+}
+
+function fullByteHash(bytes: Uint8Array) {
+  let hash = 2166136261;
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 16777619);
+  }
+  return `fnv1a:${bytes.byteLength}:${(hash >>> 0).toString(16)}`;
 }
 
 function isPickerAbort(error: unknown) {
