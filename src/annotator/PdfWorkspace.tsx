@@ -2839,7 +2839,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         }
       }
 
-      const saveAsResult = await savePdfAs(currentPdfOutputBytes, fileName);
+      const saveAsResult = await saveCurrentPdfAs(fileName);
       if (saveAsResult === 'saved') {
         return true;
       }
@@ -2871,10 +2871,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     try {
-      const saveAsResult = await savePdfAs(
-        currentPdfOutputBytes,
-        suggestedName
-      );
+      const saveAsResult = await saveCurrentPdfAs(suggestedName);
       if (saveAsResult === 'saved') {
         return true;
       }
@@ -2889,6 +2886,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     } finally {
       finishBusyOperation();
     }
+  }
+
+  async function saveCurrentPdfAs(suggestedName = fileName) {
+    validateCurrentPdfOutput();
+    return savePdfAs(currentPdfOutputBytes, suggestedName);
   }
 
   async function savePdfAs(
@@ -2951,8 +2953,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       throw new Error('No PDF is open.');
     }
 
+    const outputAnnotations = validateCurrentPdfOutput();
+
     if (hasCurrentUnsavedChanges()) {
-      return annotatedPdfBytes();
+      return annotatedPdfBytes(outputAnnotations);
     }
 
     return cleanPdfBytesRef.current ?? pdfBytes;
@@ -2985,19 +2989,34 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     downloadPdf(bytes, suggestedName);
   }
 
-  async function annotatedPdfBytes() {
+  function currentOutputAnnotations() {
+    const annotationsForOutput = currentPersistedAnnotations();
+    return {
+      annotationsForOutput,
+      annotationsToWrite: writableAnnotations(
+        annotationsForOutput,
+        cleanAnnotationsRef.current
+      )
+    };
+  }
+
+  function validateCurrentPdfOutput() {
+    const outputAnnotations = currentOutputAnnotations();
+    assertAnnotationsTextIsSupported(outputAnnotations.annotationsToWrite);
+    return outputAnnotations;
+  }
+
+  async function annotatedPdfBytes(
+    outputAnnotations = currentOutputAnnotations()
+  ) {
     if (!pdfBytes) {
       throw new Error('No PDF is open.');
     }
 
-    const annotationsForOutput = currentPersistedAnnotations();
+    const { annotationsForOutput, annotationsToWrite } = outputAnnotations;
     const replacePageIndexes = annotationReplacementPageIndexes(
       managedAnnotationPagesRef.current,
       annotationsForOutput
-    );
-    const annotationsToWrite = writableAnnotations(
-      annotationsForOutput,
-      cleanAnnotationsRef.current
     );
     const replaceAnnotationSourceIds = annotationSourceIdsForReplacement(
       annotationsToWrite,

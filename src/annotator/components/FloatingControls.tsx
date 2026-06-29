@@ -388,7 +388,11 @@ export function FloatingDocumentControls({
     <div className={`${FLOATING_FRAME_CLASS} document-controls`}>
       <IconButton
         disabled={busy}
-        label={showAnnotations ? 'Hide annotations' : 'Show annotations'}
+        label={
+          showAnnotations
+            ? 'Hide annotations on screen and when printing'
+            : 'Show annotations on screen and when printing'
+        }
         onClick={onToggleAnnotations}
       >
         {showAnnotations ? <EyeOff size={16} /> : <Eye size={16} />}

@@ -14,6 +14,7 @@ import {
 } from '../src/annotator/pdfWriter';
 import type { PdfAnnotation } from '../src/annotator/types';
 import {
+  annotationContentsByName,
   annotationSubtypeCountsByPage,
   annotationSummary,
   loadTestPdf,
@@ -111,7 +112,7 @@ test('text annotations refuse unsupported characters before writing output', asy
     opacity: 1,
     pageIndex: 0,
     rect: { x1: 72, x2: 220, y1: 720, y2: 750 },
-    text: 'Unsupported snowman \u2603'
+    text: 'Unsupported snowman \u2603\ufe0e'
   };
 
   await assert.rejects(
@@ -124,11 +125,34 @@ test('text annotations refuse unsupported characters before writing output', asy
       error instanceof UnsupportedAnnotationTextError &&
       error.annotationId === text.id &&
       error.pageIndex === 0 &&
-      error.characters.includes('\u2603')
+      error.characters.length === 1 &&
+      error.characters.includes('\u2603\ufe0e') &&
+      error.message.includes('unsupported character')
   );
 });
 
-test('sticky notes refuse unsupported characters before writing output', async () => {
+test('text annotations preserve WinAnsi punctuation and accents', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const text: PdfAnnotation = {
+    color: [0.263, 0.58, 0.827],
+    fontSize: 12,
+    id: 'test-winansi-text',
+    kind: 'freeText',
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 72, x2: 280, y1: 720, y2: 750 },
+    text: 'Café “Müller” — €'
+  };
+
+  const output = await writePdfAnnotations(bytes, [text], {
+    replaceAnnotationSourceIds: [text.id],
+    replacePageIndexes: [0]
+  });
+
+  assert.equal(await annotationContentsByName(output, text.id), text.text);
+});
+
+test('sticky notes preserve unicode contents', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const note: PdfAnnotation = {
     color: [1, 0.996, 0.306],
@@ -136,22 +160,36 @@ test('sticky notes refuse unsupported characters before writing output', async (
     kind: 'stickyNote',
     pageIndex: 0,
     rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-    text: 'Unsupported snowman \u2603'
+    text: 'Unicode note: snowman \u2603 and 中'
   };
 
-  await assert.rejects(
-    async () =>
-      writePdfAnnotations(bytes, [note], {
-        replaceAnnotationSourceIds: [note.id],
-        replacePageIndexes: [0]
-      }),
-    (error) =>
-      error instanceof UnsupportedAnnotationTextError &&
-      error.annotationId === note.id &&
-      error.annotationKind === 'stickyNote' &&
-      error.pageIndex === 0 &&
-      error.characters.includes('\u2603')
-  );
+  const output = await writePdfAnnotations(bytes, [note], {
+    replaceAnnotationSourceIds: [note.id],
+    replacePageIndexes: [0]
+  });
+
+  assert.equal(await annotationContentsByName(output, note.id), note.text);
+});
+
+test('highlight copy text does not block PDF output', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const highlight: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    contents: 'Highlighted Café \u2603 中',
+    id: 'test-highlight-unicode-copy-text',
+    kind: 'textHighlight',
+    opacity: 0.5,
+    pageIndex: 0,
+    quadPoints: [[72, 714, 120, 714, 72, 700, 120, 700]],
+    rects: [{ x1: 72, x2: 120, y1: 700, y2: 714 }]
+  };
+
+  const output = await writePdfAnnotations(bytes, [highlight], {
+    replaceAnnotationSourceIds: [highlight.id],
+    replacePageIndexes: [0]
+  });
+
+  assert.ok(output.length > 0);
 });
 
 test('moved annotations are written on their new page only', async () => {

@@ -163,12 +163,12 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
 
   return {
     async saveAs(createBytes, suggestedName: string) {
-      const bytes = await createBytes();
       const handle = await pickLocalPdfSaveFile(suggestedName);
       if (!handle) {
         return null;
       }
 
+      const bytes = await createBytes();
       const saveTarget = createBrowserPdfSaveTarget(
         handle,
         await handle.getFile()

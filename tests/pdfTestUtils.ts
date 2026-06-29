@@ -1,5 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
+import {
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFString
+} from 'pdf-lib';
 
 export const fixtureUrl = new URL('./fixtures/', import.meta.url);
 
@@ -54,6 +60,39 @@ export async function annotationSubtypeCountsByPage(bytes: Uint8Array) {
 
     return bySubtype;
   });
+}
+
+export async function annotationContentsByName(
+  bytes: Uint8Array,
+  name: string
+) {
+  const pdfDoc = await loadTestPdf(bytes);
+
+  for (const page of pdfDoc.getPages()) {
+    const annots = page.node.Annots();
+    if (!annots) {
+      continue;
+    }
+
+    for (let index = 0; index < annots.size(); index += 1) {
+      const annotation = annots.lookupMaybe(index, PDFDict);
+      if (
+        annotation
+          ?.lookupMaybe(PDFName.of('NM'), PDFString, PDFHexString)
+          ?.decodeText() !== name
+      ) {
+        continue;
+      }
+
+      return (
+        annotation
+          .lookupMaybe(PDFName.of('Contents'), PDFString, PDFHexString)
+          ?.decodeText() ?? ''
+      );
+    }
+  }
+
+  return null;
 }
 
 function annotationSubtype(annotation: PDFDict | undefined) {

@@ -50,6 +50,35 @@ const pdfSaveOptions = {
   updateFieldAppearances: false
 };
 const freeTextFontResourceName = 'Helvetica';
+const winAnsiExtraCodePoints = new Set([
+  0x0152,
+  0x0153,
+  0x0160,
+  0x0161,
+  0x0178,
+  0x017d,
+  0x017e,
+  0x0192,
+  0x02c6,
+  0x02dc,
+  0x2013,
+  0x2014,
+  0x2018,
+  0x2019,
+  0x201a,
+  0x201c,
+  0x201d,
+  0x201e,
+  0x2020,
+  0x2021,
+  0x2022,
+  0x2026,
+  0x2030,
+  0x2039,
+  0x203a,
+  0x20ac,
+  0x2122
+]);
 
 export class UnsupportedAnnotationTextError extends Error {
   annotationId: string;
@@ -71,7 +100,7 @@ export class UnsupportedAnnotationTextError extends Error {
     const label =
       annotationKind === 'stickyNote' ? 'note annotation' : 'text annotation';
     super(
-      `A ${label} on page ${pageIndex + 1} contains unsupported characters (${formatUnsupportedCharacters(characters)})`
+      `A ${label} on page ${pageIndex + 1} contains unsupported ${characters.length === 1 ? 'character' : 'characters'} (${formatUnsupportedCharacters(characters)})`
     );
     this.annotationId = annotationId;
     this.annotationKind = annotationKind;
@@ -310,7 +339,7 @@ export async function writePdfAnnotations(
         Type: 'Annot',
         Subtype: 'FreeText',
         Rect: rectToArray(rect),
-        Contents: PDFString.of(annotation.text),
+        Contents: pdfTextString(annotation.text),
         ...annotationBase(annotation.id),
         CA: pdfOpacity(annotation.opacity),
         DA: PDFString.of(
@@ -357,7 +386,7 @@ export async function writePdfAnnotations(
         Type: 'Annot',
         Subtype: 'Text',
         Rect: rectToArray(annotation.rect),
-        Contents: PDFString.of(annotation.text),
+        Contents: pdfTextString(annotation.text),
         ...annotationBase(annotation.id),
         Name: 'Note',
         Open: false,
@@ -592,14 +621,14 @@ function encodedAppearanceText(font: PDFFont, text: string) {
   return font.encodeText(text).toString();
 }
 
+function pdfTextString(text: string) {
+  const literal = PDFString.of(text);
+  return literal.decodeText() === text ? literal : PDFHexString.fromText(text);
+}
+
 export function assertAnnotationsTextIsSupported(annotations: PdfAnnotation[]) {
   for (const annotation of annotations) {
-    const text = annotationTextContent(annotation);
-    if (!text || text.trim().length === 0) {
-      continue;
-    }
-
-    const unsupported = unsupportedAnnotationTextCharacters(text);
+    const unsupported = unsupportedAnnotationTextCharacters(annotation);
     if (unsupported.length > 0) {
       throw new UnsupportedAnnotationTextError({
         annotationId: annotation.id,
@@ -611,37 +640,61 @@ export function assertAnnotationsTextIsSupported(annotations: PdfAnnotation[]) {
   }
 }
 
-function annotationTextContent(annotation: PdfAnnotation) {
-  switch (annotation.kind) {
-    case 'freeText':
-    case 'stickyNote':
-      return annotation.text;
-    case 'textHighlight':
-    case 'draw':
-    case 'freehandHighlight':
-      return annotation.contents;
-    case 'imageStamp':
-      return '';
+function unsupportedAnnotationTextCharacters(annotation: PdfAnnotation) {
+  if (annotation.kind !== 'freeText' || annotation.text.trim().length === 0) {
+    return [];
   }
-}
 
-function unsupportedAnnotationTextCharacters(text: string) {
   return Array.from(
     new Set(
-      Array.from(text).filter(
-        (character) => !isSupportedAnnotationTextCharacter(character)
+      graphemeClusters(annotation.text).filter(
+        (cluster) => !isSupportedFreeTextCluster(cluster)
       )
     )
   );
 }
 
-function isSupportedAnnotationTextCharacter(character: string) {
-  if (character === '\n' || character === '\r' || character === '\t') {
+function isSupportedFreeTextCluster(cluster: string) {
+  return Array.from(cluster).every(isSupportedFreeTextCharacter);
+}
+
+function isSupportedFreeTextCharacter(character: string) {
+  if (character === '\n' || character === '\r') {
     return true;
   }
 
   const codePoint = character.codePointAt(0);
-  return codePoint !== undefined && codePoint >= 0x20 && codePoint <= 0x7e;
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x20 && codePoint <= 0x7e) ||
+      (codePoint >= 0xa0 && codePoint <= 0xff) ||
+      winAnsiExtraCodePoints.has(codePoint))
+  );
+}
+
+function graphemeClusters(text: string) {
+  const clusters: string[] = [];
+  for (const character of Array.from(text)) {
+    if (clusters.length > 0 && isGraphemeExtension(character)) {
+      clusters[clusters.length - 1] += character;
+    } else {
+      clusters.push(character);
+    }
+  }
+  return clusters;
+}
+
+function isGraphemeExtension(character: string) {
+  const codePoint = character.codePointAt(0);
+  return (
+    codePoint !== undefined &&
+    ((codePoint >= 0x0300 && codePoint <= 0x036f) ||
+      (codePoint >= 0x1ab0 && codePoint <= 0x1aff) ||
+      (codePoint >= 0x1dc0 && codePoint <= 0x1dff) ||
+      (codePoint >= 0x20d0 && codePoint <= 0x20ff) ||
+      (codePoint >= 0xfe00 && codePoint <= 0xfe0f) ||
+      (codePoint >= 0xe0100 && codePoint <= 0xe01ef))
+  );
 }
 
 function formatUnsupportedCharacters(characters: string[]) {
