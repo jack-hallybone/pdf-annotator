@@ -8,9 +8,13 @@
 /coverage
 *.tsbuildinfo
 
-# Local files and secrets
+# Local files and secrets (except test fixture pdfs)
 *.pdf
+!tests/fixtures/test-*.pdf
+*.key
 *.pem
+*.p12
+*.pfx
 *.local
 .npmrc
 .env*
