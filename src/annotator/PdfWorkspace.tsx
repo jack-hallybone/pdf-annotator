@@ -64,6 +64,10 @@ import {
   detectReadOnlyReason,
   type PdfWorkspaceReadOnlyReason
 } from './pdfProtection';
+import {
+  canCreateOutputCopy,
+  canEditReadOnlyCopy
+} from './readOnlyPolicy';
 import type {
   PdfDownloadTarget,
   PdfExternalLinkOpener,
@@ -399,11 +403,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const hostReadOnly = !allowEditing;
   const fileReadOnly = readOnlyReason !== null && !editingEnabled;
   const readOnly = fileReadOnly || hostReadOnly;
+  const outputCopyAvailable = canCreateOutputCopy(readOnlyReason);
   const saveAvailable =
-    !hostReadOnly && Boolean(saveTargetRef.current || saveAsTargetRef.current);
-  const saveAsAvailable = !hostReadOnly && Boolean(saveAsTargetRef.current);
-  const downloadAvailable = !hostReadOnly && Boolean(downloadTargetRef.current);
-  const printAvailable = !hostReadOnly && Boolean(printTarget);
+    !hostReadOnly &&
+    outputCopyAvailable &&
+    Boolean(saveTargetRef.current || saveAsTargetRef.current);
+  const saveAsAvailable =
+    !hostReadOnly && outputCopyAvailable && Boolean(saveAsTargetRef.current);
+  const downloadAvailable =
+    !hostReadOnly && outputCopyAvailable && Boolean(downloadTargetRef.current);
+  const printAvailable =
+    !hostReadOnly && outputCopyAvailable && Boolean(printTarget);
   const mergePdfVisible = !hostReadOnly && Boolean(pickMergePdfFile);
   const imageAnnotationsVisible =
     !hostReadOnly && allowImageAnnotations && Boolean(pickImageFile);
@@ -1755,6 +1765,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       await printTarget.print(printableBytes, printableName(fileName));
     } catch (error) {
       console.error(error);
+      showWorkspaceNotice('Could not prepare this PDF for printing.');
     } finally {
       finishBusyOperation();
     }
@@ -1986,13 +1997,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         restoredSession?.fileKey ?? options.fileKey ?? null;
       downloadTargetRef.current = options.downloadTarget ?? null;
       saveAsTargetRef.current = options.saveAsTarget ?? null;
+      const nextEditingEnabled =
+        nextReadOnlyReason === 'password protected'
+          ? false
+          : restoredSession?.editingEnabled ?? false;
       const nextSaveTarget =
-        restoredSession?.readOnlyReason && restoredSession.editingEnabled
+        nextReadOnlyReason && nextEditingEnabled
           ? null
           : options.saveTarget ?? null;
       saveTargetRef.current = nextSaveTarget;
       setReadOnlyReason(nextReadOnlyReason);
-      setEditingEnabled(restoredSession?.editingEnabled ?? false);
+      setEditingEnabled(nextEditingEnabled);
       activePageIndexRef.current = activePage;
       setActivePageIndex(activePage);
 
@@ -2794,10 +2809,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       if (saveAsResult === 'unavailable') {
         const savedBytes = await currentPdfOutputBytes();
         await downloadPdfBytes(savedBytes, annotatedName(fileName));
+        showWorkspaceNotice('Could not open Save As. Downloaded a copy instead.');
       }
       return false;
     } catch (error) {
       console.error(error);
+      showWorkspaceNotice('Could not prepare this PDF for saving.');
       return false;
     } finally {
       finishBusyOperation();
@@ -2824,6 +2841,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return false;
     } catch (error) {
       console.error(error);
+      showWorkspaceNotice('Could not prepare this PDF for saving.');
       return false;
     } finally {
       finishBusyOperation();
@@ -2873,6 +2891,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       await downloadPdfBytes(savedBytes, outputName);
     } catch (error) {
       console.error(error);
+      showWorkspaceNotice('Could not download a copy of this PDF.');
     } finally {
       finishBusyOperation();
     }
@@ -3722,6 +3741,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 
   function handleEnableEditing() {
+    if (!canEditReadOnlyCopy(readOnlyReason)) {
+      return;
+    }
+
     saveTargetRef.current = null;
     setEditingEnabled(true);
     setTool('select');
@@ -3857,6 +3880,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             <ReadOnlyNotice message={readOnlyMessage} />
           ) : readOnly && readOnlyReason ? (
             <ReadOnlyBanner
+              canEditCopy={canEditReadOnlyCopy(readOnlyReason)}
               onEnableEditing={handleEnableEditing}
               reason={readOnlyReason}
             />

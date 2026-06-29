@@ -37,24 +37,30 @@ export function WorkspaceNoticeStack({
 }
 
 export function ReadOnlyBanner({
+  canEditCopy,
   onEnableEditing,
   reason
 }: {
+  canEditCopy: boolean;
   onEnableEditing: () => void;
   reason: PdfWorkspaceReadOnlyReason;
 }) {
   return (
     <div className="workspace-notice ui-frame">
       <span className="workspace-notice-text">
-        This {reason} file is open as read-only to protect the original.
+        {reason === 'password protected'
+          ? 'This password protected file is open as read-only. Editing and printing are disabled.'
+          : `This ${reason} file is open as read-only to protect the original.`}
       </span>
-      <button
-        className="ui-button protected-pdf-edit-button"
-        onClick={onEnableEditing}
-        type="button"
-      >
-        Enable Editing
-      </button>
+      {canEditCopy ? (
+        <button
+          className="ui-button protected-pdf-edit-button"
+          onClick={onEnableEditing}
+          type="button"
+        >
+          Edit a copy
+        </button>
+      ) : null}
     </div>
   );
 }
