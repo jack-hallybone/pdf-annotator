@@ -1,4 +1,5 @@
 import { Download, FolderOpen } from 'lucide-react';
+import { getBuildInfoLabel, getBuildInfoTitle } from '../buildInfo';
 import type { TabbedPdfHomeRenderProps } from '../tabbedapp';
 import titleImageUrl from './assets/title.svg?url';
 
@@ -18,6 +19,8 @@ export function BrowserHome({
   templateActions
 }: BrowserHomeProps) {
   const showInstallCard = Boolean(onInstall) || installedAsApp;
+  const buildInfoLabel = getBuildInfoLabel();
+  const buildInfoTitle = getBuildInfoTitle();
 
   return (
     <div className="browserapp-home-panel">
@@ -105,14 +108,19 @@ export function BrowserHome({
           </aside>
         ) : null}
 
-        <a
-          className="browserapp-home-credit"
-          href="https://jack-hallybone.github.io/"
-          rel="noopener noreferrer"
-          target="_blank"
-        >
-          Made by Jack and Codex
-        </a>
+        <div className="browserapp-home-meta">
+          <a
+            className="browserapp-home-credit"
+            href="https://jackhallybone.github.io/"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Made by Jack and Codex
+          </a>
+          <span className="browserapp-build-info" title={buildInfoTitle}>
+            {buildInfoLabel}
+          </span>
+        </div>
       </section>
     </div>
   );

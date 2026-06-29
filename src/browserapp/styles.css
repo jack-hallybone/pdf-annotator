@@ -163,11 +163,24 @@
   padding: 0.625rem 0.875rem;
 }
 
+.browserapp-home-meta {
+  align-items: center;
+  color: rgb(var(--app-foreground-rgb) / 0.58);
+  display: grid;
+  gap: 0.25rem;
+  justify-items: center;
+}
+
 .browserapp-home-credit {
   border-radius: 4px;
-  color: rgb(var(--app-foreground-rgb) / 0.58);
   font-size: 0.75rem;
   padding: 0.125rem 0.25rem;
+}
+
+.browserapp-build-info {
+  color: rgb(var(--app-foreground-rgb) / 0.42);
+  font-size: 0.6875rem;
+  line-height: 1.2;
 }
 
 @media (min-width: 640px) {
