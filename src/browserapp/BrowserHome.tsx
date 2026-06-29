@@ -111,7 +111,7 @@ export function BrowserHome({
         <div className="browserapp-home-meta">
           <a
             className="browserapp-home-credit"
-            href="https://jackhallybone.github.io/"
+            href="https://jack-hallybone.github.io/"
             rel="noopener noreferrer"
             target="_blank"
           >
