@@ -21,6 +21,7 @@ import { importExistingAnnotationsForPage } from './annotationImport';
 import {
   annotationFingerprint,
   annotationReplacementPageIndexes,
+  annotationSourceIdsForReplacement,
   byteFingerprint,
   createWorkSignature,
   groupAnnotationsByPage,
@@ -2781,18 +2782,20 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  function markCurrentWorkClean(cleanPdfBytes?: Uint8Array) {
-    if (cleanPdfBytes) {
-      cleanPdfBytesRef.current = cleanPdfBytes;
-    }
+  function markCurrentWorkClean(cleanPdfBytes: Uint8Array) {
+    const nextPdfFingerprint = byteFingerprint(cleanPdfBytes);
+    pdfFingerprintRef.current = nextPdfFingerprint;
+    cleanPdfBytesRef.current = cleanPdfBytes;
     cleanSignatureRefreshEnabledRef.current = true;
     cleanAnnotationsRef.current = currentPersistedAnnotations().map(
       normalizeAnnotationLayout
     );
     const nextCleanSignature = createWorkSignature(
-      pdfFingerprintRef.current,
+      nextPdfFingerprint,
       cleanAnnotationsRef.current
     );
+    setPdfBytes(cleanPdfBytes);
+    setPdfFingerprint(nextPdfFingerprint);
     setCurrentCleanWorkSignature(nextCleanSignature);
   }
 
@@ -3602,6 +3605,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     if (annotation.sourceId) {
       removedAnnotationSourceIdsRef.current.add(annotation.sourceId);
     }
+    removedAnnotationSourceIdsRef.current.add(annotation.id);
   }
 
   function updateToolSettings(update: Partial<ToolSettings>) {
@@ -4485,37 +4489,6 @@ function openExternalLinkInNewTab(url: string) {
   } catch {
     // noopener is requested in the feature string; this is a defensive fallback.
   }
-}
-
-function annotationSourceIdsForReplacement(
-  annotations: PdfAnnotation[],
-  removedSourceIds: Set<string>,
-  currentAnnotations: PdfAnnotation[],
-  allAnnotations: PdfAnnotation[] = currentAnnotations
-) {
-  const currentSourceIds = new Set(
-    currentAnnotations
-      .map((annotation) => annotation.sourceId)
-      .filter((sourceId): sourceId is string => Boolean(sourceId))
-  );
-  const sourceIds = new Set(
-    Array.from(removedSourceIds).filter(
-      (sourceId) => !currentSourceIds.has(sourceId)
-    )
-  );
-  for (const annotation of annotations) {
-    if (annotation.sourceId) {
-      sourceIds.add(annotation.sourceId);
-    } else if (annotation.kind === 'imageStamp') {
-      sourceIds.add(annotation.id);
-    }
-  }
-  for (const annotation of allAnnotations) {
-    if (annotation.sourceId && !hasAnnotationContent(annotation)) {
-      sourceIds.add(annotation.sourceId);
-    }
-  }
-  return sourceIds;
 }
 
 function annotationHistorySignature(annotations: PdfAnnotation[]) {

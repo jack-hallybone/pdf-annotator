@@ -111,6 +111,51 @@ test('adding an app note does not remove existing third-party annotations', asyn
   ]);
 });
 
+test('repeated annotation writes replace app annotations instead of duplicating them', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const before = await annotationSummary(bytes);
+  const firstNote: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: 'test-repeat-note-1',
+    kind: 'stickyNote',
+    pageIndex: 0,
+    rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+    text: 'first saved note'
+  };
+  const secondNote: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: 'test-repeat-note-2',
+    kind: 'stickyNote',
+    pageIndex: 0,
+    rect: { x1: 96, x2: 116, y1: 72, y2: 92 },
+    text: 'second saved note'
+  };
+
+  const firstOutput = await writePdfAnnotations(bytes, [firstNote], {
+    replaceAnnotationSourceIds: [firstNote.id],
+    replacePageIndexes: [0]
+  });
+  const secondOutput = await writePdfAnnotations(
+    firstOutput,
+    [firstNote, secondNote],
+    {
+      replaceAnnotationSourceIds: [firstNote.id, secondNote.id],
+      replacePageIndexes: [0]
+    }
+  );
+  const after = await annotationSummary(secondOutput);
+
+  assert.equal(after.total, before.total + 2);
+  assert.equal(
+    await annotationContentsByName(secondOutput, firstNote.id),
+    firstNote.text
+  );
+  assert.equal(
+    await annotationContentsByName(secondOutput, secondNote.id),
+    secondNote.text
+  );
+});
+
 test('text annotations refuse unsupported characters before writing output', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const text: PdfAnnotation = {

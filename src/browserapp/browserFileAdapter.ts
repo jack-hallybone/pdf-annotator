@@ -95,10 +95,8 @@ function browserFilesToHostDocuments(
   return files
     .filter(({ file }) => isPdfFile(file))
     .map(({ file, handle }, index) => ({
-      fileKey: pdfFileKey(file),
       source: {
         kind: 'loader',
-        fileKey: pdfFileKey(file),
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
@@ -176,7 +174,6 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
       );
       return {
         bytes,
-        fileKey: await pdfFileKeyForHandle(handle),
         fileName: handle.name,
         saveTarget
       };
@@ -274,21 +271,4 @@ function isPdfFile(file: File) {
     file.type === 'application/pdf' ||
     file.name.toLowerCase().endsWith('.pdf')
   );
-}
-
-function pdfFileKey(file: File) {
-  return [
-    file.webkitRelativePath || '',
-    file.name,
-    String(file.size),
-    String(file.lastModified)
-  ].join('\u001f');
-}
-
-async function pdfFileKeyForHandle(handle: LocalPdfFileHandle) {
-  try {
-    return pdfFileKey(await handle.getFile());
-  } catch {
-    return ['local-handle', handle.name].join('\u001f');
-  }
 }

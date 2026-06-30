@@ -33,6 +33,38 @@ export function annotationReplacementPageIndexes(
   return pageIndexes;
 }
 
+export function annotationSourceIdsForReplacement(
+  annotations: PdfAnnotation[],
+  removedSourceIds: Set<string>,
+  currentAnnotations: PdfAnnotation[],
+  allAnnotations: PdfAnnotation[] = currentAnnotations
+) {
+  const currentReplacementKeys = new Set(
+    currentAnnotations.flatMap(annotationReplacementKeys)
+  );
+  const sourceIds = new Set(
+    Array.from(removedSourceIds).filter(
+      (sourceId) => !currentReplacementKeys.has(sourceId)
+    )
+  );
+
+  for (const annotation of annotations) {
+    for (const key of annotationReplacementKeys(annotation)) {
+      sourceIds.add(key);
+    }
+  }
+
+  for (const annotation of allAnnotations) {
+    if (!hasAnnotationContent(annotation)) {
+      for (const key of annotationReplacementKeys(annotation)) {
+        sourceIds.add(key);
+      }
+    }
+  }
+
+  return sourceIds;
+}
+
 export function remapPageSetAfterDelete(
   pageIndexes: Set<number>,
   deletedPage: number
@@ -199,22 +231,26 @@ function stringHash(value: string) {
 }
 
 export function byteFingerprint(bytes: Uint8Array) {
-  let hash = 2166136261;
-  const step = Math.max(1, Math.floor(bytes.length / 65536));
+  let primaryHash = 2166136261;
+  let secondaryHash = 0x9e3779b9;
 
-  for (let index = 0; index < bytes.length; index += step) {
-    hash ^= bytes[index];
-    hash = Math.imul(hash, 16777619);
+  for (let index = 0; index < bytes.length; index += 1) {
+    const byte = bytes[index];
+    primaryHash ^= byte;
+    primaryHash = Math.imul(primaryHash, 16777619);
+    secondaryHash ^= byte + ((index & 0xff) << 8);
+    secondaryHash = Math.imul(secondaryHash, 16777619);
   }
 
-  for (
-    let index = Math.max(0, bytes.length - 1024);
-    index < bytes.length;
-    index += 1
-  ) {
-    hash ^= bytes[index];
-    hash = Math.imul(hash, 16777619);
-  }
+  return `${bytes.length}:${hashHex(primaryHash)}:${hashHex(secondaryHash)}`;
+}
 
-  return `${bytes.length}:${(hash >>> 0).toString(16)}`;
+function annotationReplacementKeys(annotation: PdfAnnotation) {
+  return [annotation.sourceId, annotation.id].filter(
+    (key): key is string => Boolean(key)
+  );
+}
+
+function hashHex(value: number) {
+  return (value >>> 0).toString(16).padStart(8, '0');
 }

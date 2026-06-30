@@ -70,6 +70,11 @@ const pdfPickerOptions: LocalOpenFilePickerOptions = {
   ]
 };
 
+const pdfSavePickerOptions: LocalSaveFilePickerOptions = {
+  excludeAcceptAllOption: pdfPickerOptions.excludeAcceptAllOption,
+  types: pdfPickerOptions.types
+};
+
 const imagePickerOptions: LocalOpenFilePickerOptions = {
   excludeAcceptAllOption: false,
   multiple: false,
@@ -192,7 +197,7 @@ export async function pickLocalPdfSaveFile(suggestedName: string) {
 
   try {
     return await picker({
-      ...pdfPickerOptions,
+      ...pdfSavePickerOptions,
       suggestedName
     });
   } catch (error) {
