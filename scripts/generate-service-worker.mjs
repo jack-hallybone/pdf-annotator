@@ -25,6 +25,7 @@ const assetUrls = ['./'];
 
 for (const filePath of files) {
   const relativePath = relative(outputRoot, filePath).split(sep).join('/');
+  assertPrecacheableOutput(relativePath);
   versionHash.update(relativePath);
   versionHash.update(readFileSync(filePath));
   assetUrls.push(`./${relativePath}`);
@@ -103,4 +104,59 @@ function listFiles(directory) {
     const filePath = join(directory, entry);
     return statSync(filePath).isDirectory() ? listFiles(filePath) : [filePath];
   });
+}
+
+function assertPrecacheableOutput(relativePath) {
+  const normalizedPath = relativePath.replaceAll('\\', '/');
+  if (isSuspiciousOutputFile(normalizedPath)) {
+    throw new Error(
+      `Refusing to precache suspicious build output: ${normalizedPath}`
+    );
+  }
+
+  if (isAllowedPrecacheFile(normalizedPath)) {
+    return;
+  }
+
+  throw new Error(`Unexpected build output file: ${normalizedPath}`);
+}
+
+function isSuspiciousOutputFile(relativePath) {
+  return (
+    /\.map$/i.test(relativePath) ||
+    /\.pdf$/i.test(relativePath) ||
+    /(^|\/)\.env(\.|$)/i.test(relativePath) ||
+    /(^|\/)(fixture|fixtures|test_pdfs?)(\/|$)/i.test(relativePath)
+  );
+}
+
+function isAllowedPrecacheFile(relativePath) {
+  if (
+    [
+      'apple-touch-icon.png',
+      'favicon.ico',
+      'favicon.svg',
+      'index.html',
+      'LUCIDE-LICENSE.txt',
+      'maskable-icon-192x192.png',
+      'maskable-icon-512x512.png',
+      'site.webmanifest',
+      'title.svg',
+      'web-app-manifest-192x192.png',
+      'web-app-manifest-512x512.png'
+    ].includes(relativePath)
+  ) {
+    return true;
+  }
+
+  return (
+    /^assets\/.+\.(css|js|mjs|svg)$/i.test(relativePath) ||
+    /^pdfjs\/LICENSE$/i.test(relativePath) ||
+    /^pdfjs\/cmaps\/(?:LICENSE|.+\.bcmap)$/i.test(relativePath) ||
+    /^pdfjs\/iccs\/(?:LICENSE|.+\.icc)$/i.test(relativePath) ||
+    /^pdfjs\/standard_fonts\/(?:LICENSE_[A-Z]+|.+\.(pfb|ttf))$/i.test(
+      relativePath
+    ) ||
+    /^pdfjs\/wasm\/(?:LICENSE_[A-Z0-9_]+|.+\.(js|wasm))$/i.test(relativePath)
+  );
 }

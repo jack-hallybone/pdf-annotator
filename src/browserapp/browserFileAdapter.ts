@@ -169,11 +169,11 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
       }
 
       const bytes = await createBytes();
+      await savePdfToLocalFile(handle, bytes);
       const saveTarget = createBrowserPdfSaveTarget(
         handle,
         await handle.getFile()
       );
-      await saveTarget.save(bytes);
       return {
         bytes,
         fileKey: await pdfFileKeyForHandle(handle),

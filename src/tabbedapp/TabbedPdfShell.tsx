@@ -42,7 +42,7 @@ import type {
   PdfAnnotation,
   PdfWorkspaceHandle,
   PdfWorkspaceProps,
-  PdfWorkspaceTabCacheSession,
+  SensitivePdfWorkspaceSession,
   PdfWorkspaceSourceInput,
   PdfWorkspaceSource
 } from '../annotator';
@@ -91,7 +91,7 @@ type TabbedPdfDocument = {
   id: string;
   readOnly?: boolean;
   readOnlyMessage?: string;
-  session: PdfWorkspaceTabCacheSession | null;
+  session: SensitivePdfWorkspaceSession | null;
   source: PdfWorkspaceSource;
   title: string;
 };
@@ -114,7 +114,7 @@ type CloseDocumentsDecision = 'cancel' | 'discard' | 'save';
 
 type SessionUpdate = {
   documentId: string;
-  session: PdfWorkspaceTabCacheSession;
+  session: SensitivePdfWorkspaceSession;
 };
 
 type TabContextMenuState = {
@@ -2093,7 +2093,7 @@ function DocumentTabContent({
 
 function applySessionToDocument(
   document: TabbedPdfDocument,
-  session: PdfWorkspaceTabCacheSession
+  session: SensitivePdfWorkspaceSession
 ): TabbedPdfDocument {
   return {
     ...document,

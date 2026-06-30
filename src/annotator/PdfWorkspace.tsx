@@ -55,7 +55,7 @@ import {
   UnsupportedAnnotationTextError,
   writePdfAnnotations
 } from './pdfWriter';
-import { viewportPointToPdfPoint } from './pdfGeometry';
+import { pdfRectToViewportRect, viewportPointToPdfPoint } from './pdfGeometry';
 import {
   prepareImageStampFromClipboardItems,
   prepareImageStampFromFile
@@ -157,13 +157,15 @@ export type PdfWorkspaceHistoryEntry =
       snapshot: PdfWorkspaceDocumentHistorySnapshot;
     };
 
-// In-memory tab offload only. This contains full PDF bytes, annotation state and
-// host save targets, so it is intentionally not suitable for browser storage.
-export type PdfWorkspaceTabCacheSession = {
+// Sensitive in-memory tab offload only. This contains full PDF bytes,
+// annotation state, undo/redo history and host save targets, so it must not be
+// logged, sent over a network, stored in browser storage or persisted to disk.
+export type SensitivePdfWorkspaceSession = {
   activePageIndex: number;
   activeToolKey: string;
   annotations: PdfAnnotation[];
   cleanAnnotations: PdfAnnotation[];
+  /** Full clean PDF bytes retained only for in-memory restore/save state. */
   cleanPdfBytes?: Uint8Array | null;
   cleanSignatureRefreshEnabled?: boolean;
   cleanWorkSignature: string;
@@ -173,6 +175,7 @@ export type PdfWorkspaceTabCacheSession = {
   hasUnsavedChanges: boolean;
   importedAnnotationPageIndexes: number[];
   managedAnnotationPageIndexes: number[];
+  /** Full open PDF bytes retained only for in-memory tab offloading. */
   pdfBytes: Uint8Array;
   pdfFingerprint: string;
   redoStack: PdfWorkspaceHistoryEntry[];
@@ -190,7 +193,6 @@ export type PdfWorkspaceTabCacheSession = {
   tool: Tool;
   toolPresets: ToolPresetMap;
   toolSettings: ToolSettings;
-  trustedExternalLinkKeys: string[];
   undoStack: PdfWorkspaceHistoryEntry[];
   viewPosition?: PdfWorkspaceViewPosition;
   version: 1;
@@ -205,7 +207,7 @@ export type PdfWorkspaceViewPosition = {
 export type PdfWorkspaceHandle = {
   // Captures a sensitive in-memory session for tab offloading. Hosts should keep
   // this short-lived and private, then discard it when the tab is closed.
-  captureSessionForTabCache: () => PdfWorkspaceTabCacheSession | null;
+  captureSessionForTabCache: () => SensitivePdfWorkspaceSession | null;
   downloadCopy: () => Promise<void>;
   print: () => Promise<void>;
   releaseRenderResources: () => Promise<void>;
@@ -233,7 +235,7 @@ export type PdfWorkspaceProps = {
   ) => boolean | Promise<boolean>;
   enableGlobalShortcuts?: boolean;
   enableWheelZoom?: boolean;
-  initialSession?: PdfWorkspaceTabCacheSession | null;
+  initialSession?: SensitivePdfWorkspaceSession | null;
   manageDocumentTitle?: boolean;
   onClose: () => void;
   onDirtyChange?: (hasUnsavedChanges: boolean) => void;
@@ -512,7 +514,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     afterInitialVisualReadyRef.current.push(callback);
   }
 
-  function createWorkspaceSession(): PdfWorkspaceTabCacheSession | null {
+  function createWorkspaceSession(): SensitivePdfWorkspaceSession | null {
     if (!pdfBytes) {
       return null;
     }
@@ -556,7 +558,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       tool,
       toolPresets,
       toolSettings,
-      trustedExternalLinkKeys,
       undoStack: undoStackRef.current,
       viewPosition,
       version: 1
@@ -645,7 +646,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       tool,
       toolPresets,
       toolSettings,
-      trustedExternalLinkKeys,
       undoStack
     ]
   );
@@ -1857,7 +1857,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
-  async function restoreWorkspaceSession(session: PdfWorkspaceTabCacheSession) {
+  async function restoreWorkspaceSession(session: SensitivePdfWorkspaceSession) {
     await loadPdfBytes(session.pdfBytes, session.fileName, {
       activePage: session.viewPosition?.pageIndex ?? session.activePageIndex,
       clearWorkingAnnotations: false,
@@ -1936,7 +1936,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       activePage?: number;
       clearWorkingAnnotations?: boolean;
       initialAnnotations?: PdfAnnotation[];
-      restoredSession?: PdfWorkspaceTabCacheSession | null;
+      restoredSession?: SensitivePdfWorkspaceSession | null;
       downloadTarget?: PdfDownloadTarget | null;
       fileKey?: string;
       saveAsTarget?: PdfSaveAsTarget | null;
@@ -2064,7 +2064,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         setShowAnnotations(restoredSession.showAnnotations);
         setSidebarOpen(restoredSession.sidebarOpen);
         setSidebarWidth(restoredSession.sidebarWidth);
-        setTrustedExternalLinkKeys(restoredSession.trustedExternalLinkKeys ?? []);
+        setTrustedExternalLinkKeys([]);
         cleanSignatureRefreshEnabledRef.current =
           restoredSession.cleanSignatureRefreshEnabled ?? true;
         setCurrentCleanWorkSignature(restoredSession.cleanWorkSignature);
@@ -3696,7 +3696,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         setFocusedAnnotationId(annotation.id);
       });
     }
-    void navigateToPage(annotation.pageIndex, { block: 'center' });
+    void navigateToAnnotation(annotation);
   }
 
   async function navigateToPage(
@@ -3719,6 +3719,18 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         block: options.block ?? 'start',
         destination: options.destination,
         page
+      })
+    );
+  }
+
+  async function navigateToAnnotation(annotation: PdfAnnotation) {
+    const targetPageIndex = clamp(annotation.pageIndex, 0, pages.length - 1);
+    activePageIndexRef.current = targetPageIndex;
+    setActivePageIndex(targetPageIndex);
+    const page = await ensurePageLoaded(targetPageIndex);
+    window.requestAnimationFrame(() =>
+      scrollToAnnotation(annotation, {
+        fallbackPage: page
       })
     );
   }
@@ -3945,7 +3957,69 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return;
     }
 
+    if (block === 'start') {
+      container.scrollTo({
+        behavior: 'auto',
+        top:
+          pageTopInContainer(container, pageElement) -
+          scrollContainerPaddingTop(container)
+      });
+      return;
+    }
+
     pageElement.scrollIntoView({ block });
+  }
+
+  function scrollToAnnotation(
+    annotation: PdfAnnotation,
+    { fallbackPage }: { fallbackPage: PDFPageProxy | null }
+  ) {
+    const container = scrollContainerRef.current;
+    const pageElement = container?.querySelector<HTMLElement>(
+      `[data-page-index="${annotation.pageIndex}"]`
+    );
+    if (!container || !pageElement || !fallbackPage) {
+      scrollToPage(annotation.pageIndex, {
+        block: 'center',
+        page: fallbackPage
+      });
+      return;
+    }
+
+    const viewport = fallbackPage.getViewport({ scale });
+    const annotationRect = pdfRectToViewportRect(
+      annotationBounds(annotation),
+      viewport
+    );
+    if (!Number.isFinite(annotationRect.y)) {
+      scrollToPage(annotation.pageIndex, {
+        block: 'center',
+        page: fallbackPage
+      });
+      return;
+    }
+
+    const pageTop = pageTopInContainer(container, pageElement);
+    const noticeStack = container
+      .closest('.pdf-annotator')
+      ?.querySelector<HTMLElement>('.workspace-notice-stack');
+    const noticeClearance =
+      (noticeStack?.getBoundingClientRect().height ?? 0) + 24;
+    const preferredTop =
+      pageTop +
+      annotationRect.y -
+      scrollContainerPaddingTop(container) -
+      noticeClearance;
+    const centeredTop =
+      pageTop +
+      annotationRect.y +
+      annotationRect.height / 2 -
+      container.clientHeight / 2;
+
+    container.scrollTo({
+      behavior: 'auto',
+      top: Math.max(0, Math.min(preferredTop, centeredTop))
+    });
   }
 
   function restoreCapturedViewPosition(viewPosition: PdfWorkspaceViewPosition) {

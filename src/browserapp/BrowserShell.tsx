@@ -13,6 +13,7 @@ import {
   registerBrowserServiceWorker,
   setPwaFileLaunchHandler
 } from './pwa';
+import { isBrowserAppFramed } from './frameGuard';
 import './styles.css';
 
 type BeforeInstallPromptEvent = Event & {
@@ -24,6 +25,21 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 export function BrowserShell() {
+  return isBrowserAppFramed() ? <FramedBrowserAppBlock /> : <BrowserShellInner />;
+}
+
+function FramedBrowserAppBlock() {
+  return (
+    <main className="browserapp-frame-block">
+      <section className="browserapp-frame-block-card">
+        <h1>PDF Annotator cannot run inside another page.</h1>
+        <p>Open it directly to use local PDF files safely.</p>
+      </section>
+    </main>
+  );
+}
+
+function BrowserShellInner() {
   const shellRef = useRef<TabbedPdfShellHandle>(null);
   const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
   const [installPrompt, setInstallPrompt] =

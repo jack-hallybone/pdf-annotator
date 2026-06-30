@@ -174,12 +174,14 @@ export async function fingerprintPdfFile(file: File) {
 
 export async function fingerprintPdfBytes(bytes: Uint8Array) {
   const subtle = globalThis.crypto?.subtle;
-  if (subtle) {
-    const digest = await subtle.digest('SHA-256', arrayBufferForBytes(bytes));
-    return hexBytes(new Uint8Array(digest));
+  if (!subtle) {
+    throw new Error(
+      'Secure file fingerprinting is unavailable. Use Save As to avoid overwriting the original file.'
+    );
   }
 
-  return fullByteHash(bytes);
+  const digest = await subtle.digest('SHA-256', arrayBufferForBytes(bytes));
+  return hexBytes(new Uint8Array(digest));
 }
 
 export async function pickLocalPdfSaveFile(suggestedName: string) {
@@ -360,15 +362,6 @@ function hexBytes(bytes: Uint8Array) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
     ''
   );
-}
-
-function fullByteHash(bytes: Uint8Array) {
-  let hash = 2166136261;
-  for (const byte of bytes) {
-    hash ^= byte;
-    hash = Math.imul(hash, 16777619);
-  }
-  return `fnv1a:${bytes.byteLength}:${(hash >>> 0).toString(16)}`;
 }
 
 function isPickerAbort(error: unknown) {

@@ -26,7 +26,7 @@ export type {
   PdfWorkspaceHandle,
   PdfWorkspaceHistoryEntry,
   PdfWorkspaceProps,
-  PdfWorkspaceTabCacheSession,
+  SensitivePdfWorkspaceSession,
   PdfWorkspaceViewPosition
 } from './PdfWorkspace';
 export type { PdfWorkspaceReadOnlyReason } from './pdfProtection';

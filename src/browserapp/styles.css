@@ -1,5 +1,43 @@
 @import "../theme.css";
 
+.browserapp-frame-block {
+  background: var(--app-canvas);
+  box-sizing: border-box;
+  color: var(--app-foreground);
+  display: grid;
+  min-height: 100vh;
+  padding: 1rem;
+  place-items: center;
+}
+
+.browserapp-frame-block-card {
+  background: var(--app-surface);
+  border: 1px solid rgb(var(--app-foreground-rgb) / 0.12);
+  border-radius: 6px;
+  box-shadow: 0 8px 22px rgb(var(--app-shadow-rgb) / 0.05);
+  box-sizing: border-box;
+  max-width: 32rem;
+  padding: 1.25rem;
+  text-align: center;
+}
+
+.browserapp-frame-block-card h1,
+.browserapp-frame-block-card p {
+  margin: 0;
+}
+
+.browserapp-frame-block-card h1 {
+  font-size: 1rem;
+  font-weight: 650;
+  margin-bottom: 0.5rem;
+}
+
+.browserapp-frame-block-card p {
+  color: rgb(var(--app-foreground-rgb) / 0.72);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
 .browserapp-home-panel {
   box-sizing: border-box;
   display: grid;

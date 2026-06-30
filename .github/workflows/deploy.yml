@@ -38,7 +38,7 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        run: npm run security:audit
 
       - name: Test
         run: npm test

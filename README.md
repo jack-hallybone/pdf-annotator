@@ -73,7 +73,7 @@ Required props:
 
 Useful optional props:
 
-- `confirmDiscardChanges`, `initialSession`
+- `confirmDiscardChanges`, `initialSession` (`SensitivePdfWorkspaceSession`)
 - `onOpenExternalLink`
 - `pickImageFile`, `pickMergePdfFile`, `printTarget`
 - `allowEditing`, `readOnlyMessage`, `allowImageAnnotations`, `showCloseButton`
@@ -83,7 +83,7 @@ Save and download capabilities live on `source`: `saveTarget`, `saveAsTarget`, `
 
 The ref exposes `save()`, `saveAs()`, `downloadCopy()`, `print()`, `releaseRenderResources()` and `captureSessionForTabCache()`.
 
-`captureSessionForTabCache()` is for short-lived in-memory tab offloading only. It contains full PDF bytes and annotation state, so host apps should not log it, send it over a network, or persist it to browser storage.
+`captureSessionForTabCache()` returns a `SensitivePdfWorkspaceSession` for short-lived in-memory tab offloading only. It contains full PDF bytes, annotation state, undo/redo history and save targets, so host apps must not log it, send it over a network, or persist it to browser storage.
 
 ## `TabbedPdfShell`
 

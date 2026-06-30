@@ -318,7 +318,8 @@ export async function writePdfAnnotations(
     }
 
     if (annotation.kind === 'freeText') {
-      if (annotation.text.trim().length === 0) {
+      const text = normalizedFreeText(annotation.text);
+      if (text.trim().length === 0) {
         continue;
       }
 
@@ -330,7 +331,7 @@ export async function writePdfAnnotations(
       const [r, g, b] = pdfColor(annotation.color);
       const rect = freeTextContentRect(
         annotation.rect,
-        annotation.text,
+        text,
         fontSize,
         { layoutWidth: annotation.layoutWidth }
       );
@@ -339,7 +340,7 @@ export async function writePdfAnnotations(
         Type: 'Annot',
         Subtype: 'FreeText',
         Rect: rectToArray(rect),
-        Contents: pdfTextString(annotation.text),
+        Contents: pdfTextString(text),
         ...annotationBase(annotation.id),
         CA: pdfOpacity(annotation.opacity),
         DA: PDFString.of(
@@ -354,7 +355,7 @@ export async function writePdfAnnotations(
           N: freeTextAppearance(
             page,
             rect,
-            annotation.text,
+            text,
             fontSize,
             annotation.color,
             annotation.opacity,
@@ -647,11 +648,15 @@ function unsupportedAnnotationTextCharacters(annotation: PdfAnnotation) {
 
   return Array.from(
     new Set(
-      graphemeClusters(annotation.text).filter(
+      graphemeClusters(normalizedFreeText(annotation.text)).filter(
         (cluster) => !isSupportedFreeTextCluster(cluster)
       )
     )
   );
+}
+
+function normalizedFreeText(text: string) {
+  return text.normalize('NFC');
 }
 
 function isSupportedFreeTextCluster(cluster: string) {

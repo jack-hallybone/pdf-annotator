@@ -64,6 +64,48 @@ test('local save rejects if the target content changed before overwrite', async 
   assert.equal(handle.writeCount, 0);
 });
 
+test('local overwrite fingerprinting fails closed without SHA-256', async () => {
+  const originalCrypto = globalThis.crypto;
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {}
+  });
+
+  try {
+    await assert.rejects(
+      () => fingerprintPdfBytes(new Uint8Array([1, 2, 3])),
+      /Secure file fingerprinting is unavailable/
+    );
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: originalCrypto
+    });
+  }
+});
+
+test('local save-as style write works without SHA-256 preflight', async () => {
+  const originalCrypto = globalThis.crypto;
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {}
+  });
+
+  try {
+    const handle = newMemoryPdfHandle();
+    const bytes = new Uint8Array([7, 8, 9]);
+
+    await savePdfToLocalFile(handle, bytes);
+
+    assert.deepEqual(await readHandleBytes(handle), bytes);
+  } finally {
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: originalCrypto
+    });
+  }
+});
+
 type MemoryPdfHandle = LocalPdfFileHandle & {
   abortCount: number;
   replaceBytes: (nextBytes: Uint8Array) => void;

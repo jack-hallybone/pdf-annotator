@@ -1,7 +1,6 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PDFDocument, ParseSpeeds } from 'pdf-lib';
 
-const PDF_PROTECTION_SCAN_BYTES = 4 * 1024 * 1024;
 const pdfProtectionLoadOptions = {
   ignoreEncryption: true,
   parseSpeed: ParseSpeeds.Fastest,
@@ -101,24 +100,7 @@ export function bytesContainPdfMarker(
   pattern: string,
   options: { caseInsensitive?: boolean } = {}
 ) {
-  for (const [start, end] of pdfMarkerScanRanges(bytes.length)) {
-    if (bytesContainAscii(bytes, pattern, options, start, end)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function pdfMarkerScanRanges(length: number): Array<[number, number]> {
-  if (length <= PDF_PROTECTION_SCAN_BYTES * 2) {
-    return [[0, length]];
-  }
-
-  return [
-    [0, PDF_PROTECTION_SCAN_BYTES],
-    [length - PDF_PROTECTION_SCAN_BYTES, length]
-  ];
+  return bytesContainAscii(bytes, pattern, options);
 }
 
 function bytesContainAscii(
