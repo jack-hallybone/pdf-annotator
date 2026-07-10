@@ -470,14 +470,15 @@ export const TabbedPdfShell = forwardRef<
       if (!command) {
         return;
       }
+      // Suppress the browser's native print/save even when no document is open
+      event.preventDefault();
+      event.stopImmediatePropagation();
 
       const activeDocumentId = activeDocumentIdRef.current;
       if (!activeDocumentId) {
         return;
       }
 
-      event.preventDefault();
-      event.stopImmediatePropagation();
       void runWorkspaceCommand(activeDocumentId, command);
     }
 

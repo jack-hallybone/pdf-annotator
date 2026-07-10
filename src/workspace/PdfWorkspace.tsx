@@ -3408,6 +3408,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     finishCurrentAnnotationEditWithValidation();
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
+    setActiveToolKey('select');
     try {
       const file = await pickImageFile();
       if (file) {
