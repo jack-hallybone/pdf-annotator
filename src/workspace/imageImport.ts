@@ -16,7 +16,7 @@ const MAX_IMAGE_DIMENSION = 1800;
 const MAX_IMAGE_PIXELS = 2_400_000;
 const MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024;
 const MAX_SOURCE_IMAGE_DIMENSION = 12_000;
-const MAX_SOURCE_IMAGE_PIXELS = 40_000_000;
+export const MAX_SOURCE_IMAGE_PIXELS = 40_000_000;
 const IMAGE_HEADER_SCAN_BYTES = 64 * 1024;
 const jpegStartOfFrameMarkers = new Set([
   0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce,

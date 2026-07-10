@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   canCreateOutputCopy,
   canEditReadOnlyCopy
-} from '../src/annotator/readOnlyPolicy';
+} from '../src/workspace/readOnlyPolicy';
 
 test('only non-encrypted protected PDFs can be edited as a copy', () => {
   assert.equal(canEditReadOnlyCopy('PDF/A compliant'), true);

@@ -10,6 +10,8 @@ export function safePdfFileName(name: string, fallback = 'annotated.pdf') {
 
 function cleanFileName(name: string) {
   const cleaned = name
+    // Intentionally strips ASCII control characters from filenames.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, '_')
     .replace(/\s+/g, ' ')
     .trim()

@@ -4,6 +4,7 @@ import {
   type RefObject,
   forwardRef,
   useCallback,
+  useDeferredValue,
   useEffect,
   useImperativeHandle,
   useId,
@@ -24,10 +25,12 @@ import {
   annotationSourceIdsForReplacement,
   byteFingerprint,
   createWorkSignature,
-  groupAnnotationsByPage,
+  groupAnnotationsByPageStable,
   hasAnnotationContent,
   mergeImportedAnnotations,
   normalizeAnnotationLayout,
+  remapAnnotationsAfterDelete,
+  remapAnnotationsAfterInsert,
   remapPageSetAfterDelete,
   remapPageSetAfterInsert
 } from './annotationState';
@@ -47,16 +50,30 @@ import {
 } from './components/FloatingControls';
 import { PdfPageView } from './PdfPageView';
 import {
-  addBlankPageAt,
-  addLinedPageAt,
   assertAnnotationsTextIsSupported,
-  mergePdfAfterPage,
-  removePage,
-  rotatePageClockwise,
   UnsupportedAnnotationTextError,
   writePdfAnnotations
 } from './pdfWriter';
+import {
+  addBlankPageAt,
+  addLinedPageAt,
+  applyStructuralOperation,
+  extractPagesBytes,
+  invertStructuralOperation,
+  mergePdfAfterPage,
+  removePage,
+  rotatePageClockwise,
+  type PdfStructuralOperation
+} from './pdfPageOperations';
 import { pdfRectToViewportRect, viewportPointToPdfPoint } from './pdfGeometry';
+import {
+  annotationHistoryEntry,
+  annotationHistorySignature,
+  documentHistorySnapshotByteSize,
+  normalizeHistoryStack,
+  trimHistoryStack
+} from './historyStack';
+import { markNonSerializable } from './sensitiveSession';
 import {
   prepareImageStampFromClipboardItems,
   prepareImageStampFromFile
@@ -119,13 +136,12 @@ import type { AppTheme } from '../theme';
 
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const RENDER_RESOURCE_RELEASE_DELAY_MS = 500;
-const MAX_HISTORY_ENTRIES = 20;
-const MAX_DOCUMENT_HISTORY_ENTRIES = 5;
 const MAX_DOCUMENT_HISTORY_ENTRY_BYTES = 96 * 1024 * 1024;
-const MAX_DOCUMENT_HISTORY_TOTAL_BYTES = 128 * 1024 * 1024;
 const DEFAULT_WORKSPACE_CLASS = 'pdf-annotator--fullscreen';
 
-// In-memory undo/redo only. This contains full PDF bytes and must not be
+// In-memory undo/redo only. `operation` (rather than a full copy of the
+// document's bytes) is applied to the current bytes to reach this entry's
+// state, so entries scale with edit size, not document size. Must not be
 // persisted, logged or sent outside the host app.
 export type PdfWorkspaceDocumentHistorySnapshot = {
   activePageIndex: number;
@@ -136,7 +152,7 @@ export type PdfWorkspaceDocumentHistorySnapshot = {
   cleanWorkSignature: string;
   importedAnnotationPageIndexes: number[];
   managedAnnotationPageIndexes: number[];
-  pdfBytes: Uint8Array;
+  operation: PdfStructuralOperation;
   pdfFingerprint: string;
   removedAnnotationSourceIds: string[];
   shouldImportAnnotations: boolean;
@@ -282,13 +298,31 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   ) {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const pagesLayerRef = useRef<HTMLDivElement | null>(null);
+  // Coalescing window for merging rapid discrete annotation commits (e.g.
+  // fast repeated clicks) into one undo entry - unrelated to the live-edit
+  // (drag) lifecycle tracked by liveAnnotationEditRef below.
   const lastUndoCommitTimeRef = useRef(0);
-  const liveEditActiveRef = useRef(false);
-  const finishLiveEditOnPointerUpRef = useRef(false);
-  const pendingUndoSnapshotRef = useRef<{
-    annotations: PdfAnnotation[];
-    signature: string;
-  } | null>(null);
+  // Tracks an in-progress annotation edit (a drag/resize gesture, or a
+  // multi-step programmatic edit) so it can be committed as a single undo
+  // entry instead of one per intermediate change:
+  // - idle: no edit in progress.
+  // - pending: an edit has started (a "before" snapshot is held) but no
+  //   pointer-drag lifecycle owns it - used by commitAnnotations({recordUndo:
+  //   false}) callers that finish the edit explicitly (e.g. delete/erase).
+  // - liveEdit: a pointer-drag gesture owns the edit; finishOnPointerUp
+  //   controls whether releasing the pointer should commit it.
+  const liveAnnotationEditRef = useRef<
+    | { kind: 'idle' }
+    | {
+        kind: 'pending';
+        snapshot: { annotations: PdfAnnotation[]; signature: string };
+      }
+    | {
+        kind: 'liveEdit';
+        snapshot: { annotations: PdfAnnotation[]; signature: string };
+        finishOnPointerUp: boolean;
+      }
+  >({ kind: 'idle' });
   const annotationsByPageCacheRef = useRef<Map<number, PdfAnnotation[]>>(
     new Map()
   );
@@ -299,7 +333,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const loadingPagesRef = useRef<Set<number>>(new Set());
   const pageAccessClockRef = useRef(0);
   const pageAccessOrderRef = useRef<Map<number, number>>(new Map());
+  // Pages whose annotations came from the source PDF itself (vs. drawn by the user).
   const importedAnnotationPagesRef = useRef<Set<number>>(new Set());
+  // Pages this session has taken ownership of writing annotations for.
   const managedAnnotationPagesRef = useRef<Set<number>>(new Set());
   const removedAnnotationSourceIdsRef = useRef<Set<string>>(new Set());
   const largeDocumentHistoryNoticeShownRef = useRef(false);
@@ -310,6 +346,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const pdfFingerprintRef = useRef('');
   const cleanWorkSignatureRef = useRef('');
   const cleanPdfBytesRef = useRef<Uint8Array | null>(null);
+  // Last-saved annotation state, used to detect unsaved changes and to restore on discard.
   const cleanAnnotationsRef = useRef<PdfAnnotation[]>([]);
   const cleanSignatureRefreshEnabledRef = useRef(true);
   const pendingZoomAnchorRef = useRef<{
@@ -334,6 +371,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const sourceLoadRef = useRef<string | null>(null);
   const workspaceSourceIdRef = useRef(source.sourceId);
   const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
+  const pdfBytesRef = useRef<Uint8Array | null>(null);
   const mountedRef = useRef(false);
   const unmountCleanupTimerRef = useRef<number | null>(null);
   const [pdfBytes, setPdfBytes] = useState<Uint8Array | null>(null);
@@ -345,13 +383,21 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [initialVisualReady, setInitialVisualReady] = useState(false);
   const [scale, setScale] = useState(ACTUAL_SIZE_ZOOM);
   const [activePageIndex, setActivePageIndex] = useState(0);
-  const [tool, setTool] = useState<Tool>('select');
   const [activeToolKey, setActiveToolKey] = useState('select');
+  // `tool` is fully determined by `activeToolKey` (each toolbar item maps to
+  // exactly one Tool) - derived instead of tracked as separate state so the
+  // two can't drift out of sync.
+  const tool = useMemo(
+    () => tools.find((item) => item.key === activeToolKey)?.tool ?? 'select',
+    [activeToolKey]
+  );
   const [toolSettings, setToolSettings] =
     useState<ToolSettings>(defaultToolSettings);
   const [toolPresets, setToolPresets] = useState<ToolPresetMap>(
     createDefaultToolPresets
   );
+  // Live working set of all annotations, including empty/in-progress ones (e.g. a
+  // freeText box with no text yet) that shouldn't count as real content.
   const [annotations, setAnnotations] = useState<PdfAnnotation[]>([]);
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>(
@@ -383,10 +429,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [trustedExternalLinkKeys, setTrustedExternalLinkKeys] = useState<
     string[]
   >([]);
-  const [scrollbarGutter, setScrollbarGutter] = useState({
-    block: 0,
-    inline: 0
-  });
+  const [scrollbarGutterBlock, setScrollbarGutterBlock] = useState(0);
+  const [scrollbarGutterInline, setScrollbarGutterInline] = useState(0);
+  // `annotations` filtered down to ones with actual content - what would be
+  // written to the file if saved right now.
   const persistedAnnotations = useMemo(
     () => annotations.filter(hasAnnotationContent),
     [annotations]
@@ -399,9 +445,16 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       ),
     [annotations]
   );
+  // persistedAnnotations gets a new array reference on every annotation
+  // edit, including every pointermove during a drag/resize gesture.
+  // Deferring it lets React coalesce rapid-fire drag frames instead of
+  // recomputing this signature (a full pass over every annotation) on each
+  // one - hasUnsavedChanges only needs to catch up shortly after a gesture,
+  // not track it frame-for-frame.
+  const deferredPersistedAnnotations = useDeferredValue(persistedAnnotations);
   const currentWorkSignature = useMemo(
-    () => createWorkSignature(pdfFingerprint, persistedAnnotations),
-    [persistedAnnotations, pdfFingerprint]
+    () => createWorkSignature(pdfFingerprint, deferredPersistedAnnotations),
+    [deferredPersistedAnnotations, pdfFingerprint]
   );
   const [cleanWorkSignature, setCleanWorkSignature] = useState('');
   const hasUnsavedChanges =
@@ -441,13 +494,15 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       ({
         ...appThemeStyle(theme),
         ...style,
-        '--pdfa-scrollbar-block': `${scrollbarGutter.block}px`,
-        '--pdfa-scrollbar-inline': `${scrollbarGutter.inline}px`
+        '--pdfa-scrollbar-block': `${scrollbarGutterBlock}px`,
+        '--pdfa-scrollbar-inline': `${scrollbarGutterInline}px`
       }) as CSSProperties,
-    [scrollbarGutter.block, scrollbarGutter.inline, style, theme]
+    [scrollbarGutterBlock, scrollbarGutterInline, style, theme]
   );
   activePageIndexRef.current = activePageIndex;
   annotationsRef.current = annotations;
+  pdfBytesRef.current = pdfBytes;
+  pdfDocRef.current = pdfDoc;
   cleanWorkSignatureRef.current = cleanWorkSignature;
   undoStackRef.current = undoStack;
   redoStackRef.current = redoStack;
@@ -456,7 +511,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       void importAnnotationsForLoadedPage(
         page,
         pageIndex,
-        loadGenerationRef.current
+        loadGenerationRef.current,
+        pdfBytesRef.current
       );
     },
     []
@@ -522,7 +578,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     const viewPosition = captureViewPosition();
 
-    return {
+    return markNonSerializable<SensitivePdfWorkspaceSession>({
       activePageIndex: viewPosition.pageIndex,
       activeToolKey,
       annotations,
@@ -562,7 +618,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       undoStack: undoStackRef.current,
       viewPosition,
       version: 1
-    };
+    });
   }
 
   function captureViewPosition(): PdfWorkspaceViewPosition {
@@ -691,9 +747,23 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     noticeTimersRef.current.set(id, timer);
   }
 
-  useEffect(() => {
-    pdfDocRef.current = pdfDoc;
-  }, [pdfDoc]);
+  // Some pre-existing annotation looked like one of our editable kinds but
+  // its own data failed our validation (bad image bit depth, a BBox/Rect
+  // relationship that isn't a pure translate, etc.) - not something this
+  // app produced or broke, so it's left untouched in the file, but it also
+  // can't be shown or edited. Let the user know it's there rather than
+  // letting it silently vanish from view.
+  function reportMalformedAnnotations(count: number) {
+    if (count <= 0) {
+      return;
+    }
+
+    showWorkspaceNotice(
+      count === 1
+        ? '1 annotation could not be displayed. It is preserved, untouched, in the file.'
+        : `${count} annotations could not be displayed. They are preserved, untouched, in the file.`
+    );
+  }
 
   useEffect(
     () => () => {
@@ -884,7 +954,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     const cleanup = () => {
       try {
         page.cleanup();
-      } catch (error) {
+      } catch {
         if (retries > 0) {
           window.setTimeout(
             () => schedulePdfPageCleanup(page, retries - 1),
@@ -893,7 +963,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           return;
         }
 
-        console.error(error);
+        // Internal resource bookkeeping only - nothing for the user to act on.
       }
     };
 
@@ -1016,23 +1086,43 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container || !initialVisualReady) {
-      setScrollbarGutter((current) =>
-        current.block === 0 && current.inline === 0
-          ? current
-          : { block: 0, inline: 0 }
-      );
+      setScrollbarGutterInline(0);
+      return;
+    }
+
+    // `.pdf-scroll-root` uses `scrollbar-gutter: stable`, so the vertical
+    // scrollbar's reserved width is fixed by the browser/OS for the whole
+    // session and never changes with content, zoom or sidebar width -
+    // measuring it once (rather than reactively) avoids recalculating
+    // scroll-container padding mid-scroll, which was remapping an
+    // in-progress scrollbar thumb drag and causing it to jump. A window
+    // resize listener still catches genuine environment changes (moving to
+    // a different-DPI display, browser zoom) without reacting to content.
+    const updateInline = () => {
+      setScrollbarGutterInline((current) => {
+        const next = measureScrollbarGutter(container).inline;
+        return current === next ? current : next;
+      });
+    };
+    updateInline();
+    window.addEventListener('resize', updateInline);
+    return () => window.removeEventListener('resize', updateInline);
+  }, [initialVisualReady]);
+
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || !initialVisualReady) {
+      setScrollbarGutterBlock(0);
       return;
     }
 
     let frame = 0;
     const updateScrollbarGutter = () => {
       frame = 0;
-      const next = measureScrollbarGutter(container);
-      setScrollbarGutter((current) =>
-        current.block === next.block && current.inline === next.inline
-          ? current
-          : next
-      );
+      setScrollbarGutterBlock((current) => {
+        const next = measureScrollbarGutter(container).block;
+        return current === next ? current : next;
+      });
     };
     const scheduleUpdate = () => {
       if (frame) {
@@ -1079,9 +1169,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
       if (event.key === 'Escape') {
         event.preventDefault();
-        finishCurrentAnnotationEditWithValidation();
-        setTool('select');
+        const keepSelection = finishCurrentAnnotationEditWithValidation();
         setActiveToolKey('select');
+        if (!keepSelection) {
+          setSelectedAnnotationIds([]);
+        }
         setFocusedAnnotationId(null);
         (document.activeElement as HTMLElement | null)?.blur();
         return;
@@ -1194,32 +1286,72 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     let frame = 0;
-    const updateActivePage = () => {
+    const findBestVisiblePage = (elements: Iterable<HTMLElement>) => {
       const containerRect = container.getBoundingClientRect();
       let bestPage = -1;
       let bestArea = 0;
 
-      container
-        .querySelectorAll<HTMLElement>('[data-page-index]')
-        .forEach((element) => {
-          const rect = element.getBoundingClientRect();
-          const visibleWidth = Math.max(
-            0,
-            Math.min(rect.right, containerRect.right) -
-              Math.max(rect.left, containerRect.left)
-          );
-          const visibleHeight = Math.max(
-            0,
-            Math.min(rect.bottom, containerRect.bottom) -
-              Math.max(rect.top, containerRect.top)
-          );
-          const area = visibleWidth * visibleHeight;
+      for (const element of elements) {
+        const rect = element.getBoundingClientRect();
+        const visibleWidth = Math.max(
+          0,
+          Math.min(rect.right, containerRect.right) -
+            Math.max(rect.left, containerRect.left)
+        );
+        const visibleHeight = Math.max(
+          0,
+          Math.min(rect.bottom, containerRect.bottom) -
+            Math.max(rect.top, containerRect.top)
+        );
+        const area = visibleWidth * visibleHeight;
 
-          if (area > bestArea) {
-            bestArea = area;
-            bestPage = Number(element.dataset.pageIndex);
-          }
-        });
+        if (area > bestArea) {
+          bestArea = area;
+          bestPage = Number(element.dataset.pageIndex);
+        }
+      }
+
+      return bestPage;
+    };
+
+    const updateActivePage = () => {
+      // Scrolling can only move the active page by a page or two per frame,
+      // so check a small window around it instead of every page in the
+      // document. This keeps the scroll handler's DOM/layout work constant
+      // regardless of document length, instead of scanning every page on
+      // every scroll tick.
+      const searchRadius = LAZY_PAGE_BUFFER + 2;
+      const start = Math.max(0, activePageIndexRef.current - searchRadius);
+      const end = Math.min(
+        pages.length - 1,
+        activePageIndexRef.current + searchRadius
+      );
+      const windowSelector = Array.from(
+        { length: Math.max(0, end - start + 1) },
+        (_, offset) => `[data-page-index="${start + offset}"]`
+      ).join(',');
+
+      let bestPage = windowSelector
+        ? findBestVisiblePage(
+            container.querySelectorAll<HTMLElement>(windowSelector)
+          )
+        : -1;
+
+      // A match sitting right at the edge of the search window means the
+      // true best page could lie just beyond it, so re-check against every
+      // page - same as when nothing in the window was visible at all (e.g.
+      // a large jump like clicking the scrollbar track).
+      const windowMissedEdge =
+        (bestPage === start && start > 0) ||
+        (bestPage === end && end < pages.length - 1);
+      if (bestPage < 0 || windowMissedEdge) {
+        const fullScanBest = findBestVisiblePage(
+          container.querySelectorAll<HTMLElement>('[data-page-index]')
+        );
+        if (fullScanBest >= 0) {
+          bestPage = fullScanBest;
+        }
+      }
 
       if (bestPage >= 0) {
         setActivePageIndex((current) => {
@@ -1263,8 +1395,13 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
   useEffect(() => {
     function endPointerLiveEdit() {
-      if (!finishLiveEditOnPointerUpRef.current) {
-        liveEditActiveRef.current = false;
+      const state = liveAnnotationEditRef.current;
+      if (state.kind !== 'liveEdit') {
+        return;
+      }
+
+      if (!state.finishOnPointerUp) {
+        liveAnnotationEditRef.current = { kind: 'pending', snapshot: state.snapshot };
         return;
       }
 
@@ -1302,20 +1439,19 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     if (
       options.recordUndo === false &&
-      pendingUndoSnapshotRef.current === null
+      liveAnnotationEditRef.current.kind === 'idle'
     ) {
       currentSignature ??= annotationHistorySignature(current);
-      pendingUndoSnapshotRef.current = {
-        annotations: current,
-        signature: currentSignature
+      liveAnnotationEditRef.current = {
+        kind: 'pending',
+        snapshot: { annotations: current, signature: currentSignature }
       };
     }
 
-    annotationsRef.current = next;
-    setAnnotations(next);
+    setAnnotationsState(next);
     if (
       options.recordUndo === false ||
-      pendingUndoSnapshotRef.current !== null
+      liveAnnotationEditRef.current.kind !== 'idle'
     ) {
       return;
     }
@@ -1338,33 +1474,35 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   function beginAnnotationEdit({
     finishOnPointerUp = false
   }: { finishOnPointerUp?: boolean } = {}) {
-    if (liveEditActiveRef.current) {
-      finishLiveEditOnPointerUpRef.current =
-        finishLiveEditOnPointerUpRef.current || finishOnPointerUp;
+    const state = liveAnnotationEditRef.current;
+    if (state.kind === 'liveEdit') {
+      liveAnnotationEditRef.current = {
+        ...state,
+        finishOnPointerUp: state.finishOnPointerUp || finishOnPointerUp
+      };
       return;
     }
 
-    if (!pendingUndoSnapshotRef.current) {
-      const currentAnnotations = annotationsRef.current;
-      pendingUndoSnapshotRef.current = {
-        annotations: currentAnnotations,
-        signature: annotationHistorySignature(currentAnnotations)
-      };
-    }
+    const snapshot =
+      state.kind === 'pending'
+        ? state.snapshot
+        : {
+            annotations: annotationsRef.current,
+            signature: annotationHistorySignature(annotationsRef.current)
+          };
 
-    liveEditActiveRef.current = true;
-    finishLiveEditOnPointerUpRef.current = finishOnPointerUp;
+    liveAnnotationEditRef.current = { kind: 'liveEdit', snapshot, finishOnPointerUp };
     lastUndoCommitTimeRef.current = Date.now();
   }
 
   function finishAnnotationEdit() {
-    const pendingSnapshot = pendingUndoSnapshotRef.current;
-    pendingUndoSnapshotRef.current = null;
-    liveEditActiveRef.current = false;
-    finishLiveEditOnPointerUpRef.current = false;
-    if (!pendingSnapshot) {
+    const state = liveAnnotationEditRef.current;
+    liveAnnotationEditRef.current = { kind: 'idle' };
+    if (state.kind === 'idle') {
       return;
     }
+
+    const pendingSnapshot = state.snapshot;
 
     const currentSignature = annotationHistorySignature(annotationsRef.current);
     if (currentSignature === pendingSnapshot.signature) {
@@ -1399,8 +1537,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     if (entry.kind === 'document') {
-      const redoEntry = documentHistoryEntry();
+      if (!pdfBytes) {
+        return;
+      }
+
+      const redoOperation = await invertStructuralOperation(
+        entry.snapshot.operation,
+        pdfBytes
+      );
+      const redoEntry = documentHistoryEntry(redoOperation);
       if (!redoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
+        showWorkspaceNotice('Could not undo this change.');
         return;
       }
 
@@ -1431,8 +1578,17 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     if (entry.kind === 'document') {
-      const undoEntry = documentHistoryEntry();
+      if (!pdfBytes) {
+        return;
+      }
+
+      const undoOperation = await invertStructuralOperation(
+        entry.snapshot.operation,
+        pdfBytes
+      );
+      const undoEntry = documentHistoryEntry(undoOperation);
       if (!undoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
+        showWorkspaceNotice('Could not redo this change.');
         return;
       }
 
@@ -1502,25 +1658,41 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     updateRedoStack([]);
   }
 
+  // Sole place that writes `annotations` state - annotationsRef is updated
+  // synchronously here (inside the setAnnotations updater, which React runs
+  // synchronously even though the resulting re-render is deferred) so every
+  // write site gets a live ref for free instead of having to remember to
+  // update it by hand.
+  function setAnnotationsState(
+    update: PdfAnnotation[] | ((current: PdfAnnotation[]) => PdfAnnotation[])
+  ) {
+    setAnnotations((current) => {
+      const next = typeof update === 'function' ? update(current) : update;
+      annotationsRef.current = next;
+      return next;
+    });
+  }
+
   function applyAnnotationHistory(nextAnnotations: PdfAnnotation[]) {
-    annotationsRef.current = nextAnnotations;
-    setAnnotations(nextAnnotations);
+    setAnnotationsState(nextAnnotations);
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
   }
 
   function replaceAnnotationsWithoutHistory(nextAnnotations: PdfAnnotation[]) {
-    const normalized = nextAnnotations.map(normalizeAnnotationLayout);
-    annotationsRef.current = normalized;
-    setAnnotations(normalized);
+    setAnnotationsState(nextAnnotations.map(normalizeAnnotationLayout));
   }
 
-  function documentHistoryEntry(): PdfWorkspaceHistoryEntry | null {
-    const snapshot = createDocumentHistorySnapshot();
+  function documentHistoryEntry(
+    operation: PdfStructuralOperation
+  ): PdfWorkspaceHistoryEntry | null {
+    const snapshot = createDocumentHistorySnapshot(operation);
     return snapshot ? { kind: 'document', snapshot } : null;
   }
 
-  function createDocumentHistorySnapshot(): PdfWorkspaceDocumentHistorySnapshot | null {
+  function createDocumentHistorySnapshot(
+    operation: PdfStructuralOperation
+  ): PdfWorkspaceDocumentHistorySnapshot | null {
     if (!pdfBytes) {
       return null;
     }
@@ -1538,7 +1710,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       managedAnnotationPageIndexes: Array.from(
         managedAnnotationPagesRef.current
       ),
-      pdfBytes,
+      operation,
       pdfFingerprint: pdfFingerprintRef.current,
       removedAnnotationSourceIds: Array.from(
         removedAnnotationSourceIdsRef.current
@@ -1560,7 +1732,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return null;
     }
 
-    return snapshot;
+    return markNonSerializable(snapshot);
   }
 
   function resetPdfState({
@@ -1576,9 +1748,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     pageAccessClockRef.current = 0;
     pageAccessOrderRef.current.clear();
     importedAnnotationPagesRef.current.clear();
-    liveEditActiveRef.current = false;
-    finishLiveEditOnPointerUpRef.current = false;
-    pendingUndoSnapshotRef.current = null;
+    liveAnnotationEditRef.current = { kind: 'idle' };
     structureReloadInProgressRef.current = false;
     removedAnnotationSourceIdsRef.current.clear();
     largeDocumentHistoryNoticeShownRef.current = false;
@@ -1618,10 +1788,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     if (clearAnnotations) {
-      annotationsRef.current = [];
       cleanAnnotationsRef.current = [];
       managedAnnotationPagesRef.current.clear();
-      setAnnotations([]);
+      setAnnotationsState([]);
       updateUndoStack([]);
       updateRedoStack([]);
       setCurrentCleanWorkSignature('');
@@ -1682,8 +1851,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     try {
       await (doc as { destroy?: () => Promise<void> } | null)?.destroy?.();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // Internal resource teardown only - nothing for the user to act on.
     }
   }
 
@@ -1692,8 +1861,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     loadingTaskRef.current = null;
     try {
       await loadingTask?.destroy();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // Internal resource teardown only - nothing for the user to act on.
     }
   }
 
@@ -1759,8 +1928,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           fileName,
           hasUnsavedChanges
         });
-      } catch (error) {
-        console.error(error);
+      } catch {
+        showWorkspaceNotice('Could not confirm. Nothing was closed.');
         return false;
       }
     }
@@ -1797,9 +1966,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     try {
       const printableBytes = await printablePdfBytes();
-      await printTarget.print(printableBytes, printableName(fileName));
+      await printTarget(printableBytes, printableName(fileName));
     } catch (error) {
-      console.error(error);
       handlePreparationError(error);
       showWorkspaceNotice(
         preparationErrorNotice(error, 'Could not prepare this PDF for printing.')
@@ -1853,8 +2021,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
 
       openExternalLinkInNewTab(url);
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showWorkspaceNotice('Could not open this link.');
     }
   }
 
@@ -1947,7 +2115,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   ) {
     const currentPdfDoc = pdfDoc;
     const generation = loadGenerationRef.current + 1;
-    const nextPdfFingerprint = byteFingerprint(bytes);
     const restoredSession = options.restoredSession ?? null;
     loadGenerationRef.current = generation;
     resetPdfState({
@@ -1982,6 +2149,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
 
       const loadingTask = startPdfLoading(bytes, generation);
+      // Hash bytes on the main thread while pdf.js parses in its worker,
+      // instead of paying for the hash before handing bytes to the worker
+      // at all. Not needed until well after the first page is fetched.
+      const nextPdfFingerprint = byteFingerprint(bytes);
       const loadedPdf = await loadingTask.promise;
       if (loadingTaskRef.current === loadingTask) {
         loadingTaskRef.current = null;
@@ -1991,23 +2162,24 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         return;
       }
 
-      const nextReadOnlyReason =
-        restoredSession?.readOnlyReason ??
-        (await detectReadOnlyReason(
-          bytes,
-          loadedPdf,
-          passwordProtectedLoadRef.current
-        ));
-      if (!mountedRef.current || generation !== loadGenerationRef.current) {
-        await destroyPdfDocument(loadedPdf);
-        return;
-      }
-
+      // Read-only detection (a handful of full-buffer scans plus a metadata
+      // round-trip) only gates the read-only banner/editing toggle - it
+      // doesn't need to finish before the first page can be fetched, so run
+      // both concurrently instead of blocking page 1 on it.
       const activePage = Math.min(
         options.activePage ?? 0,
         loadedPdf.numPages - 1
       );
-      const firstPage = await loadedPdf.getPage(activePage + 1);
+      const [nextReadOnlyReason, firstPage] = await Promise.all([
+        restoredSession?.readOnlyReason
+          ? Promise.resolve(restoredSession.readOnlyReason)
+          : detectReadOnlyReason(
+              bytes,
+              loadedPdf,
+              passwordProtectedLoadRef.current
+            ),
+        loadedPdf.getPage(activePage + 1)
+      ]);
       if (!mountedRef.current || generation !== loadGenerationRef.current) {
         await destroyPdfDocument(loadedPdf);
         return;
@@ -2053,7 +2225,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         cleanAnnotationsRef.current = restoredSession.cleanAnnotations.map(
           normalizeAnnotationLayout
         );
-        setTool(restoredSession.tool);
         setActiveToolKey(
           tools.some((item) => item.key === restoredSession.activeToolKey)
             ? restoredSession.activeToolKey
@@ -2072,8 +2243,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         const restoredAnnotations = restoredSession.annotations.map(
           normalizeAnnotationLayout
         );
-        annotationsRef.current = restoredAnnotations;
-        setAnnotations(restoredAnnotations);
+        setAnnotationsState(restoredAnnotations);
         setSelectedAnnotationIds([]);
         setFocusedAnnotationId(null);
         updateUndoStack(normalizeHistoryStack(restoredSession.undoStack));
@@ -2081,20 +2251,18 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       } else if (options.clearWorkingAnnotations ?? true) {
         const initialAnnotations =
           options.initialAnnotations?.map(normalizeAnnotationLayout) ?? [];
-        setTool('select');
         setActiveToolKey('select');
         cleanSignatureRefreshEnabledRef.current = true;
         cleanAnnotationsRef.current = [];
         setCurrentCleanWorkSignature(createWorkSignature(nextPdfFingerprint, []));
-        annotationsRef.current = initialAnnotations;
-        setAnnotations(initialAnnotations);
+        setAnnotationsState(initialAnnotations);
         setSelectedAnnotationIds([]);
         setFocusedAnnotationId(null);
         updateUndoStack([]);
         updateRedoStack([]);
       }
 
-      void importInitialPageAnnotations(firstPage, activePage, generation);
+      void importInitialPageAnnotations(firstPage, activePage, generation, bytes);
       const restoredViewPosition = restoredSession?.viewPosition;
       if (restoredViewPosition) {
         runAfterInitialVisualReady(() =>
@@ -2117,21 +2285,16 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             return;
           }
 
-          void loadPagesEagerly(remainingPageIndexes, loadedPdf, generation)
-            .catch((error) => {
-              if (
-                mountedRef.current &&
-                generation === loadGenerationRef.current
-              ) {
-                console.error(error);
-              }
-            });
+          // Best-effort prefetch of the rest of the document - a failure here
+          // just means those pages stay unloaded until scrolled into view,
+          // where ensurePageLoaded retries (and reports) individually.
+          void loadPagesEagerly(remainingPageIndexes, loadedPdf, generation, bytes)
+            .catch(() => undefined);
         });
         return;
       }
     } catch (error) {
       if (mountedRef.current && generation === loadGenerationRef.current) {
-        console.error(error);
         const message =
           error instanceof Error ? error.message : 'Could not load PDF.';
         setLoadError(message);
@@ -2149,7 +2312,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   ) {
     const currentPdfDoc = pdfDoc;
     const generation = loadGenerationRef.current + 1;
-    const nextPdfFingerprint = byteFingerprint(bytes);
     loadGenerationRef.current = generation;
     cleanSignatureRefreshEnabledRef.current = false;
     shouldImportAnnotationsRef.current = true;
@@ -2162,6 +2324,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     try {
       await cancelLoadingTask();
       const loadingTask = startPdfLoading(bytes, generation);
+      const nextPdfFingerprint = byteFingerprint(bytes);
       pendingPdf = await loadingTask.promise;
       const loadedPdf = pendingPdf;
       if (loadingTaskRef.current === loadingTask) {
@@ -2230,7 +2393,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       setSettingsToolKey(null);
 
       for (const { page, pageIndex } of loadedPages) {
-        void importAnnotationsForLoadedPage(page, pageIndex, generation);
+        void importAnnotationsForLoadedPage(page, pageIndex, generation, bytes);
       }
 
       scheduleAfterVisiblePaint(() => {
@@ -2251,18 +2414,28 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             return;
           }
 
-          void loadPagesEagerly(remainingPageIndexes, loadedPdf, generation);
+          void loadPagesEagerly(
+            remainingPageIndexes,
+            loadedPdf,
+            generation,
+            bytes
+          ).catch(() => undefined);
         });
       }
 
-      return true;
-    } catch (error) {
+      // Returning the generation this call committed (rather than a plain
+      // `true`) lets callers tell "this specific structural edit's own
+      // internal reload completed" apart from "some other load has since
+      // superseded it" - `replacePdfAfterStructureEdit` always advances
+      // `loadGenerationRef.current` itself as part of a normal successful
+      // edit, so comparing against the caller's pre-call generation would
+      // incorrectly read every successful edit as superseded.
+      return generation;
+    } catch {
       if (pendingPdf) {
         await destroyPdfDocument(pendingPdf);
       }
-      if (generation === loadGenerationRef.current) {
-        console.error(error);
-      }
+      // Callers show the user a notice for this (see e.g. handleDeletePage).
       return false;
     } finally {
       if (generation === loadGenerationRef.current) {
@@ -2271,9 +2444,46 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
+  // Used when a structural edit fails before replacePdfAfterStructureEdit
+  // commits new bytes to state (pdfBytes/pdfDoc/pages are untouched in that
+  // case - only the ancillary annotation/index-set refs some handlers
+  // mutate ahead of the reload need reverting). Deliberately does NOT go
+  // through restoreDocumentHistory: that applies the undo entry's
+  // operation to the CURRENT bytes, which assumes the edit's bytes were
+  // already committed to state - applying it here, when they weren't,
+  // would e.g. re-insert a page that was never actually removed.
+  function rollbackAncillaryStateOnly(
+    snapshot: PdfWorkspaceDocumentHistorySnapshot
+  ) {
+    cleanSignatureRefreshEnabledRef.current =
+      snapshot.cleanSignatureRefreshEnabled ?? true;
+    importedAnnotationPagesRef.current = new Set(
+      snapshot.importedAnnotationPageIndexes
+    );
+    managedAnnotationPagesRef.current = new Set(
+      snapshot.managedAnnotationPageIndexes
+    );
+    removedAnnotationSourceIdsRef.current = new Set(
+      snapshot.removedAnnotationSourceIds
+    );
+    shouldImportAnnotationsRef.current = snapshot.shouldImportAnnotations;
+    cleanPdfBytesRef.current = snapshot.cleanPdfBytes ?? null;
+    cleanAnnotationsRef.current = snapshot.cleanAnnotations.map(
+      normalizeAnnotationLayout
+    );
+    setCurrentCleanWorkSignature(snapshot.cleanWorkSignature);
+    replaceAnnotationsWithoutHistory(snapshot.annotations);
+    setSelectedAnnotationIds([]);
+    setFocusedAnnotationId(null);
+  }
+
   async function restoreDocumentHistory(
     snapshot: PdfWorkspaceDocumentHistorySnapshot
   ) {
+    if (!pdfBytes) {
+      return false;
+    }
+
     const currentPdfDoc = pdfDoc;
     const generation = loadGenerationRef.current + 1;
     loadGenerationRef.current = generation;
@@ -2297,8 +2507,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setWorkspaceBusy(true);
 
     try {
+      const restoredBytes = await applyStructuralOperation(
+        pdfBytes,
+        snapshot.operation
+      );
       await cancelLoadingTask();
-      const loadingTask = startPdfLoading(snapshot.pdfBytes, generation);
+      const loadingTask = startPdfLoading(restoredBytes, generation);
       pendingPdf = await loadingTask.promise;
       const loadedPdf = pendingPdf;
       if (loadingTaskRef.current === loadingTask) {
@@ -2357,10 +2571,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       pdfFingerprintRef.current = snapshot.pdfFingerprint;
       cleanPdfBytesRef.current = snapshot.cleanPdfBytes ?? null;
       cleanAnnotationsRef.current = restoredCleanAnnotations;
-      annotationsRef.current = restoredAnnotations;
       pagesRef.current = nextPages;
       resetInitialVisualReadiness(activePage);
-      setPdfBytes(snapshot.pdfBytes);
+      setPdfBytes(restoredBytes);
       setPdfFingerprint(snapshot.pdfFingerprint);
       setPdfDoc(loadedPdf);
       setPageSize({
@@ -2369,7 +2582,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       });
       setPages(nextPages);
       setCurrentCleanWorkSignature(snapshot.cleanWorkSignature);
-      setAnnotations(restoredAnnotations);
+      setAnnotationsState(restoredAnnotations);
       pendingPdf = null;
       activePageIndexRef.current = activePage;
       setActivePageIndex(activePage);
@@ -2380,9 +2593,19 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
       for (const { page, pageIndex } of loadedPages) {
         if (pageIndex === activePage) {
-          void importInitialPageAnnotations(page, pageIndex, generation);
+          void importInitialPageAnnotations(
+            page,
+            pageIndex,
+            generation,
+            restoredBytes
+          );
         } else {
-          void importAnnotationsForLoadedPage(page, pageIndex, generation);
+          void importAnnotationsForLoadedPage(
+            page,
+            pageIndex,
+            generation,
+            restoredBytes
+          );
         }
       }
 
@@ -2411,18 +2634,21 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             return;
           }
 
-          void loadPagesEagerly(remainingPageIndexes, loadedPdf, generation);
+          void loadPagesEagerly(
+            remainingPageIndexes,
+            loadedPdf,
+            generation,
+            restoredBytes
+          ).catch(() => undefined);
         });
       }
 
       return true;
-    } catch (error) {
+    } catch {
       if (pendingPdf) {
         await destroyPdfDocument(pendingPdf);
       }
-      if (generation === loadGenerationRef.current) {
-        console.error(error);
-      }
+      // Callers show the user a notice for this (see undoHistory/redoHistory).
       return false;
     } finally {
       if (generation === loadGenerationRef.current) {
@@ -2436,7 +2662,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     pageIndex: number,
     doc: PDFDocumentProxy | null = pdfDoc,
     generation = loadGenerationRef.current,
-    options: { evictOldPages?: boolean } = {}
+    options: { evictOldPages?: boolean } = {},
+    pdfBytes: Uint8Array | null = pdfBytesRef.current
   ) {
     if (
       !doc ||
@@ -2482,11 +2709,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         return retained;
       });
 
-      await importAnnotationsForLoadedPage(page, pageIndex, generation);
+      await importAnnotationsForLoadedPage(page, pageIndex, generation, pdfBytes);
       return page;
-    } catch (error) {
+    } catch {
       if (generation === loadGenerationRef.current) {
-        console.error(error);
+        showWorkspaceNotice(`Could not load page ${pageIndex + 1}.`);
       }
       return null;
     } finally {
@@ -2497,7 +2724,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   async function loadPagesEagerly(
     pageIndexes: number[],
     doc: PDFDocumentProxy,
-    generation: number
+    generation: number,
+    pdfBytes: Uint8Array | null
   ) {
     for (const pageIndex of pageIndexes) {
       loadingPagesRef.current.add(pageIndex);
@@ -2540,33 +2768,41 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       managedAnnotationPagesRef.current.add(pageIndex);
     }
 
-    const importedAnnotations = (
-      await Promise.all(
-        loadedPages.map(({ page, pageIndex }) =>
-          importExistingAnnotationsForPage(page, pageIndex)
-        )
+    if (!pdfBytes) {
+      return;
+    }
+
+    const importResults = await Promise.all(
+      loadedPages.map(({ page, pageIndex }) =>
+        importExistingAnnotationsForPage(page, pageIndex, pdfBytes)
       )
-    ).flat();
+    );
     if (generation !== loadGenerationRef.current) {
       return;
     }
+
+    const importedAnnotations = importResults.flatMap(
+      (result) => result.annotations
+    );
+    reportMalformedAnnotations(
+      importResults.reduce((sum, result) => sum + result.malformedCount, 0)
+    );
 
     cleanAnnotationsRef.current = mergeImportedAnnotations(
       cleanAnnotationsRef.current,
       importedAnnotations
     );
     refreshCleanWorkSignatureFromImports();
-    setAnnotations((current) => {
-      const next = mergeImportedAnnotations(current, importedAnnotations);
-      annotationsRef.current = next;
-      return next;
-    });
+    setAnnotationsState((current) =>
+      mergeImportedAnnotations(current, importedAnnotations)
+    );
   }
 
   async function importAnnotationsForLoadedPage(
     page: PDFPageProxy,
     pageIndex: number,
-    generation: number
+    generation: number,
+    pdfBytes: Uint8Array | null
   ) {
     if (
       !shouldImportAnnotationsRef.current ||
@@ -2579,36 +2815,38 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     importedAnnotationPagesRef.current.add(pageIndex);
     managedAnnotationPagesRef.current.add(pageIndex);
-    const importedAnnotations = await importExistingAnnotationsForPage(
-      page,
-      pageIndex
-    );
+    if (!pdfBytes) {
+      return;
+    }
+
+    const { annotations: importedAnnotations, malformedCount } =
+      await importExistingAnnotationsForPage(page, pageIndex, pdfBytes);
     if (generation !== loadGenerationRef.current) {
       return;
     }
 
+    reportMalformedAnnotations(malformedCount);
     cleanAnnotationsRef.current = mergeImportedAnnotations(
       cleanAnnotationsRef.current,
       importedAnnotations
     );
     refreshCleanWorkSignatureFromImports();
-    setAnnotations((current) => {
-      const next = mergeImportedAnnotations(current, importedAnnotations);
-      annotationsRef.current = next;
-      return next;
-    });
+    setAnnotationsState((current) =>
+      mergeImportedAnnotations(current, importedAnnotations)
+    );
   }
 
   async function importInitialPageAnnotations(
     page: PDFPageProxy,
     pageIndex: number,
-    generation: number
+    generation: number,
+    pdfBytes: Uint8Array | null
   ) {
     try {
-      await importAnnotationsForLoadedPage(page, pageIndex, generation);
-    } catch (error) {
+      await importAnnotationsForLoadedPage(page, pageIndex, generation, pdfBytes);
+    } catch {
       if (mountedRef.current && generation === loadGenerationRef.current) {
-        console.error(error);
+        showWorkspaceNotice(`Could not load annotations on page ${pageIndex + 1}.`);
       }
     } finally {
       if (mountedRef.current) {
@@ -2631,29 +2869,47 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     finishAnnotationEdit();
-    const undoEntry = documentHistoryEntry();
+    // Captured before any await so a document swap that races this edit (the
+    // merge-file picker and the pdf-lib merge itself can both take a while)
+    // can be detected instead of applying a stale operation's result, or
+    // rolling back a *different* document's ancillary state, on failure.
+    const generation = loadGenerationRef.current;
+    let undoEntry: PdfWorkspaceHistoryEntry | null = null;
     try {
       const mergeFile = await pickMergePdfFile();
-      if (!mergeFile) {
+      if (!mergeFile || generation !== loadGenerationRef.current) {
         return;
       }
 
-      const { bytes: nextBytes } = await mergePdfAfterPage(
-        pdfBytes,
-        mergeFile.bytes,
-        pages.length - 1
-      );
-      const replaced = await replacePdfAfterStructureEdit(nextBytes, {
+      const {
+        bytes: nextBytes,
+        insertAt,
+        insertedPageCount
+      } = await mergePdfAfterPage(pdfBytes, mergeFile.bytes, pages.length - 1);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
+      undoEntry = documentHistoryEntry({
+        type: 'removePages',
+        startIndex: insertAt,
+        count: insertedPageCount
+      });
+      const replacedGeneration = await replacePdfAfterStructureEdit(nextBytes, {
         activePage: activePageIndex
       });
-      if (!replaced) {
+      if (replacedGeneration === false) {
         throw new Error('Could not load the merged PDF.');
       }
-      pushDocumentUndoEntry(undoEntry);
+      if (replacedGeneration === loadGenerationRef.current) {
+        pushDocumentUndoEntry(undoEntry);
+      }
     } catch (error) {
-      console.error(error);
-      if (undoEntry?.kind === 'document') {
-        await restoreDocumentHistory(undoEntry.snapshot);
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not merge this PDF.'
+      );
+      if (undoEntry?.kind === 'document' && generation === loadGenerationRef.current) {
+        rollbackAncillaryStateOnly(undoEntry.snapshot);
       }
     } finally {
       finishBusyOperation();
@@ -2671,9 +2927,25 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     finishAnnotationEdit();
-    const undoEntry = documentHistoryEntry();
+    const generation = loadGenerationRef.current;
+    let undoEntry: PdfWorkspaceHistoryEntry | null = null;
     try {
+      const extractedPage = await extractPagesBytes(pdfBytes, pageIndex, 1);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
+      undoEntry = documentHistoryEntry({
+        type: 'insertPages',
+        atIndex: pageIndex,
+        pageCount: extractedPage.pageCount,
+        pagesBytes: extractedPage.bytes
+      });
       const nextBytes = await removePage(pdfBytes, pageIndex);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
       managedAnnotationPagesRef.current = remapPageSetAfterDelete(
         managedAnnotationPagesRef.current,
         pageIndex
@@ -2686,18 +2958,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         remapAnnotationsAfterDelete(annotationsRef.current, pageIndex)
       );
       setSelectedAnnotationIds([]);
-      const replaced = await replacePdfAfterStructureEdit(nextBytes, {
+      const replacedGeneration = await replacePdfAfterStructureEdit(nextBytes, {
         activePage: Math.max(0, Math.min(pageIndex, pages.length - 2))
       });
-      if (!replaced) {
+      if (replacedGeneration === false) {
         throw new Error('Could not reload the PDF after deleting the page.');
       }
-      pushDocumentUndoEntry(undoEntry);
-      setPageMenuIndex(null);
+      if (replacedGeneration === loadGenerationRef.current) {
+        pushDocumentUndoEntry(undoEntry);
+        setPageMenuIndex(null);
+      }
     } catch (error) {
-      console.error(error);
-      if (undoEntry?.kind === 'document') {
-        await restoreDocumentHistory(undoEntry.snapshot);
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not delete this page.'
+      );
+      if (undoEntry?.kind === 'document' && generation === loadGenerationRef.current) {
+        rollbackAncillaryStateOnly(undoEntry.snapshot);
       }
     } finally {
       finishBusyOperation();
@@ -2714,13 +2990,23 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     finishAnnotationEdit();
-    const undoEntry = documentHistoryEntry();
+    const generation = loadGenerationRef.current;
+    let undoEntry: PdfWorkspaceHistoryEntry | null = null;
     try {
       const insertIndex = position === 'before' ? pageIndex : pageIndex + 1;
+      undoEntry = documentHistoryEntry({
+        type: 'removePages',
+        startIndex: insertIndex,
+        count: 1
+      });
       const nextBytes =
         kind === 'lined'
           ? await addLinedPageAt(pdfBytes, insertIndex, pageIndex)
           : await addBlankPageAt(pdfBytes, insertIndex, pageIndex);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
       managedAnnotationPagesRef.current = remapPageSetAfterInsert(
         managedAnnotationPagesRef.current,
         insertIndex
@@ -2732,18 +3018,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       replaceAnnotationsWithoutHistory(
         remapAnnotationsAfterInsert(annotationsRef.current, insertIndex)
       );
-      const replaced = await replacePdfAfterStructureEdit(nextBytes, {
+      const replacedGeneration = await replacePdfAfterStructureEdit(nextBytes, {
         activePage: insertIndex
       });
-      if (!replaced) {
+      if (replacedGeneration === false) {
         throw new Error('Could not reload the PDF after adding the page.');
       }
-      pushDocumentUndoEntry(undoEntry);
-      setPageMenuIndex(null);
+      if (replacedGeneration === loadGenerationRef.current) {
+        pushDocumentUndoEntry(undoEntry);
+        setPageMenuIndex(null);
+      }
     } catch (error) {
-      console.error(error);
-      if (undoEntry?.kind === 'document') {
-        await restoreDocumentHistory(undoEntry.snapshot);
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not add a page.'
+      );
+      if (undoEntry?.kind === 'document' && generation === loadGenerationRef.current) {
+        rollbackAncillaryStateOnly(undoEntry.snapshot);
       }
     } finally {
       finishBusyOperation();
@@ -2761,21 +3051,34 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     finishAnnotationEdit();
-    const undoEntry = documentHistoryEntry();
+    const generation = loadGenerationRef.current;
+    const undoEntry = documentHistoryEntry({
+      type: 'rotatePage',
+      pageIndex,
+      deltaDegrees: -90
+    });
     try {
       const nextBytes = await rotatePageClockwise(pdfBytes, pageIndex);
-      const replaced = await replacePdfAfterStructureEdit(nextBytes, {
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
+      const replacedGeneration = await replacePdfAfterStructureEdit(nextBytes, {
         activePage: pageIndex
       });
-      if (!replaced) {
+      if (replacedGeneration === false) {
         throw new Error('Could not reload the PDF after rotating the page.');
       }
-      pushDocumentUndoEntry(undoEntry);
-      setPageMenuIndex(null);
+      if (replacedGeneration === loadGenerationRef.current) {
+        pushDocumentUndoEntry(undoEntry);
+        setPageMenuIndex(null);
+      }
     } catch (error) {
-      console.error(error);
-      if (undoEntry?.kind === 'document') {
-        await restoreDocumentHistory(undoEntry.snapshot);
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not rotate this page.'
+      );
+      if (undoEntry?.kind === 'document' && generation === loadGenerationRef.current) {
+        rollbackAncillaryStateOnly(undoEntry.snapshot);
       }
     } finally {
       finishBusyOperation();
@@ -2816,17 +3119,25 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return false;
     }
 
+    // Captured before the awaits below so a host-triggered document swap
+    // mid-save (a slow native save dialog while a different source prop
+    // arrives) can be detected instead of stamping this save's result onto
+    // whatever document is current by the time it resolves.
+    const generation = loadGenerationRef.current;
+
     try {
       const saveTarget = saveTargetRef.current;
 
       if (saveTarget) {
         const savedBytes = await currentPdfOutputBytes();
         try {
-          await saveTarget.save(savedBytes);
-          markCurrentWorkClean(savedBytes);
+          const saveResult = await saveTarget(savedBytes);
+          if (generation === loadGenerationRef.current) {
+            fileKeyRef.current = saveResult?.fileKey ?? fileKeyRef.current;
+            markCurrentWorkClean(savedBytes);
+          }
           return true;
-        } catch (error) {
-          console.error(error);
+        } catch {
           const saveAsResult = await savePdfAs(
             () => Promise.resolve(savedBytes),
             fileName
@@ -2836,7 +3147,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           }
           if (saveAsResult === 'unavailable') {
             await downloadPdfBytes(savedBytes, annotatedName(fileName));
-            showWorkspaceNotice('Failed to save. Downloaded a copy instead.');
+            showWorkspaceNotice('Could not save. Downloaded a copy instead.');
+          } else {
+            showWorkspaceNotice('Save cancelled. Your changes are still here.');
           }
           return false;
         }
@@ -2853,7 +3166,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
       return false;
     } catch (error) {
-      console.error(error);
       handlePreparationError(error);
       showWorkspaceNotice(
         preparationErrorNotice(error, 'Could not prepare this PDF for saving.')
@@ -2880,7 +3192,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
       return false;
     } catch (error) {
-      console.error(error);
       handlePreparationError(error);
       showWorkspaceNotice(
         preparationErrorNotice(error, 'Could not prepare this PDF for saving.')
@@ -2905,9 +3216,14 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return 'unavailable' as const;
     }
 
+    // See handleSave's identical guard: the save-as dialog can be slow, and
+    // the document may no longer be the one this save-as started against by
+    // the time it resolves.
+    const generation = loadGenerationRef.current;
+
     let result;
     try {
-      result = await saveAsTarget.saveAs(
+      result = await saveAsTarget(
         createBytes,
         safePdfFileName(suggestedName)
       );
@@ -2915,11 +3231,14 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       if (error instanceof UnsupportedAnnotationTextError) {
         throw error;
       }
-      console.error(error);
       return 'unavailable' as const;
     }
     if (!result) {
       return 'cancelled' as const;
+    }
+
+    if (generation !== loadGenerationRef.current) {
+      return 'saved' as const;
     }
 
     saveTargetRef.current = result.saveTarget ?? null;
@@ -2941,7 +3260,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       const outputName = annotatedName(fileName);
       await downloadPdfBytes(savedBytes, outputName);
     } catch (error) {
-      console.error(error);
       handlePreparationError(error);
       showWorkspaceNotice(
         preparationErrorNotice(error, 'Could not download a copy of this PDF.')
@@ -2985,7 +3303,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   async function downloadPdfBytes(bytes: Uint8Array, suggestedName: string) {
     const target = downloadTargetRef.current;
     if (target) {
-      await target.download(bytes, safePdfFileName(suggestedName));
+      await target(bytes, safePdfFileName(suggestedName));
       return;
     }
 
@@ -3037,7 +3355,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     return writePdfAnnotations(pdfBytes, annotationsToWrite, {
       replaceAnnotationSourceIds,
-      replacePageIndexes
+      replacePageIndexes,
+      onMalformedExistingAnnotations: reportMalformedAnnotations
     });
   }
 
@@ -3095,7 +3414,11 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         await handleAddImageFromFile(file);
       }
     } catch (error) {
-      console.error(error);
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not add this image.'
+      );
+    } finally {
+      setActiveToolKey('select');
     }
   }
 
@@ -3108,7 +3431,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       const image = await prepareImageStampFromClipboardItems(
         clipboardData.items
       ).catch((error) => {
-        console.error(error);
+        showWorkspaceNotice(
+          error instanceof Error ? error.message : 'Could not paste this image.'
+        );
         return null;
       });
       if (image) {
@@ -3135,12 +3460,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       return;
     }
 
+    // Callers (handleAddImageFromFile's caller) report a failure to the user.
     try {
       const preparedImage = await prepareImage();
       addPreparedImageAnnotationFromData(preparedImage);
-    } catch (error) {
-      console.error(error);
-      throw error;
     } finally {
       finishBusyOperation();
     }
@@ -3164,7 +3487,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     );
     setSelectedAnnotationIds([annotation.id]);
     setFocusedAnnotationId(null);
-    setTool('select');
     setActiveToolKey(defaultToolKeyForTool('select'));
     setSettingsToolKey(null);
   }
@@ -3187,7 +3509,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     );
     setSelectedAnnotationIds([annotation.id]);
     setFocusedAnnotationId(null);
-    setTool('select');
     setActiveToolKey(defaultToolKeyForTool('select'));
     setSettingsToolKey(null);
   }
@@ -3335,8 +3656,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             : annotation
         ),
       options.recordUndo === false
-        ? { recordUndo: false }
-        : { coalesce: true }
+        ? { assumeChanged: true, recordUndo: false }
+        : { assumeChanged: true, coalesce: true }
     );
   }
 
@@ -3387,7 +3708,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     );
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
-    if (pendingUndoSnapshotRef.current && !liveEditActiveRef.current) {
+    if (liveAnnotationEditRef.current.kind === 'pending') {
       finishAnnotationEdit();
     }
   }
@@ -3414,7 +3735,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setFocusedAnnotationId((current) =>
       current && idSet.has(current) ? null : current
     );
-    if (pendingUndoSnapshotRef.current && !liveEditActiveRef.current) {
+    if (liveAnnotationEditRef.current.kind === 'pending') {
       finishAnnotationEdit();
     }
   }
@@ -3528,14 +3849,18 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setFocusedAnnotationId(null);
   }
 
+  // Returns true when it deliberately left an annotation selected (e.g. to
+  // point the user at unsupported text that needs fixing) - callers that
+  // want to also clear the selection afterward should skip doing so in that
+  // case rather than clobbering it.
   function finishCurrentAnnotationEditWithValidation() {
     if (focusedAnnotationId) {
-      handleFocusAnnotationConsumed(focusedAnnotationId);
-      return;
+      return handleFocusAnnotationConsumed(focusedAnnotationId);
     }
 
     warnUnsupportedTextInAnnotations(selectedAnnotationIds);
     finishAnnotationEdit();
+    return false;
   }
 
   function warnUnsupportedTextInAnnotations(annotationIds: string[]) {
@@ -3563,6 +3888,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
+  // Returns true when it deliberately left `annotationId` selected (the
+  // unsupported-text-warning case) so callers know not to clear it right after.
   function handleFocusAnnotationConsumed(annotationId: string) {
     const annotation = annotationsRef.current.find(
       (item) => item.id === annotationId
@@ -3574,7 +3901,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       );
       deleteAnnotations([annotationId]);
       finishAnnotationEdit();
-      return;
+      return false;
     }
 
     if (annotation) {
@@ -3589,7 +3916,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           );
           finishAnnotationEdit();
           showWorkspaceNotice(error.message);
-          return;
+          return true;
         }
         throw error;
       }
@@ -3599,6 +3926,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       current === annotationId ? null : current
     );
     finishAnnotationEdit();
+    return false;
   }
 
   function rememberRemovedAnnotationSource(annotation: PdfAnnotation) {
@@ -3651,7 +3979,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     if (usesAnnotationLayer(item.tool)) {
       setShowAnnotations(true);
     }
-    setTool(item.tool);
     setActiveToolKey(toolKey);
     setSettingsToolKey(null);
   }
@@ -3669,7 +3996,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     if (usesAnnotationLayer(nextTool)) {
       setShowAnnotations(true);
     }
-    setTool(nextTool);
     setActiveToolKey(defaultToolKeyForTool(nextTool));
   }
 
@@ -3688,7 +4014,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     setShowAnnotations(true);
-    setTool('select');
     setActiveToolKey('select');
     setSettingsToolKey(null);
     setSelectedAnnotationIds([annotation.id]);
@@ -3853,7 +4178,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
           return normalizeAnnotationLayout(movedAnnotation);
         }),
-      { recordUndo: false }
+      { assumeChanged: true, recordUndo: false }
     );
 
     if (moved && movedBetweenPages) {
@@ -3905,7 +4230,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setShowAnnotations((current) => {
       const next = !current;
       if (!next) {
-        setTool('select');
         setActiveToolKey('select');
         setSelectedAnnotationIds([]);
         setFocusedAnnotationId(null);
@@ -3922,7 +4246,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     saveTargetRef.current = null;
     setEditingEnabled(true);
-    setTool('select');
+    setFileName((current) => copyName(current));
     setActiveToolKey('select');
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
@@ -4167,6 +4491,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
                       void handlePdfDestination(destination)
                     }
                     onNavigatePage={handlePdfPageNavigation}
+                    onNotice={showWorkspaceNotice}
                     onPageReady={handlePageReady}
                     onPruneOffPageAnnotations={pruneOffPageAnnotations}
                     selectedAnnotationIds={selectedAnnotationIds}
@@ -4444,6 +4769,10 @@ function annotatedName(name: string) {
   return name.replace(/\.pdf$/i, '') + '-annotated.pdf';
 }
 
+function copyName(name: string) {
+  return name.replace(/\.pdf$/i, '') + ' - copy.pdf';
+}
+
 function printableName(name: string) {
   return name.replace(/\.pdf$/i, '') + '-print.pdf';
 }
@@ -4489,165 +4818,6 @@ function openExternalLinkInNewTab(url: string) {
   } catch {
     // noopener is requested in the feature string; this is a defensive fallback.
   }
-}
-
-function annotationHistorySignature(annotations: PdfAnnotation[]) {
-  return createWorkSignature('', annotations);
-}
-
-function groupAnnotationsByPageStable(
-  annotations: PdfAnnotation[],
-  previousByPage: Map<number, PdfAnnotation[]>
-) {
-  const grouped = groupAnnotationsByPage(annotations);
-  for (const [pageIndex, pageAnnotations] of grouped) {
-    const previousPageAnnotations = previousByPage.get(pageIndex);
-    if (
-      previousPageAnnotations &&
-      annotationArraysEqual(previousPageAnnotations, pageAnnotations)
-    ) {
-      grouped.set(pageIndex, previousPageAnnotations);
-    }
-  }
-
-  previousByPage.clear();
-  for (const [pageIndex, pageAnnotations] of grouped) {
-    previousByPage.set(pageIndex, pageAnnotations);
-  }
-  return grouped;
-}
-
-function annotationArraysEqual(
-  left: PdfAnnotation[],
-  right: PdfAnnotation[]
-) {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  return left.every((annotation, index) => annotation === right[index]);
-}
-
-function annotationHistoryEntry(
-  annotations: PdfAnnotation[]
-): PdfWorkspaceHistoryEntry {
-  return {
-    annotations,
-    kind: 'annotations'
-  };
-}
-
-function normalizeHistoryStack(
-  stack: unknown
-): PdfWorkspaceHistoryEntry[] {
-  if (!Array.isArray(stack)) {
-    return [];
-  }
-
-  return stack.flatMap((entry): PdfWorkspaceHistoryEntry[] => {
-    if (isHistoryEntry(entry)) {
-      return [entry];
-    }
-
-    if (Array.isArray(entry)) {
-      return [annotationHistoryEntry(entry as PdfAnnotation[])];
-    }
-
-    return [];
-  });
-}
-
-function isHistoryEntry(entry: unknown): entry is PdfWorkspaceHistoryEntry {
-  if (!entry || typeof entry !== 'object') {
-    return false;
-  }
-
-  const kind = (entry as { kind?: unknown }).kind;
-  return kind === 'annotations' || kind === 'document';
-}
-
-function trimHistoryStack(entries: PdfWorkspaceHistoryEntry[]) {
-  const trimmed =
-    entries.length > MAX_HISTORY_ENTRIES
-      ? entries.slice(entries.length - MAX_HISTORY_ENTRIES)
-      : [...entries];
-  let documentEntries = trimmed.filter(
-    (entry) => entry.kind === 'document'
-  ).length;
-  if (documentEntries <= MAX_DOCUMENT_HISTORY_ENTRIES) {
-    return trimmed;
-  }
-
-  while (
-    documentEntries > MAX_DOCUMENT_HISTORY_ENTRIES &&
-    trimmed.length > 0
-  ) {
-    const [removed] = trimmed.splice(0, 1);
-    if (removed?.kind === 'document') {
-      documentEntries -= 1;
-    }
-  }
-
-  while (
-    documentHistoryStackByteSize(trimmed) > MAX_DOCUMENT_HISTORY_TOTAL_BYTES &&
-    trimmed.some((entry) => entry.kind === 'document')
-  ) {
-    const removeIndex = trimmed.findIndex((entry) => entry.kind === 'document');
-    if (removeIndex < 0) {
-      break;
-    }
-    trimmed.splice(removeIndex, 1);
-  }
-
-  return trimmed;
-}
-
-function documentHistoryStackByteSize(entries: PdfWorkspaceHistoryEntry[]) {
-  return entries.reduce(
-    (total, entry) =>
-      entry.kind === 'document'
-        ? total + documentHistorySnapshotByteSize(entry.snapshot)
-        : total,
-    0
-  );
-}
-
-function documentHistorySnapshotByteSize(
-  snapshot: PdfWorkspaceDocumentHistorySnapshot
-) {
-  const byteArrays = new Set<Uint8Array>();
-  byteArrays.add(snapshot.pdfBytes);
-  if (snapshot.cleanPdfBytes) {
-    byteArrays.add(snapshot.cleanPdfBytes);
-  }
-  return Array.from(byteArrays).reduce(
-    (total, bytes) => total + bytes.byteLength,
-    0
-  );
-}
-
-function remapAnnotationsAfterDelete(
-  annotations: PdfAnnotation[],
-  deletedPageIndex: number
-) {
-  return annotations
-    .filter((annotation) => annotation.pageIndex !== deletedPageIndex)
-    .map((annotation) =>
-      annotation.pageIndex > deletedPageIndex
-        ? { ...annotation, pageIndex: annotation.pageIndex - 1 }
-        : annotation
-    );
-}
-
-function remapAnnotationsAfterInsert(
-  annotations: PdfAnnotation[],
-  insertIndex: number
-) {
-  return annotations.map((annotation) =>
-    annotation.pageIndex >= insertIndex
-      ? { ...annotation, pageIndex: annotation.pageIndex + 1 }
-      : annotation
-  );
 }
 
 function writableAnnotations(
@@ -4790,15 +4960,15 @@ function scrollContainerPaddingTop(container: HTMLElement) {
 
 function measureScrollbarGutter(container: HTMLElement) {
   const hasHorizontalScrollbar = container.scrollWidth > container.clientWidth;
-  const hasVerticalScrollbar = container.scrollHeight > container.clientHeight;
 
   return {
     block: hasHorizontalScrollbar
       ? Math.max(0, container.offsetHeight - container.clientHeight)
       : 0,
-    inline: hasVerticalScrollbar
-      ? Math.max(0, container.offsetWidth - container.clientWidth)
-      : 0
+    // `.pdf-scroll-root` reserves this space via `scrollbar-gutter: stable`
+    // regardless of whether content actually overflows, so it's read
+    // unconditionally rather than gated behind a vertical-overflow check.
+    inline: Math.max(0, container.offsetWidth - container.clientWidth)
   };
 }
 

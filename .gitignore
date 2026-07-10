@@ -24,4 +24,5 @@
 Thumbs.db
 .idea
 .vscode
+.claude
 npm-debug.log*

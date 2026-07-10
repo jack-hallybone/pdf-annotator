@@ -41,7 +41,7 @@ SVG favicons adapt to light/dark mode. Installed PWA and Apple touch icons are s
 
 ## Project Layers
 
-- `src/annotator`: reusable single-PDF workspace component.
+- `src/workspace`: reusable single-PDF workspace component.
 - `src/tabbedapp`: reusable multi-PDF tab shell.
 - `src/browserapp`: browser/GitHub Pages host wiring.
 
@@ -52,7 +52,7 @@ The reusable layers expose capabilities upward. `PdfWorkspace` owns PDF renderin
 Use this when a host app already owns document selection and wants one PDF viewer/editor.
 
 ```tsx
-import { PdfWorkspace, readPdfFile } from './annotator';
+import { PdfWorkspace, readPdfFile } from './workspace';
 
 const bytes = await readPdfFile(file);
 

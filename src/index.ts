@@ -1,2 +1,2 @@
-export * from './annotator';
+export * from './workspace';
 export * from './tabbedapp';

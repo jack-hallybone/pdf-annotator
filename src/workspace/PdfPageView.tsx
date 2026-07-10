@@ -1,6 +1,7 @@
-import { Copy, Highlighter, Trash2 } from 'lucide-react';
+import { Copy, Highlighter, RotateCw, Trash2 } from 'lucide-react';
 import {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -20,7 +21,9 @@ import {
 } from 'pdfjs-dist/web/pdf_viewer.mjs';
 import type {
   PdfAnnotation,
+  PageDisplaySize,
   PageRenderPriority,
+  PageViewport,
   PdfPoint,
   PdfRect,
   Tool,
@@ -33,6 +36,7 @@ import {
 } from './SettingsPanel';
 import { rgbToCss } from './annotationColors';
 import {
+  existingAnnotationId,
   getDisplayAnnotations,
   isEditableExistingAnnotation
 } from './annotationImport';
@@ -44,16 +48,43 @@ import {
   boundsForPoints,
   boundsForRects,
   dotPath,
-  inkPathCommands,
   isLassoSelectableAnnotation,
-  nearestRectIndex,
   pathHitTest,
   pathLength,
   rectToQuadPoints,
-  resampleInkPath,
-  simplifyInkPath
+  resizeFreeTextWidth,
+  resizeImageStampRect,
+  resizeImageStampToHeight,
+  resizeImageStampToWidth
 } from './annotationGeometry';
 import {
+  annotationMatchesEraserScope,
+  buildEraserAnnotationIndex,
+  queryEraserAnnotationIndex,
+  type EraserAnnotationIndex,
+  type EraserScope
+} from './eraserGeometry';
+import {
+  appendDraftInkPoints,
+  appendMutableInkPoint,
+  freehandHighlightMinLength,
+  inkDotMaxLength,
+  normalizeDraftInkPath
+} from './inkCapture';
+import {
+  clearDisplayCanvas,
+  drawInkCanvasAnnotation,
+  drawInkCanvasPath,
+  eraseInkCanvasPaths,
+  inkCanvasPixelRatio,
+  prepareInkCanvasContextState,
+  renderInkCanvasLayer,
+  renderPdfPathCanvas,
+  renderTextHighlightCanvas
+} from './inkRendering';
+import { millimetresToPdfUnits, pdfUnitsToMillimetres } from './pdfUnits';
+import {
+  annotationContentTransform,
   pdfArrayRectToViewportRect,
   pdfRectToViewportRect,
   viewportPointToPdfPoint,
@@ -75,11 +106,11 @@ import {
   getTextForHighlights,
   getTextLayerRects,
   joinTextLayerSegments,
-  nearestTextRectIndex,
+  moveTextHighlightHandle,
+  oppositeHighlightHandleAnchor,
   type TextLayerRect,
   textLayerSegmentsInRange,
-  textLayerSegmentsToHighlightRects,
-  textRectOverlapsHighlight
+  textLayerSegmentsToHighlightRects
 } from './textLayerGeometry';
 import { clamp } from './viewerConfig';
 import {
@@ -91,14 +122,8 @@ import {
   SELECTION_ACCENT,
   TEXT_HIGHLIGHT_STYLE
 } from './components/AnnotationPrimitives';
-import {
-  FREE_TEXT_LINE_HEIGHT,
-  FREE_TEXT_MAX_WIDTH,
-  FREE_TEXT_MIN_WIDTH
-} from './freeTextLayout';
+import { FREE_TEXT_LINE_HEIGHT } from './freeTextLayout';
 
-type PageViewport = ReturnType<PDFPageProxy['getViewport']>;
-type EraserScope = 'all' | 'draw' | 'highlight';
 type ViewportRect = { x: number; y: number; width: number; height: number };
 type TextHitRect = TextLayerRect & { viewportRect: ViewportRect };
 type ActiveTextGeometry = {
@@ -128,15 +153,6 @@ type DraftInkPath = {
 type EraserGesture = {
   pendingUntilDrag: boolean;
 };
-type EraserAnnotationIndexEntry = {
-  annotation: PdfAnnotation;
-  bounds: PdfRect;
-};
-type EraserAnnotationIndex = {
-  cellSize: number;
-  grid: Map<string, EraserAnnotationIndexEntry[]>;
-  queryPadding: number;
-};
 type AnnotationPathUpdate = {
   annotationId: string;
   paths: PdfPoint[][];
@@ -151,6 +167,7 @@ type InkCanvasRenderState = {
   pixelRatio: number;
   scale: number;
   viewportHeight: number;
+  viewportRotation: number;
   viewportWidth: number;
 };
 type TextSelectionHighlightAction = {
@@ -165,10 +182,6 @@ type VisiblePageBounds = {
   left: number;
   right: number;
   top: number;
-};
-type PageDisplaySize = {
-  height: number;
-  width: number;
 };
 
 type PdfPageViewProps = {
@@ -205,6 +218,7 @@ type PdfPageViewProps = {
   }) => { pageIndex: number; point: PdfPoint } | null;
   onNavigateDestination: (destination: string | unknown[]) => void;
   onNavigatePage: (pageIndex: number) => void;
+  onNotice?: (message: string) => void;
   onPageReady?: (pageIndex: number) => void;
   onPruneOffPageAnnotations: (annotationIds: string[]) => void;
   onSelectAnnotations: (annotationIds: string[]) => void;
@@ -220,6 +234,11 @@ type PdfPageViewProps = {
     options?: { recordUndo?: boolean }
   ) => void;
 };
+
+// Stable no-op used where AnnotationShape needs a drag-handle callback but
+// the layer it's rendered in doesn't support that interaction (a shared
+// module-level constant so it never breaks AnnotationShape's memoization).
+const noopAnnotationDragHandler = () => undefined;
 
 function PdfPageViewComponent({
   page,
@@ -246,6 +265,7 @@ function PdfPageViewComponent({
   onMoveAnnotationsToPage,
   onNavigateDestination,
   onNavigatePage,
+  onNotice,
   onPageReady,
   onPruneOffPageAnnotations,
   onSelectAnnotations,
@@ -259,6 +279,7 @@ function PdfPageViewComponent({
   const appearanceLayerRef = useRef<HTMLCanvasElement>(null);
   const inkCanvasRef = useRef<HTMLCanvasElement>(null);
   const highlightInkCanvasRef = useRef<HTMLCanvasElement>(null);
+  const textHighlightCanvasRef = useRef<HTMLCanvasElement>(null);
   const draftInkCanvasRef = useRef<HTMLCanvasElement>(null);
   const draftHighlightInkCanvasRef = useRef<HTMLCanvasElement>(null);
   const eraserCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -320,7 +341,42 @@ function PdfPageViewComponent({
   navigateDestinationRef.current = onNavigateDestination;
   externalLinkRequestRef.current = onExternalLinkRequest;
   navigatePageRef.current = onNavigatePage;
+  // Mirrors used so the stable (useCallback, empty-deps) annotation
+  // pointer-handlers below always read current values via .current instead
+  // of closing over them - closing over annotations/selectedAnnotationIds
+  // directly would force the handlers to change identity on every
+  // annotation edit, which is exactly the per-drag-frame re-render cost
+  // AnnotationShape's memoization is meant to avoid.
+  const annotationsRef = useRef(annotations);
+  const selectedAnnotationIdsRef = useRef(selectedAnnotationIds);
+  const toolRef = useRef(tool);
+  const readOnlyRef = useRef(readOnly);
+  const onUpdateAnnotationRef = useRef(onUpdateAnnotation);
+  const onSelectAnnotationsRef = useRef(onSelectAnnotations);
+  const onBeginAnnotationEditRef = useRef(onBeginAnnotationEdit);
+  const onActivateRef = useRef(onActivate);
+  const onFocusAnnotationConsumedRef = useRef(onFocusAnnotationConsumed);
+  const getActiveTextGeometryRef = useRef(getActiveTextGeometry);
+  annotationsRef.current = annotations;
+  selectedAnnotationIdsRef.current = selectedAnnotationIds;
+  toolRef.current = tool;
+  readOnlyRef.current = readOnly;
+  onUpdateAnnotationRef.current = onUpdateAnnotation;
+  onSelectAnnotationsRef.current = onSelectAnnotations;
+  onBeginAnnotationEditRef.current = onBeginAnnotationEdit;
+  onActivateRef.current = onActivate;
+  onFocusAnnotationConsumedRef.current = onFocusAnnotationConsumed;
+  getActiveTextGeometryRef.current = getActiveTextGeometry;
   const viewport = useMemo(() => page.getViewport({ scale }), [page, scale]);
+  const viewportRef = useRef(viewport);
+  viewportRef.current = viewport;
+  // Escape doesn't generate a pointerup/pointercancel DOM event, so nothing
+  // in the pointer-driven gesture tracking below ever sees it on its own.
+  // This ref lets a single window-level Escape listener (registered once)
+  // always call the current render's cancelActiveGesture, which reads
+  // whichever gesture state (drag/resize/eraser/ink/lasso) is live right now.
+  const cancelActiveGestureRef = useRef(cancelActiveGesture);
+  cancelActiveGestureRef.current = cancelActiveGesture;
   const renderKey = `${page.pageNumber}:${scale}`;
   const [displaySize, setDisplaySize] = useState(() =>
     viewportDisplaySize(viewport)
@@ -355,6 +411,8 @@ function PdfPageViewComponent({
     },
     [annotations, readOnly, selectedAnnotationIdSet]
   );
+  // This page's annotations (from the workspace-wide `annotations` prop), sorted
+  // into stacking order for rendering.
   const displayAnnotations = useMemo(
     () =>
       [...annotations].sort(
@@ -436,6 +494,17 @@ function PdfPageViewComponent({
     },
     []
   );
+
+  useEffect(() => {
+    function handleWindowKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        cancelActiveGestureRef.current();
+      }
+    }
+
+    window.addEventListener('keydown', handleWindowKeyDown);
+    return () => window.removeEventListener('keydown', handleWindowKeyDown);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -582,8 +651,7 @@ function PdfPageViewComponent({
             await renderRasterFallbackWithRecovery();
           } catch (fallbackError) {
             if (!isRenderCancellation(fallbackError)) {
-              console.error(error);
-              console.error(fallbackError);
+              onNotice?.(`Could not display page ${pageIndex + 1}.`);
             }
           }
         }
@@ -673,9 +741,9 @@ function PdfPageViewComponent({
             setExistingAnnotations(annotationsForDisplay);
           }
         })
-        .catch((error) => {
+        .catch(() => {
           if (!cancelled) {
-            console.error(error);
+            onNotice?.(`Could not load annotations on page ${pageIndex + 1}.`);
           }
         });
     });
@@ -685,6 +753,16 @@ function PdfPageViewComponent({
       cancelScheduledRead();
     };
   }, [baseLayerReady, page, renderPriority]);
+
+  // Only the *set* of imported image-stamp ids matters for deciding whether
+  // to hide a native-rendered stamp below - deriving this narrow key (rather
+  // than depending on `annotations` directly) keeps the overlay re-render
+  // below from firing on every unrelated annotation edit/drag.
+  const importedImageStampIdsKey = annotations
+    .filter((annotation) => annotation.kind === 'imageStamp')
+    .map((annotation) => annotation.id)
+    .sort()
+    .join('|');
 
   useEffect(() => {
     async function renderAnnotationAppearanceOverlay() {
@@ -698,8 +776,12 @@ function PdfPageViewComponent({
       }
 
       const hasAppearanceOverlayAnnotations = existingAnnotations.some(
-        (annotation, index) =>
-          shouldRenderExistingAnnotationInAppearanceOverlay(annotation, index)
+        (annotation) =>
+          shouldRenderExistingAnnotationInAppearanceOverlay(
+            annotation,
+            annotationsRef.current,
+            pageIndex
+          )
       );
       const hasReadOnlyTextMarkups = existingAnnotations.some(
         isReadOnlyTextMarkupAnnotation
@@ -766,6 +848,8 @@ function PdfPageViewComponent({
           appearancePixels,
           basePixels,
           existingAnnotations,
+          annotationsRef.current,
+          pageIndex,
           viewport,
           scaleX,
           scaleY
@@ -774,6 +858,8 @@ function PdfPageViewComponent({
         clearManagedAnnotationRectsFromAppearanceOverlay(
           context,
           existingAnnotations,
+          annotationsRef.current,
+          pageIndex,
           viewport,
           scaleX,
           scaleY
@@ -797,7 +883,7 @@ function PdfPageViewComponent({
     const cancelScheduledRender = schedulePriorityTask(renderPriority, () => {
       void renderAnnotationAppearanceOverlay().catch((error) => {
         if (!cancelled && !isRenderCancellation(error)) {
-          console.error(error);
+          onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
         }
       });
     });
@@ -813,7 +899,9 @@ function PdfPageViewComponent({
   }, [
     baseLayerReady,
     existingAnnotations,
+    importedImageStampIdsKey,
     page,
+    pageIndex,
     renderPriority,
     showAnnotations,
     viewport
@@ -867,7 +955,9 @@ function PdfPageViewComponent({
       });
     }
 
-    renderAnnotationLayer().catch(console.error);
+    renderAnnotationLayer().catch(() => {
+      onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
+    });
 
     return () => {
       annotationLayerRef.current?.replaceChildren();
@@ -977,6 +1067,7 @@ function PdfPageViewComponent({
         pixelRatio: inkCanvasPixelRatio(displaySize),
         scale,
         viewportHeight: viewport.height,
+        viewportRotation: viewport.rotation,
         viewportWidth: viewport.width
       };
     });
@@ -1063,6 +1154,32 @@ function PdfPageViewComponent({
       event.target === event.currentTarget &&
       selectedPageAnnotations.length > 0
     ) {
+      // Image stamps render in a separate SVG layer beneath this interaction
+      // layer, so once anything is selected and this layer's pointer-events
+      // flip to 'auto', a click that visually lands on a stamp still hits
+      // this layer's own empty background (event.target === currentTarget)
+      // rather than the stamp's own <g>. Without this check, clicking an
+      // already-selected stamp to start a drag would instead deselect it.
+      if (tool === 'select') {
+        const point = eventToPdfPoint(event, viewport);
+        const hitStamp = [...imageDisplayAnnotations]
+          .reverse()
+          .find((candidate) => annotationHitTest(candidate, point, scale));
+        if (hitStamp) {
+          event.preventDefault();
+          if (!selectedAnnotationIds.includes(hitStamp.id)) {
+            onSelectAnnotations([hitStamp.id]);
+          }
+          beginMoveAnnotationAtPoint({
+            annotationId: hitStamp.id,
+            captureTarget: event.currentTarget,
+            point,
+            pointerId: event.pointerId
+          });
+          return;
+        }
+      }
+
       onSelectAnnotations([]);
       dismissedSelectionPointerIdRef.current = event.pointerId;
       event.preventDefault();
@@ -1155,7 +1272,12 @@ function PdfPageViewComponent({
         if (!selectedAnnotationIdSet.has(hitAnnotation.id)) {
           onSelectAnnotations([hitAnnotation.id]);
         }
-        if (tool === 'select') {
+        // The highlight tool intentionally shares this select-and-drag
+        // affordance with the select tool (so highlights can be nudged/
+        // recolored without switching tools) - the draw tool deliberately
+        // does not, since ink strokes are thin enough that clicking one
+        // precisely while trying to draw nearby would be error-prone.
+        if (tool === 'select' || tool === 'highlight') {
           beginMoveAnnotationAtPoint({
             annotationId: hitAnnotation.id,
             captureTarget: event.currentTarget,
@@ -1441,6 +1563,7 @@ function PdfPageViewComponent({
 
     if (moveActiveDragSelection(event.clientX, event.clientY)) {
       event.preventDefault();
+      event.stopPropagation();
       return;
     }
 
@@ -1545,6 +1668,49 @@ function PdfPageViewComponent({
     }
 
     if (dragHandle?.pointerId === event.pointerId) {
+      setDragHandle(null);
+      activeTextGeometryRef.current = null;
+    }
+
+    if (eraserPathRef.current) {
+      endEraserGesture();
+    }
+
+    if (lassoPath) {
+      setLassoPath(null);
+    }
+
+    if (draftTextHighlight) {
+      setDraftTextHighlight(null);
+      activeTextGeometryRef.current = null;
+    }
+
+    if (draftInkPathRef.current) {
+      endDraftInkPath();
+    }
+  }
+
+  // Escape-key counterpart to handlePointerCancel above - same gesture
+  // cleanup, but unconditional (no pointerId to match against, since Escape
+  // isn't a pointer event) and treats an in-progress annotation move as
+  // finished-in-place (pruning off-page annotations) rather than abandoned,
+  // matching what releasing the pointer normally does.
+  function cancelActiveGesture() {
+    const activeDragSelection = dragSelectionRef.current;
+    if (activeDragSelection) {
+      dragSelectionRef.current = null;
+      onPruneOffPageAnnotations(activeDragSelection.annotationIds);
+    }
+
+    if (freeTextResizeHandle) {
+      setFreeTextResizeHandle(null);
+    }
+
+    if (imageStampResizeHandle) {
+      setImageStampResizeHandle(null);
+    }
+
+    if (dragHandle) {
       setDragHandle(null);
       activeTextGeometryRef.current = null;
     }
@@ -1733,59 +1899,172 @@ function PdfPageViewComponent({
     onToolChange('select');
   }
 
-  function beginMoveAnnotation(
-    event: React.PointerEvent<SVGGElement>,
-    annotationId: string
-  ) {
-    if (readOnly || tool !== 'select') {
-      return;
-    }
-
-    event.preventDefault();
-    event.stopPropagation();
-    const captureTarget = event.currentTarget.ownerSVGElement ?? event.currentTarget;
-    beginMoveAnnotationAtPoint({
+  // Stable (empty/near-empty deps) so it can be passed to AnnotationShape
+  // without forcing every annotation on the page to re-render whenever any
+  // one of them changes - reads current values via refs instead of closing
+  // over annotations/selectedAnnotationIds/tool/readOnly/viewport directly.
+  const beginMoveAnnotationAtPoint = useCallback(
+    ({
       annotationId,
       captureTarget,
-      point: eventToPdfPointFromElement(event, viewport),
-      pointerId: event.pointerId
-    });
-  }
-
-  function beginMoveAnnotationAtPoint({
-    annotationId,
-    captureTarget,
-    point,
-    pointerId
-  }: {
-    annotationId: string;
-    captureTarget: Element;
-    point: PdfPoint;
-    pointerId: number;
-  }) {
-    const targetAnnotation = annotations.find(
-      (annotation) => annotation.id === annotationId
-    );
-    if (targetAnnotation?.kind === 'textHighlight') {
-      return;
-    }
-
-    const selectedOnPage = selectedAnnotationIds.filter((id) =>
-      annotations.some((annotation) => annotation.id === id)
-    );
-    const annotationIds = selectedOnPage.includes(annotationId)
-      ? selectedOnPage
-      : [annotationId];
-    onBeginAnnotationEdit({ finishOnPointerUp: true });
-    captureTarget.setPointerCapture?.(pointerId);
-    const nextDragSelection = {
-      annotationIds,
-      lastPoint: point,
-      pageIndex,
+      point,
       pointerId
-    };
-    dragSelectionRef.current = nextDragSelection;
-  }
+    }: {
+      annotationId: string;
+      captureTarget: Element;
+      point: PdfPoint;
+      pointerId: number;
+    }) => {
+      const targetAnnotation = annotationsRef.current.find(
+        (annotation) => annotation.id === annotationId
+      );
+      if (targetAnnotation?.kind === 'textHighlight') {
+        return;
+      }
+
+      const selectedOnPage = selectedAnnotationIdsRef.current.filter((id) =>
+        annotationsRef.current.some((annotation) => annotation.id === id)
+      );
+      const annotationIds = selectedOnPage.includes(annotationId)
+        ? selectedOnPage
+        : [annotationId];
+      onBeginAnnotationEditRef.current({ finishOnPointerUp: true });
+      captureTarget.setPointerCapture?.(pointerId);
+      const nextDragSelection = {
+        annotationIds,
+        lastPoint: point,
+        pageIndex,
+        pointerId
+      };
+      dragSelectionRef.current = nextDragSelection;
+    },
+    [pageIndex]
+  );
+
+  const beginMoveAnnotation = useCallback(
+    (event: React.PointerEvent<SVGGElement>, annotationId: string) => {
+      if (
+        readOnlyRef.current ||
+        (toolRef.current !== 'select' && toolRef.current !== 'highlight')
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const captureTarget =
+        event.currentTarget.ownerSVGElement ?? event.currentTarget;
+      beginMoveAnnotationAtPoint({
+        annotationId,
+        captureTarget,
+        point: eventToPdfPointFromElement(event, viewportRef.current),
+        pointerId: event.pointerId
+      });
+    },
+    [beginMoveAnnotationAtPoint]
+  );
+
+  // The following handlers back AnnotationShape's callback props. They're
+  // all stable (useCallback with only pageIndex, which never changes for a
+  // mounted page instance, as a dep) so passing the same annotation array
+  // reference's unrelated entries down to AnnotationShape (memoized below)
+  // lets React skip re-rendering annotations that aren't the one changing.
+  const handleAnnotationSelect = useCallback(
+    (annotationId: string) => {
+      onActivateRef.current(pageIndex);
+      onSelectAnnotationsRef.current([annotationId]);
+    },
+    [pageIndex]
+  );
+
+  const handleAnnotationHoverChange = useCallback(
+    (hovered: boolean, annotationId: string) => {
+      setHoveredAnnotationId(hovered ? annotationId : null);
+    },
+    []
+  );
+
+  const handleAnnotationUpdate = useCallback(
+    (
+      annotationId: string,
+      updater: (annotation: PdfAnnotation) => PdfAnnotation
+    ) => {
+      onUpdateAnnotationRef.current(annotationId, updater, {
+        recordUndo: false
+      });
+    },
+    []
+  );
+
+  const handleAnnotationFocusEnd = useCallback((annotationId: string) => {
+    onFocusAnnotationConsumedRef.current(annotationId);
+  }, []);
+
+  const handleAnnotationBeginEdit = useCallback(() => {
+    onBeginAnnotationEditRef.current();
+  }, []);
+
+  const handleBeginHighlightHandleDrag = useCallback(
+    (
+      event: React.PointerEvent<SVGCircleElement>,
+      handle: 'start' | 'end',
+      annotationId: string
+    ) => {
+      event.stopPropagation();
+      onBeginAnnotationEditRef.current({ finishOnPointerUp: true });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const annotation = annotationsRef.current.find(
+        (candidate) => candidate.id === annotationId
+      );
+      const geometry = getActiveTextGeometryRef.current();
+      setDragHandle({
+        anchorIndex:
+          annotation?.kind === 'textHighlight'
+            ? oppositeHighlightHandleAnchor(annotation, handle, geometry.textRects)
+            : null,
+        annotationId,
+        handle,
+        pointerId: event.pointerId
+      });
+    },
+    []
+  );
+
+  const handleBeginFreeTextResizeHandleDrag = useCallback(
+    (
+      event: React.PointerEvent<SVGCircleElement>,
+      handle: 'left' | 'right',
+      annotationId: string
+    ) => {
+      event.stopPropagation();
+      onBeginAnnotationEditRef.current({ finishOnPointerUp: true });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setFreeTextResizeHandle({
+        annotationId,
+        handle,
+        pointerId: event.pointerId
+      });
+    },
+    []
+  );
+
+  const handleBeginImageStampResizeHandleDrag = useCallback(
+    (
+      event: React.PointerEvent<SVGCircleElement>,
+      handle: ImageStampResizeHandle['handle'],
+      annotationId: string
+    ) => {
+      event.stopPropagation();
+      onBeginAnnotationEditRef.current({ finishOnPointerUp: true });
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setImageStampResizeHandle({
+        annotationId,
+        handle,
+        pointerId: event.pointerId
+      });
+    },
+    []
+  );
 
   function findCanvasBackedInkAnnotationAtPoint(point: PdfPoint) {
     for (let index = displayAnnotations.length - 1; index >= 0; index -= 1) {
@@ -1812,9 +2091,15 @@ function PdfPageViewComponent({
     }
 
     const scope = eraserScopeRef.current;
+    // Ink deletions/path edits stay deferred to gesture-end (queued below) -
+    // a single stroke can generate hundreds of point samples, so committing
+    // annotation state on every one would force expensive re-renders. Other
+    // annotation kinds are a single hit each (already deduped via
+    // eraserDeletedIdsRef above), so they're cheap to commit immediately for
+    // real-time visual feedback instead of waiting for pointer-up.
     const deleteIds: string[] = [];
-
     const pathUpdates: AnnotationPathUpdate[] = [];
+    const immediateDeleteIds: string[] = [];
 
     for (const { annotation, bounds } of queryEraserAnnotationIndex(
       eraserAnnotationIndex,
@@ -1883,12 +2168,15 @@ function PdfPageViewComponent({
         expandedRectContainsPoint(bounds, point, padding) &&
         annotationHitTest(annotation, point, scale)
       ) {
-        deleteIds.push(annotation.id);
+        immediateDeleteIds.push(annotation.id);
         eraserDeletedIdsRef.current.add(annotation.id);
       }
     }
 
     queueEraseAnnotationChanges(deleteIds, pathUpdates);
+    if (immediateDeleteIds.length > 0) {
+      onEraseAnnotations({ deleteIds: immediateDeleteIds, pathUpdates: [] });
+    }
   }
 
   function queueEraseAnnotationChanges(
@@ -1999,7 +2287,13 @@ function PdfPageViewComponent({
     eraserGestureRef.current = {
       pendingUntilDrag: requireMovement
     };
-    suppressNextContextMenuRef.current = !requireMovement;
+    // Only a right-click-drag erase gesture that actually crosses the
+    // minimum drag distance (below, once pendingUntilDrag clears) should
+    // suppress the browser's native context menu - reset here rather than
+    // deriving from `requireMovement`, since that's also true for the
+    // ordinary left-click Eraser-tool path, which has no context menu to
+    // suppress and shouldn't arm this for an unrelated later right-click.
+    suppressNextContextMenuRef.current = false;
     scheduleEraserPreviewRender();
 
     if (!requireMovement) {
@@ -2115,6 +2409,37 @@ function PdfPageViewComponent({
         : [],
     [draftTextHighlight]
   );
+
+  useLayoutEffect(() => {
+    if (!showSynchronizedAnnotations) {
+      clearDisplayCanvas(textHighlightCanvasRef.current);
+      return;
+    }
+
+    renderTextHighlightCanvas({
+      annotations,
+      canvas: textHighlightCanvasRef.current,
+      displaySize,
+      draftHighlight:
+        draftTextHighlightRects.length > 0
+          ? {
+              color: toolSettings.highlightColor,
+              opacity: toolSettings.highlightOpacity,
+              rects: draftTextHighlightRects
+            }
+          : undefined,
+      viewport
+    });
+  }, [
+    annotations,
+    displaySize,
+    draftTextHighlightRects,
+    showSynchronizedAnnotations,
+    toolSettings.highlightColor,
+    toolSettings.highlightOpacity,
+    viewport
+  ]);
+
   function copySelectedHighlightText() {
     const text = getTextForHighlights(
       selectedPageAnnotations,
@@ -2126,7 +2451,9 @@ function PdfPageViewComponent({
       return;
     }
 
-    void navigator.clipboard.writeText(text).catch(console.error);
+    void navigator.clipboard.writeText(text).catch(() => {
+      onNotice?.('Could not copy text.');
+    });
   }
 
   function createHighlightFromTextSelection(
@@ -2337,24 +2664,16 @@ function PdfPageViewComponent({
                   annotation={annotation}
                   focused={false}
                   key={annotation.id}
-                  onBeginHighlightHandleDrag={() => undefined}
-                  onBeginFreeTextResizeHandleDrag={() => undefined}
-                  onBeginImageStampResizeHandleDrag={() => undefined}
+                  onBeginHighlightHandleDrag={noopAnnotationDragHandler}
+                  onBeginFreeTextResizeHandleDrag={noopAnnotationDragHandler}
+                  onBeginImageStampResizeHandleDrag={noopAnnotationDragHandler}
                   onBeginMoveDrag={beginMoveAnnotation}
-                  onHoverChange={(hovered) =>
-                    setHoveredAnnotationId(hovered ? annotation.id : null)
-                  }
-                  onBeginEdit={onBeginAnnotationEdit}
-                  onFocusEnd={onFocusAnnotationConsumed}
-                  onSelect={() => {
-                    onActivate(pageIndex);
-                    onSelectAnnotations([annotation.id]);
-                  }}
-                  onUpdate={(updater) =>
-                    onUpdateAnnotation(annotation.id, updater, {
-                      recordUndo: false
-                    })
-                  }
+                  onHoverChange={handleAnnotationHoverChange}
+                  onBeginEdit={handleAnnotationBeginEdit}
+                  onFocusEnd={handleAnnotationFocusEnd}
+                  onSelect={handleAnnotationSelect}
+                  onUpdate={handleAnnotationUpdate}
+                  partOfSelection={selectedAnnotationIds.includes(annotation.id)}
                   readOnly={readOnly}
                   scale={scale}
                   selected={false}
@@ -2365,6 +2684,10 @@ function PdfPageViewComponent({
               ))}
             </svg>
           ) : null}
+          <canvas
+            className="pdfa-ink-canvas-layer pdfa-highlight-canvas-layer pdfa-fill"
+            ref={textHighlightCanvasRef}
+          />
           <canvas
             className="pdfa-ink-canvas-layer pdfa-highlight-canvas-layer pdfa-fill"
             ref={highlightInkCanvasRef}
@@ -2404,80 +2727,21 @@ function PdfPageViewComponent({
               onPointerCancel={handlePointerCancel}
               onLostPointerCapture={handlePointerCancel}
             >
-            {draftTextHighlightRects.map((rect, index) => {
-              const bounds = pdfRectToViewportRect(rect, viewport);
-              return (
-                <rect
-                  fill={rgbToCss(toolSettings.highlightColor)}
-                  height={bounds.height}
-                  key={`draft-text-highlight-${index}`}
-                  opacity={toolSettings.highlightOpacity}
-                  style={TEXT_HIGHLIGHT_STYLE}
-                  width={bounds.width}
-                  x={bounds.x}
-                  y={bounds.y}
-                />
-              );
-            })}
             {showSynchronizedAnnotations ? vectorDisplayAnnotations.map((annotation) => (
               <AnnotationShape
                 annotation={annotation}
                 focused={focusedAnnotationId === annotation.id}
                 key={annotation.id}
-                onBeginHighlightHandleDrag={(event, handle) => {
-                  event.stopPropagation();
-                  onBeginAnnotationEdit({ finishOnPointerUp: true });
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  const geometry = getActiveTextGeometry();
-                  setDragHandle({
-                    anchorIndex:
-                      annotation.kind === 'textHighlight'
-                        ? oppositeHighlightHandleAnchor(
-                            annotation,
-                            handle,
-                            geometry.textRects
-                          )
-                        : null,
-                    annotationId: annotation.id,
-                    handle,
-                    pointerId: event.pointerId
-                  });
-                }}
-                onBeginFreeTextResizeHandleDrag={(event, handle) => {
-                  event.stopPropagation();
-                  onBeginAnnotationEdit({ finishOnPointerUp: true });
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setFreeTextResizeHandle({
-                    annotationId: annotation.id,
-                    handle,
-                    pointerId: event.pointerId
-                  });
-                }}
-                onBeginImageStampResizeHandleDrag={(event, handle) => {
-                  event.stopPropagation();
-                  onBeginAnnotationEdit({ finishOnPointerUp: true });
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setImageStampResizeHandle({
-                    annotationId: annotation.id,
-                    handle,
-                    pointerId: event.pointerId
-                  });
-                }}
+                onBeginHighlightHandleDrag={handleBeginHighlightHandleDrag}
+                onBeginFreeTextResizeHandleDrag={handleBeginFreeTextResizeHandleDrag}
+                onBeginImageStampResizeHandleDrag={handleBeginImageStampResizeHandleDrag}
                 onBeginMoveDrag={beginMoveAnnotation}
-                onHoverChange={(hovered) =>
-                  setHoveredAnnotationId(hovered ? annotation.id : null)
-                }
-                onBeginEdit={onBeginAnnotationEdit}
-                onFocusEnd={onFocusAnnotationConsumed}
-                onSelect={() => {
-                  onActivate(pageIndex);
-                  onSelectAnnotations([annotation.id]);
-                }}
-                onUpdate={(updater) =>
-                  onUpdateAnnotation(annotation.id, updater, {
-                    recordUndo: false
-                  })
-                }
+                onHoverChange={handleAnnotationHoverChange}
+                onBeginEdit={handleAnnotationBeginEdit}
+                onFocusEnd={handleAnnotationFocusEnd}
+                onSelect={handleAnnotationSelect}
+                onUpdate={handleAnnotationUpdate}
+                partOfSelection={selectedAnnotationIds.includes(annotation.id)}
                 readOnly={readOnly}
                 scale={scale}
                 selected={selectedAnnotationIds.includes(annotation.id)}
@@ -2601,7 +2865,7 @@ function stringArraysEqual(left: string[], right: string[]) {
   return left.every((value, index) => value === right[index]);
 }
 
-function AnnotationShape({
+const AnnotationShape = memo(function AnnotationShape({
   annotation,
   focused,
   onBeginEdit,
@@ -2613,6 +2877,7 @@ function AnnotationShape({
   onHoverChange,
   onSelect,
   onUpdate,
+  partOfSelection,
   readOnly,
   scale,
   selected,
@@ -2625,24 +2890,37 @@ function AnnotationShape({
   onBeginEdit: () => void;
   onBeginFreeTextResizeHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
-    handle: 'left' | 'right'
+    handle: 'left' | 'right',
+    annotationId: string
   ) => void;
   onBeginImageStampResizeHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
-    handle: ImageStampResizeHandle['handle']
+    handle: ImageStampResizeHandle['handle'],
+    annotationId: string
   ) => void;
   onBeginHighlightHandleDrag: (
     event: React.PointerEvent<SVGCircleElement>,
-    handle: 'start' | 'end'
+    handle: 'start' | 'end',
+    annotationId: string
   ) => void;
   onBeginMoveDrag: (
     event: React.PointerEvent<SVGGElement>,
     annotationId: string
   ) => void;
   onFocusEnd: (annotationId: string) => void;
-  onHoverChange: (hovered: boolean) => void;
-  onSelect: () => void;
-  onUpdate: (updater: (annotation: PdfAnnotation) => PdfAnnotation) => void;
+  onHoverChange: (hovered: boolean, annotationId: string) => void;
+  onSelect: (annotationId: string) => void;
+  onUpdate: (
+    annotationId: string,
+    updater: (annotation: PdfAnnotation) => PdfAnnotation
+  ) => void;
+  // Whether this annotation is currently in the selection, independent of
+  // `selected` below - image stamps always pass `selected={false}` here to
+  // avoid double-rendering their selection outline/resize handles (a
+  // separate ImageStampSelectionOverlay owns that), but a drag-start still
+  // needs to know the TRUE selection membership so clicking one image in an
+  // existing multi-selection doesn't collapse it down to just that image.
+  partOfSelection: boolean;
   readOnly: boolean;
   scale: number;
   selected: boolean;
@@ -2677,12 +2955,15 @@ function AnnotationShape({
 
       if (tool === 'highlight') {
         if (
-          (annotation.kind === 'textHighlight' ||
-            annotation.kind === 'freehandHighlight' ||
-            annotation.kind === 'draw') &&
-          !selected
+          annotation.kind === 'textHighlight' ||
+          annotation.kind === 'freehandHighlight' ||
+          annotation.kind === 'draw'
         ) {
-          onSelect();
+          event.preventDefault();
+          if (!selected) {
+            onSelect(annotation.id);
+          }
+          onBeginMoveDrag(event, annotation.id);
         }
         return;
       }
@@ -2692,8 +2973,8 @@ function AnnotationShape({
       }
 
       event.preventDefault();
-      if (!selected) {
-        onSelect();
+      if (!partOfSelection) {
+        onSelect(annotation.id);
       }
       onBeginMoveDrag(event, annotation.id);
     },
@@ -2706,8 +2987,8 @@ function AnnotationShape({
         event.stopPropagation();
       }
     },
-    onPointerEnter: () => onHoverChange(true),
-    onPointerLeave: () => onHoverChange(false),
+    onPointerEnter: () => onHoverChange(true, annotation.id),
+    onPointerLeave: () => onHoverChange(false, annotation.id),
     style: { cursor: 'pointer', pointerEvents: 'auto' as const }
   };
 
@@ -2719,11 +3000,15 @@ function AnnotationShape({
             const bounds = pdfRectToViewportRect(rect, viewport);
             return (
               <g key={`${annotation.id}-${index}`}>
+                {/* The visible fill is painted on the highlight canvas layer
+                    (see renderTextHighlightCanvas) so its multiply blend can
+                    reach the real page content - an outermost <svg> always
+                    isolates blend modes, so this rect only exists as an
+                    invisible hit target for selecting/dragging. */}
                 <rect
                   fill={rgbToCss(annotation.color)}
                   height={bounds.height}
-                  opacity={annotation.opacity}
-                  style={TEXT_HIGHLIGHT_STYLE}
+                  style={{ opacity: 0, pointerEvents: 'all' }}
                   width={bounds.width}
                   x={bounds.x}
                   y={bounds.y}
@@ -2746,7 +3031,9 @@ function AnnotationShape({
           {selected ? (
             <TextHighlightHandles
               annotation={annotation}
-              onBeginDrag={onBeginHighlightHandleDrag}
+              onBeginDrag={(event, handle) =>
+                onBeginHighlightHandleDrag(event, handle, annotation.id)
+              }
               viewport={viewport}
             />
           ) : null}
@@ -2801,14 +3088,18 @@ function AnnotationShape({
 
     case 'freeText': {
       const rect = pdfRectToViewportRect(annotation.rect, viewport);
+      const { localWidth, localHeight, transform } = annotationContentTransform(
+        rect,
+        viewport,
+        annotation.rotation ?? 0
+      );
       const editable = selected || focused;
       return (
         <g {...commonProps}>
           <foreignObject
-            height={rect.height}
-            width={rect.width}
-            x={rect.x}
-            y={rect.y}
+            height={localHeight}
+            transform={transform}
+            width={localWidth}
           >
             {editable ? (
               <AutoFocusTextarea
@@ -2818,7 +3109,7 @@ function AnnotationShape({
                   focused && annotation.text.trim().length === 0 ? 750 : 0
                 }
                 onChange={(event) =>
-                  onUpdate((current) =>
+                  onUpdate(annotation.id, (current) =>
                     current.kind === 'freeText'
                       ? { ...current, text: event.target.value }
                       : current
@@ -2856,7 +3147,9 @@ function AnnotationShape({
           {editable ? (
             <FreeTextWidthHandles
               annotation={annotation}
-              onBeginDrag={onBeginFreeTextResizeHandleDrag}
+              onBeginDrag={(event, handle) =>
+                onBeginFreeTextResizeHandleDrag(event, handle, annotation.id)
+              }
               viewport={viewport}
             />
           ) : null}
@@ -2866,31 +3159,36 @@ function AnnotationShape({
 
     case 'imageStamp': {
       const rect = pdfRectToViewportRect(annotation.rect, viewport);
+      const { localWidth, localHeight, transform } = annotationContentTransform(
+        rect,
+        viewport,
+        annotation.rotation ?? 0
+      );
       return (
         <g {...commonProps}>
           <image
-            height={rect.height}
+            height={localHeight}
             href={`data:${annotation.mimeType};base64,${annotation.imageData}`}
             preserveAspectRatio="xMidYMid meet"
-            width={rect.width}
-            x={rect.x}
-            y={rect.y}
+            transform={transform}
+            width={localWidth}
           />
           {selected ? (
             <>
               <rect
                 fill="none"
-                height={rect.height}
+                height={localHeight}
                 stroke={SELECTION_ACCENT}
                 strokeDasharray="4 3"
                 strokeWidth="1.5"
-                width={rect.width}
-                x={rect.x}
-                y={rect.y}
+                transform={transform}
+                width={localWidth}
               />
               <ImageStampResizeHandles
                 annotation={annotation}
-                onBeginDrag={onBeginImageStampResizeHandleDrag}
+                onBeginDrag={(event, handle) =>
+                  onBeginImageStampResizeHandleDrag(event, handle, annotation.id)
+                }
                 viewport={viewport}
               />
             </>
@@ -2938,7 +3236,7 @@ function AnnotationShape({
                   : onBeginEdit
               }
               onTextChange={(text) =>
-                onUpdate((current) =>
+                onUpdate(annotation.id, (current) =>
                   current.kind === 'stickyNote' ? { ...current, text } : current
                 )
               }
@@ -2951,7 +3249,7 @@ function AnnotationShape({
       );
     }
   }
-}
+});
 
 function TextHighlightHandles({
   annotation,
@@ -3014,13 +3312,18 @@ function FreeTextWidthHandles({
   viewport: PageViewport;
 }) {
   const bounds = pdfRectToViewportRect(annotation.rect, viewport);
-  const centerY = bounds.y + bounds.height / 2;
+  const { localWidth, localHeight, transform } = annotationContentTransform(
+    bounds,
+    viewport,
+    annotation.rotation ?? 0
+  );
+  const centerY = localHeight / 2;
 
   return (
-    <g style={{ pointerEvents: 'auto' }}>
+    <g style={{ pointerEvents: 'auto' }} transform={transform}>
       <circle
         className="free-text-width-handle"
-        cx={bounds.x}
+        cx={0}
         cy={centerY}
         fill={SELECTION_ACCENT}
         onPointerDown={(event) => onBeginDrag(event, 'left')}
@@ -3030,7 +3333,7 @@ function FreeTextWidthHandles({
       />
       <circle
         className="free-text-width-handle"
-        cx={bounds.x + bounds.width}
+        cx={localWidth}
         cy={centerY}
         fill={SELECTION_ACCENT}
         onPointerDown={(event) => onBeginDrag(event, 'right')}
@@ -3055,17 +3358,21 @@ function ImageStampSelectionOverlay({
   viewport: PageViewport;
 }) {
   const rect = pdfRectToViewportRect(annotation.rect, viewport);
+  const { localWidth, localHeight, transform } = annotationContentTransform(
+    rect,
+    viewport,
+    annotation.rotation ?? 0
+  );
   return (
     <g style={{ pointerEvents: 'auto' }}>
       <rect
         fill="none"
-        height={rect.height}
+        height={localHeight}
         stroke={SELECTION_ACCENT}
         strokeDasharray="4 3"
         strokeWidth="1.5"
-        width={rect.width}
-        x={rect.x}
-        y={rect.y}
+        transform={transform}
+        width={localWidth}
       />
       <ImageStampResizeHandles
         annotation={annotation}
@@ -3088,31 +3395,24 @@ function ImageStampResizeHandles({
   ) => void;
   viewport: PageViewport;
 }) {
-  const rect = annotation.rect;
+  const rect = pdfRectToViewportRect(annotation.rect, viewport);
+  const { localWidth, localHeight, transform } = annotationContentTransform(
+    rect,
+    viewport,
+    annotation.rotation ?? 0
+  );
   const handles: Array<{
     handle: ImageStampResizeHandle['handle'];
     point: [number, number];
   }> = [
-    {
-      handle: 'top-left',
-      point: viewport.convertToViewportPoint(rect.x1, rect.y2) as [number, number]
-    },
-    {
-      handle: 'top-right',
-      point: viewport.convertToViewportPoint(rect.x2, rect.y2) as [number, number]
-    },
-    {
-      handle: 'bottom-left',
-      point: viewport.convertToViewportPoint(rect.x1, rect.y1) as [number, number]
-    },
-    {
-      handle: 'bottom-right',
-      point: viewport.convertToViewportPoint(rect.x2, rect.y1) as [number, number]
-    }
+    { handle: 'top-left', point: [0, 0] },
+    { handle: 'top-right', point: [localWidth, 0] },
+    { handle: 'bottom-left', point: [0, localHeight] },
+    { handle: 'bottom-right', point: [localWidth, localHeight] }
   ];
 
   return (
-    <g style={{ pointerEvents: 'auto' }}>
+    <g style={{ pointerEvents: 'auto' }} transform={transform}>
       {handles.map(({ handle, point }) => (
         <circle
           cx={point[0]}
@@ -3163,6 +3463,9 @@ function SelectionToolbar({
     (annotation) => annotation.kind === 'textHighlight'
   );
   const showsColor = Boolean(first && hasColor(first));
+  const showsRotate = annotations.some(
+    (annotation) => annotation.kind === 'freeText' || annotation.kind === 'imageStamp'
+  );
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const visibleBounds = useVisiblePageBounds(pageRef, viewport);
   const rowHeights = [
@@ -3369,6 +3672,22 @@ function SelectionToolbar({
                 Copy text
               </button>
             ) : null}
+            {showsRotate ? (
+              <button
+                className="selection-rotate-button"
+                onClick={() =>
+                  onUpdate((current) =>
+                    current.kind === 'freeText' || current.kind === 'imageStamp'
+                      ? { ...current, rotation: ((current.rotation ?? 0) + 90) % 360 }
+                      : current
+                  )
+                }
+                title="Rotate 90°"
+                type="button"
+              >
+                <RotateCw size={15} />
+              </button>
+            ) : null}
             <button
               className="selection-delete-button"
               onClick={onDelete}
@@ -3411,7 +3730,12 @@ function sameInkCanvasRenderFrame(
     previous.pixelRatio === inkCanvasPixelRatio(displaySize) &&
     previous.scale === scale &&
     previous.viewportWidth === viewport.width &&
-    previous.viewportHeight === viewport.height
+    previous.viewportHeight === viewport.height &&
+    // Width/height alone can't distinguish a rotation on a square page (they
+    // don't change numerically), which would otherwise let the single-added-
+    // stroke fast path paint just the new stroke onto an otherwise-stale,
+    // pre-rotation canvas.
+    previous.viewportRotation === viewport.rotation
   );
 }
 
@@ -3449,93 +3773,6 @@ function findSingleAddedInkAnnotation(
     : null;
 }
 
-function buildEraserAnnotationIndex(
-  annotations: PdfAnnotation[],
-  scale: number,
-  eraserWidth: number
-): EraserAnnotationIndex {
-  const entries = annotations.map((annotation) => ({
-    annotation,
-    bounds: annotationBounds(annotation)
-  }));
-  const eraserRadius = Math.max(eraserWidth / 2 / scale, 1 / scale);
-  const maxInkPadding = entries.reduce((maxPadding, { annotation }) => {
-    if (annotation.kind !== 'draw' && annotation.kind !== 'freehandHighlight') {
-      return maxPadding;
-    }
-
-    return Math.max(maxPadding, annotation.width * 1.4);
-  }, 0);
-  const queryPadding = Math.max(eraserRadius, maxInkPadding, 6 / scale);
-  const cellSize = Math.max(32 / scale, queryPadding * 2, 16);
-  const grid = new Map<string, EraserAnnotationIndexEntry[]>();
-
-  for (const entry of entries) {
-    if (!isFiniteRect(entry.bounds)) {
-      continue;
-    }
-
-    forEachGridCell(entry.bounds, cellSize, queryPadding, (key) => {
-      const bucket = grid.get(key);
-      if (bucket) {
-        bucket.push(entry);
-      } else {
-        grid.set(key, [entry]);
-      }
-    });
-  }
-
-  return { cellSize, grid, queryPadding };
-}
-
-function queryEraserAnnotationIndex(
-  index: EraserAnnotationIndex,
-  point: PdfPoint
-) {
-  const candidates = new Map<string, EraserAnnotationIndexEntry>();
-  const queryBounds = {
-    x1: point.x,
-    y1: point.y,
-    x2: point.x,
-    y2: point.y
-  };
-
-  forEachGridCell(queryBounds, index.cellSize, index.queryPadding, (key) => {
-    for (const entry of index.grid.get(key) ?? []) {
-      candidates.set(entry.annotation.id, entry);
-    }
-  });
-
-  return candidates.values();
-}
-
-function forEachGridCell(
-  bounds: PdfRect,
-  cellSize: number,
-  padding: number,
-  callback: (key: string) => void
-) {
-  const minX = Math.floor((Math.min(bounds.x1, bounds.x2) - padding) / cellSize);
-  const maxX = Math.floor((Math.max(bounds.x1, bounds.x2) + padding) / cellSize);
-  const minY = Math.floor((Math.min(bounds.y1, bounds.y2) - padding) / cellSize);
-  const maxY = Math.floor((Math.max(bounds.y1, bounds.y2) + padding) / cellSize);
-
-  for (let x = minX; x <= maxX; x += 1) {
-    for (let y = minY; y <= maxY; y += 1) {
-      callback(`${x}:${y}`);
-    }
-  }
-}
-
-function isFiniteRect(rect: PdfRect) {
-  return (
-    Number.isFinite(rect.x1) &&
-    Number.isFinite(rect.y1) &&
-    Number.isFinite(rect.x2) &&
-    Number.isFinite(rect.y2)
-  );
-}
-
 function isCanvasBackedInkAnnotation(
   annotation: PdfAnnotation,
   selectedAnnotationIds: Set<string>
@@ -3544,118 +3781,6 @@ function isCanvasBackedInkAnnotation(
     !selectedAnnotationIds.has(annotation.id) &&
     (annotation.kind === 'draw' || annotation.kind === 'freehandHighlight')
   );
-}
-
-function clearDisplayCanvas(canvas: HTMLCanvasElement | null) {
-  if (!canvas) {
-    return;
-  }
-
-  const context = canvas.getContext('2d');
-  if (!context) {
-    return;
-  }
-
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  context.clearRect(0, 0, canvas.width, canvas.height);
-}
-
-function renderInkCanvasLayer({
-  annotations,
-  canvas,
-  displaySize,
-  kind,
-  scale,
-  viewport
-}: {
-  annotations: PdfAnnotation[];
-  canvas: HTMLCanvasElement | null;
-  displaySize: PageDisplaySize;
-  kind: 'draw' | 'freehandHighlight';
-  scale: number;
-  viewport: PageViewport;
-}) {
-  const context = prepareInkCanvasContext({
-    canvas,
-    clear: true,
-    displaySize,
-    viewport
-  });
-  if (!context) {
-    return;
-  }
-
-  for (const annotation of annotations) {
-    if (annotation.kind === kind) {
-      drawInkAnnotationOnContext(context, annotation, scale, viewport);
-    }
-  }
-
-  context.globalAlpha = 1;
-}
-
-function drawInkCanvasAnnotation({
-  annotation,
-  canvas,
-  clear,
-  displaySize,
-  scale,
-  viewport
-}: {
-  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>;
-  canvas: HTMLCanvasElement | null;
-  clear: boolean;
-  displaySize: PageDisplaySize;
-  scale: number;
-  viewport: PageViewport;
-}) {
-  const context = prepareInkCanvasContext({
-    canvas,
-    clear,
-    displaySize,
-    viewport
-  });
-  if (!context) {
-    return;
-  }
-
-  drawInkAnnotationOnContext(context, annotation, scale, viewport);
-  context.globalAlpha = 1;
-}
-
-function renderPdfPathCanvas({
-  canvas,
-  color,
-  displaySize,
-  opacity,
-  path,
-  viewport,
-  width
-}: {
-  canvas: HTMLCanvasElement | null;
-  color: string;
-  displaySize: PageDisplaySize;
-  opacity: number;
-  path: PdfPoint[];
-  viewport: PageViewport;
-  width: number;
-}) {
-  const context = prepareInkCanvasContext({
-    canvas,
-    clear: true,
-    displaySize,
-    viewport
-  });
-  if (!context) {
-    return;
-  }
-
-  context.globalAlpha = clamp(opacity, 0, 1);
-  context.fillStyle = color;
-  context.strokeStyle = color;
-  context.lineWidth = Math.max(0.25, width);
-  drawInkCanvasPath(context, path, viewport, false, width);
-  context.globalAlpha = 1;
 }
 
 function resolvedAccentColor(element: Element | null) {
@@ -3667,210 +3792,6 @@ function resolvedAccentColor(element: Element | null) {
       .trim() ||
     '#cc41bf'
   );
-}
-
-function eraseInkCanvasPaths({
-  annotation,
-  canvas,
-  displaySize,
-  paths,
-  scale,
-  viewport
-}: {
-  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>;
-  canvas: HTMLCanvasElement | null;
-  displaySize: PageDisplaySize;
-  paths: PdfPoint[][];
-  scale: number;
-  viewport: PageViewport;
-}) {
-  const context = prepareInkCanvasContext({
-    canvas,
-    clear: false,
-    displaySize,
-    viewport
-  });
-  if (!context) {
-    return;
-  }
-
-  const previousComposite = context.globalCompositeOperation;
-  context.globalCompositeOperation = 'destination-out';
-  context.globalAlpha = 1;
-  context.fillStyle = '#000';
-  context.strokeStyle = '#000';
-  context.lineWidth = Math.max(0.25, annotation.width * scale + 2);
-
-  for (const path of paths) {
-    drawInkCanvasPath(
-      context,
-      path,
-      viewport,
-      annotation.kind === 'freehandHighlight' && annotation.filled === true,
-      annotation.width * scale + 2
-    );
-  }
-
-  context.globalCompositeOperation = previousComposite;
-  context.globalAlpha = 1;
-}
-
-function prepareInkCanvasContext({
-  canvas,
-  clear,
-  displaySize,
-  viewport
-}: {
-  canvas: HTMLCanvasElement | null;
-  clear: boolean;
-  displaySize: PageDisplaySize;
-  viewport: PageViewport;
-}) {
-  return prepareInkCanvasContextState({
-    canvas,
-    clear,
-    displaySize,
-    viewport
-  })?.context ?? null;
-}
-
-function prepareInkCanvasContextState({
-  canvas,
-  clear,
-  displaySize,
-  viewport
-}: {
-  canvas: HTMLCanvasElement | null;
-  clear: boolean;
-  displaySize: PageDisplaySize;
-  viewport: PageViewport;
-}) {
-  if (!canvas) {
-    return null;
-  }
-
-  const context = canvas.getContext('2d');
-  if (!context) {
-    return null;
-  }
-
-  const pixelRatio = inkCanvasPixelRatio(displaySize);
-  const pixelWidth = Math.max(1, Math.ceil(displaySize.width * pixelRatio));
-  const pixelHeight = Math.max(1, Math.ceil(displaySize.height * pixelRatio));
-  const resized = canvas.width !== pixelWidth || canvas.height !== pixelHeight;
-
-  if (canvas.width !== pixelWidth) {
-    canvas.width = pixelWidth;
-  }
-  if (canvas.height !== pixelHeight) {
-    canvas.height = pixelHeight;
-  }
-
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  if (clear || resized) {
-    context.clearRect(0, 0, canvas.width, canvas.height);
-  }
-  context.imageSmoothingEnabled = true;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  context.setTransform(
-    (displaySize.width / Math.max(1, viewport.width)) * pixelRatio,
-    0,
-    0,
-    (displaySize.height / Math.max(1, viewport.height)) * pixelRatio,
-    0,
-    0
-  );
-
-  return { context, resized };
-}
-
-function inkCanvasPixelRatio(displaySize: PageDisplaySize) {
-  return safeCanvasPixelRatio(
-    displaySize.width,
-    displaySize.height,
-    Math.min(window.devicePixelRatio || 1, 2)
-  );
-}
-
-function drawInkAnnotationOnContext(
-  context: CanvasRenderingContext2D,
-  annotation: Extract<PdfAnnotation, { kind: 'draw' | 'freehandHighlight' }>,
-  scale: number,
-  viewport: PageViewport
-) {
-  context.globalAlpha = clamp(annotation.opacity, 0, 1);
-  context.fillStyle = rgbToCss(annotation.color);
-  context.strokeStyle = rgbToCss(annotation.color);
-  context.lineWidth = Math.max(0.25, annotation.width * scale);
-
-  for (const path of annotation.paths) {
-    drawInkCanvasPath(
-      context,
-      path,
-      viewport,
-      annotation.kind === 'freehandHighlight' && annotation.filled === true,
-      annotation.width * scale
-    );
-  }
-}
-
-function drawInkCanvasPath(
-  context: CanvasRenderingContext2D,
-  path: PdfPoint[],
-  viewport: PageViewport,
-  filled: boolean,
-  width: number
-) {
-  const commands = inkPathCommands(path);
-  if (commands.length === 0) {
-    return;
-  }
-
-  if (commands.length === 1) {
-    const [x, y] = viewport.convertToViewportPoint(
-      commands[0].point.x,
-      commands[0].point.y
-    );
-    context.beginPath();
-    context.arc(x, y, Math.max(0.25, width / 2), 0, Math.PI * 2);
-    context.fill();
-    return;
-  }
-
-  context.beginPath();
-  for (const command of commands) {
-    const [x, y] = viewport.convertToViewportPoint(
-      command.point.x,
-      command.point.y
-    );
-    if (command.type === 'move') {
-      context.moveTo(x, y);
-      continue;
-    }
-
-    if (command.type === 'line') {
-      context.lineTo(x, y);
-      continue;
-    }
-
-    const [control1X, control1Y] = viewport.convertToViewportPoint(
-      command.control1.x,
-      command.control1.y
-    );
-    const [control2X, control2Y] = viewport.convertToViewportPoint(
-      command.control2.x,
-      command.control2.y
-    );
-    context.bezierCurveTo(control1X, control1Y, control2X, control2Y, x, y);
-  }
-
-  if (filled) {
-    context.closePath();
-    context.fill();
-  } else {
-    context.stroke();
-  }
 }
 
 function getTextSelectionHighlightAction(
@@ -4255,216 +4176,6 @@ function nearestTextHitRect(
   return best;
 }
 
-function resizeFreeTextWidth(
-  annotation: Extract<PdfAnnotation, { kind: 'freeText' }>,
-  point: PdfPoint,
-  handle: 'left' | 'right'
-) {
-  const left = Math.min(annotation.rect.x1, annotation.rect.x2);
-  const right = Math.max(annotation.rect.x1, annotation.rect.x2);
-  const top = Math.max(annotation.rect.y1, annotation.rect.y2);
-  const bottom = Math.min(annotation.rect.y1, annotation.rect.y2);
-
-  if (handle === 'left') {
-    const nextLeft = clamp(
-      point.x,
-      right - FREE_TEXT_MAX_WIDTH,
-      right - FREE_TEXT_MIN_WIDTH
-    );
-    return {
-      ...annotation,
-      layoutWidth: right - nextLeft,
-      rect: {
-        x1: nextLeft,
-        y1: bottom,
-        x2: right,
-        y2: top
-      }
-    };
-  }
-
-  const nextRight = clamp(
-    point.x,
-    left + FREE_TEXT_MIN_WIDTH,
-    left + FREE_TEXT_MAX_WIDTH
-  );
-  return {
-    ...annotation,
-    layoutWidth: nextRight - left,
-    rect: {
-      x1: left,
-      y1: bottom,
-      x2: nextRight,
-      y2: top
-    }
-  };
-}
-
-function resizeImageStampRect(
-  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
-  point: PdfPoint,
-  handle: ImageStampResizeHandle['handle'],
-  scale: number
-) {
-  const rect = annotation.rect;
-  const aspectRatio = imageStampAspectRatio(annotation);
-  const minSize = Math.max(4, 12 / scale);
-  const anchors = {
-    'top-left': { x: rect.x2, y: rect.y1 },
-    'top-right': { x: rect.x1, y: rect.y1 },
-    'bottom-left': { x: rect.x2, y: rect.y2 },
-    'bottom-right': { x: rect.x1, y: rect.y2 }
-  };
-  const anchor = anchors[handle];
-  const requestedWidth = Math.max(minSize, Math.abs(point.x - anchor.x));
-  const requestedHeight = Math.max(minSize, Math.abs(point.y - anchor.y));
-  const width = Math.max(requestedWidth, requestedHeight * aspectRatio);
-  const height = width / aspectRatio;
-  const right = handle.endsWith('right');
-  const top = handle.startsWith('top');
-  const x1 = right ? anchor.x : anchor.x - width;
-  const x2 = right ? anchor.x + width : anchor.x;
-  const y1 = top ? anchor.y : anchor.y - height;
-  const y2 = top ? anchor.y + height : anchor.y;
-
-  return {
-    ...annotation,
-    rect: normalizedRect({ x1, x2, y1, y2 })
-  };
-}
-
-function resizeImageStampToWidth(
-  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
-  width: number
-) {
-  const rect = annotation.rect;
-  const nextWidth = Math.max(1, width);
-  const height = nextWidth / imageStampAspectRatio(annotation);
-  return {
-    ...annotation,
-    rect: {
-      ...rect,
-      x2: rect.x1 + nextWidth,
-      y1: rect.y2 - height
-    }
-  };
-}
-
-function resizeImageStampToHeight(
-  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
-  height: number
-) {
-  const rect = annotation.rect;
-  const nextHeight = Math.max(1, height);
-  const width = nextHeight * imageStampAspectRatio(annotation);
-  return {
-    ...annotation,
-    rect: {
-      ...rect,
-      x2: rect.x1 + width,
-      y1: rect.y2 - nextHeight
-    }
-  };
-}
-
-function imageStampAspectRatio(
-  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>
-) {
-  return Math.max(0.01, annotation.widthPx / Math.max(1, annotation.heightPx));
-}
-
-function normalizedRect(rect: PdfRect): PdfRect {
-  return {
-    x1: Math.min(rect.x1, rect.x2),
-    y1: Math.min(rect.y1, rect.y2),
-    x2: Math.max(rect.x1, rect.x2),
-    y2: Math.max(rect.y1, rect.y2)
-  };
-}
-
-function oppositeHighlightHandleAnchor(
-  annotation: Extract<PdfAnnotation, { kind: 'textHighlight' }>,
-  handle: 'start' | 'end',
-  textRects: TextLayerRect[]
-) {
-  const coveredTextRects = textRects.filter((textRect) =>
-    annotation.rects.some((highlightRect) =>
-      textRectOverlapsHighlight(textRect.rect, highlightRect)
-    )
-  );
-  const firstCoveredIndex = coveredTextRects[0]?.index;
-  const lastCoveredIndex = coveredTextRects.at(-1)?.index;
-
-  if (
-    typeof firstCoveredIndex !== 'number' ||
-    typeof lastCoveredIndex !== 'number'
-  ) {
-    return null;
-  }
-
-  return handle === 'start' ? lastCoveredIndex : firstCoveredIndex;
-}
-
-function moveTextHighlightHandle(
-  annotation: Extract<PdfAnnotation, { kind: 'textHighlight' }>,
-  handle: 'start' | 'end',
-  point: PdfPoint,
-  textRects: TextLayerRect[],
-  anchorIndex: number | null
-) {
-  if (textRects.length > 0 && anchorIndex !== null) {
-    const targetIndex = nearestTextRectIndex(textRects, point);
-    const startIndex =
-      handle === 'start'
-        ? Math.min(targetIndex, anchorIndex)
-        : Math.min(anchorIndex, targetIndex);
-    const endIndex =
-      handle === 'start'
-        ? Math.max(targetIndex, anchorIndex)
-        : Math.max(anchorIndex, targetIndex);
-    const nextTextRects = textRects.filter(
-      (textRect) => textRect.index >= startIndex && textRect.index <= endIndex
-    );
-    const nextRects = textLayerSegmentsToHighlightRects(nextTextRects);
-
-    if (nextRects.length > 0) {
-      return {
-        ...annotation,
-        rects: nextRects,
-        quadPoints: nextRects.map(rectToQuadPoints),
-        contents: joinTextLayerSegments(nextTextRects)
-      };
-    }
-  }
-
-  const rects = annotation.rects.map((rect) => ({ ...rect }));
-  const targetIndex = nearestRectIndex(rects, point);
-
-  if (handle === 'start') {
-    const nextRects = rects.slice(targetIndex);
-    const first = nextRects[0];
-    if (first) {
-      first.x1 = clamp(point.x, Math.min(first.x1, first.x2), first.x2 - 1);
-    }
-    return {
-      ...annotation,
-      rects: nextRects,
-      quadPoints: nextRects.map(rectToQuadPoints)
-    };
-  } else {
-    const nextRects = rects.slice(0, targetIndex + 1);
-    const last = nextRects.at(-1);
-    if (last) {
-      last.x2 = clamp(point.x, last.x1 + 1, Math.max(last.x1, last.x2));
-    }
-    return {
-      ...annotation,
-      rects: nextRects,
-      quadPoints: nextRects.map(rectToQuadPoints)
-    };
-  }
-}
-
 function releasePointer(event: React.PointerEvent, pointerId: number) {
   try {
     (event.target as Element).releasePointerCapture?.(pointerId);
@@ -4482,7 +4193,8 @@ function shouldRenderExistingAnnotationInPdfJsLayer(
 
 function shouldRenderExistingAnnotationInAppearanceOverlay(
   annotation: ExistingPdfAnnotation,
-  _annotationIndex: number
+  pageAnnotations: PdfAnnotation[],
+  pageIndex: number
 ) {
   if (
     annotation.annotationType === AnnotationType.LINK ||
@@ -4493,7 +4205,7 @@ function shouldRenderExistingAnnotationInAppearanceOverlay(
     return false;
   }
 
-  return !isEditableExistingAnnotation(annotation);
+  return !isManagedExistingAnnotation(annotation, pageAnnotations, pageIndex);
 }
 
 function isReadOnlyTextMarkupAnnotation(annotation: ExistingPdfAnnotation) {
@@ -4508,10 +4220,35 @@ function isReadOnlyTextMarkupAnnotation(annotation: ExistingPdfAnnotation) {
   );
 }
 
+// pdf.js's Stamp metadata can't tell us on its own whether a stamp will
+// import as an editable image (that requires the async pdf-lib byte
+// extraction in annotationImport.ts) - so instead of duplicating that
+// structural check here, this looks at whether the import already
+// succeeded, i.e. whether a matching imported `imageStamp` annotation is
+// currently present. That keeps the "hide the native PDF rendering" and
+// "did the import work" decisions from ever disagreeing, which would
+// otherwise either double-render the stamp or make it vanish.
+function isManagedExistingAnnotation(
+  annotation: ExistingPdfAnnotation,
+  pageAnnotations: PdfAnnotation[],
+  pageIndex: number
+) {
+  if (annotation.annotationType === AnnotationType.STAMP) {
+    const importedId = `imported-${pageIndex}-${existingAnnotationId(annotation)}`;
+    return pageAnnotations.some(
+      (candidate) => candidate.kind === 'imageStamp' && candidate.id === importedId
+    );
+  }
+
+  return isEditableExistingAnnotation(annotation);
+}
+
 function keepOnlyChangedPixelsInAnnotationRects(
   appearance: ImageData,
   base: ImageData,
   existingAnnotations: ExistingPdfAnnotation[],
+  pageAnnotations: PdfAnnotation[],
+  pageIndex: number,
   viewport: PageViewport,
   scaleX: number,
   scaleY: number
@@ -4527,7 +4264,13 @@ function keepOnlyChangedPixelsInAnnotationRects(
   }
 
   for (const annotation of existingAnnotations) {
-    if (!shouldRenderExistingAnnotationInAppearanceOverlay(annotation, 0)) {
+    if (
+      !shouldRenderExistingAnnotationInAppearanceOverlay(
+        annotation,
+        pageAnnotations,
+        pageIndex
+      )
+    ) {
       continue;
     }
 
@@ -4602,6 +4345,8 @@ function* annotationPixelIndexes(
 function clearManagedAnnotationRectsFromAppearanceOverlay(
   context: CanvasRenderingContext2D,
   existingAnnotations: ExistingPdfAnnotation[],
+  pageAnnotations: PdfAnnotation[],
+  pageIndex: number,
   viewport: PageViewport,
   scaleX: number,
   scaleY: number
@@ -4609,7 +4354,7 @@ function clearManagedAnnotationRectsFromAppearanceOverlay(
   const padding = 8;
   existingAnnotations.forEach((annotation) => {
     if (
-      !isEditableExistingAnnotation(annotation) &&
+      !isManagedExistingAnnotation(annotation, pageAnnotations, pageIndex) &&
       !isReadOnlyTextMarkupAnnotation(annotation)
     ) {
       return;
@@ -4936,46 +4681,7 @@ function isAnnotationCreationTool(tool: Tool) {
   );
 }
 
-const PDF_UNITS_PER_INCH = 72;
-const MILLIMETRES_PER_INCH = 25.4;
-const INK_CAPTURE_SPACING_MM = 0.05;
-const INK_POINT_SPACING_MM = 0.15;
-const INK_SIMPLIFICATION_TOLERANCE_MM = 0.05;
-const INK_DOT_MAX_LENGTH_MM = 0.35;
-const FREEHAND_HIGHLIGHT_MIN_LENGTH_MM = 1;
 const TYPE_ERASER_MIN_DISTANCE_PX = 5;
-
-function appendDraftInkPoints(
-  path: PdfPoint[],
-  points: PdfPoint[],
-  viewport: PageViewport
-) {
-  const minDistance = inkCaptureSpacing(viewport);
-  for (const point of points) {
-    appendMutableInkPoint(path, point, minDistance);
-  }
-  return path;
-}
-
-function appendMutableInkPoint(
-  path: PdfPoint[],
-  point: PdfPoint,
-  minDistance: number
-) {
-  if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) {
-    return;
-  }
-
-  const previous = path[path.length - 1];
-  if (
-    previous &&
-    Math.hypot(point.x - previous.x, point.y - previous.y) < minDistance
-  ) {
-    return;
-  }
-
-  path.push(point);
-}
 
 function appendPdfPoints(path: PdfPoint[], points: PdfPoint[]) {
   return appendMutablePdfPoints([...path], points);
@@ -5015,51 +4721,10 @@ function expandedRectContainsPoint(
   );
 }
 
-function normalizeDraftInkPath(path: PdfPoint[], viewport: PageViewport) {
-  const resampled = resampleInkPath(path, inkPointSpacing(viewport));
-  return simplifyInkPath(resampled, inkSimplificationTolerance(viewport));
-}
-
-function inkCaptureSpacing(viewport: PageViewport) {
-  return millimetresToPdfUnits(INK_CAPTURE_SPACING_MM, viewport);
-}
-
-function inkPointSpacing(viewport: PageViewport) {
-  return millimetresToPdfUnits(INK_POINT_SPACING_MM, viewport);
-}
-
-function inkSimplificationTolerance(viewport: PageViewport) {
-  return millimetresToPdfUnits(INK_SIMPLIFICATION_TOLERANCE_MM, viewport);
-}
-
-function inkDotMaxLength(viewport: PageViewport) {
-  return millimetresToPdfUnits(INK_DOT_MAX_LENGTH_MM, viewport);
-}
-
-function freehandHighlightMinLength(viewport: PageViewport) {
-  return millimetresToPdfUnits(FREEHAND_HIGHLIGHT_MIN_LENGTH_MM, viewport);
-}
-
 function typeEraserMinLength(viewport: PageViewport) {
   const start = viewportPointToPdfPoint(0, 0, viewport);
   const end = viewportPointToPdfPoint(TYPE_ERASER_MIN_DISTANCE_PX, 0, viewport);
   return Math.hypot(end.x - start.x, end.y - start.y);
-}
-
-function millimetresToPdfUnits(millimetres: number, viewport: PageViewport) {
-  const userUnit =
-    Number.isFinite(viewport.userUnit) && viewport.userUnit > 0
-      ? viewport.userUnit
-      : 1;
-  return (millimetres * PDF_UNITS_PER_INCH) / MILLIMETRES_PER_INCH / userUnit;
-}
-
-function pdfUnitsToMillimetres(pdfUnits: number, viewport: PageViewport) {
-  const userUnit =
-    Number.isFinite(viewport.userUnit) && viewport.userUnit > 0
-      ? viewport.userUnit
-      : 1;
-  return (pdfUnits * MILLIMETRES_PER_INCH * userUnit) / PDF_UNITS_PER_INCH;
 }
 
 function schedulePriorityTask(
@@ -5102,24 +4767,6 @@ function hasColor(
   annotation: PdfAnnotation
 ): annotation is Extract<PdfAnnotation, { color: [number, number, number] }> {
   return annotation.kind !== 'imageStamp';
-}
-
-function annotationMatchesEraserScope(
-  annotation: PdfAnnotation,
-  scope: EraserScope
-) {
-  if (scope === 'all') {
-    return true;
-  }
-
-  if (scope === 'draw') {
-    return annotation.kind === 'draw';
-  }
-
-  return (
-    annotation.kind === 'textHighlight' ||
-    annotation.kind === 'freehandHighlight'
-  );
 }
 
 function hasStroke(

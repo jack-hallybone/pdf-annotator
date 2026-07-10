@@ -19,6 +19,39 @@ export function pdfRectToViewportRect(rect: PdfRect, viewport: PageViewport) {
   };
 }
 
+// Annotation kinds whose content has its own visual "up" (image pixels, text
+// baselines) need to spin with the page's rotation, not just slide to the
+// rotated bounding box - `pdfRectToViewportRect` alone only repositions/resizes
+// that box. This returns the local (unrotated) dimensions to lay the content
+// out at, plus the transform that places and spins it to match `rect`.
+// `extraRotation` layers a per-annotation clockwise spin (freeText/imageStamp's
+// own `rotation` field) on top of the page's - both pivot on the same on-screen
+// center, so they compose by simple addition.
+export function annotationContentTransform(
+  rect: { height: number; width: number; x: number; y: number },
+  viewport: PageViewport,
+  extraRotation = 0
+) {
+  // `rect` only ever has the PAGE's rotation baked in (it comes from
+  // `pdfRectToViewportRect`, unaware of `extraRotation`), so recovering the
+  // fixed local content size must undo only that, not the combined angle -
+  // otherwise the content's own dimensions would incorrectly shift every
+  // time `extraRotation` changes instead of just spinning in place.
+  const pageRotation = ((viewport.rotation % 360) + 360) % 360;
+  const pageSwapped = pageRotation === 90 || pageRotation === 270;
+  const localWidth = pageSwapped ? rect.height : rect.width;
+  const localHeight = pageSwapped ? rect.width : rect.height;
+  const rotation = ((viewport.rotation + extraRotation) % 360 + 360) % 360;
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+
+  return {
+    localWidth,
+    localHeight,
+    transform: `translate(${centerX} ${centerY}) rotate(${rotation}) translate(${-localWidth / 2} ${-localHeight / 2})`
+  };
+}
+
 export function pathToViewportD(path: PdfPoint[], viewport: PageViewport) {
   return inkPathCommands(path)
     .map((command) => {

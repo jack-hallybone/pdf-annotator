@@ -1,4 +1,8 @@
-import { boundsForRects } from './annotationGeometry';
+import {
+  boundsForRects,
+  nearestRectIndex,
+  rectToQuadPoints
+} from './annotationGeometry';
 import {
   viewportPointToPdfPoint,
   viewportRectToPdfRect
@@ -421,4 +425,92 @@ function dedupeClientRects(rects: DOMRect[]) {
     seen.add(key);
     return true;
   });
+}
+
+// Text-highlight resize-handle math. Kept here (rather than in
+// annotationGeometry) because it is fundamentally about mapping a drag point
+// back onto the page's text-layer segments - it leans on the text-layer
+// helpers above and only borrows nearestRectIndex/rectToQuadPoints from
+// annotationGeometry.
+export function oppositeHighlightHandleAnchor(
+  annotation: Extract<PdfAnnotation, { kind: 'textHighlight' }>,
+  handle: 'start' | 'end',
+  textRects: TextLayerRect[]
+) {
+  const coveredTextRects = textRects.filter((textRect) =>
+    annotation.rects.some((highlightRect) =>
+      textRectOverlapsHighlight(textRect.rect, highlightRect)
+    )
+  );
+  const firstCoveredIndex = coveredTextRects[0]?.index;
+  const lastCoveredIndex = coveredTextRects.at(-1)?.index;
+
+  if (
+    typeof firstCoveredIndex !== 'number' ||
+    typeof lastCoveredIndex !== 'number'
+  ) {
+    return null;
+  }
+
+  return handle === 'start' ? lastCoveredIndex : firstCoveredIndex;
+}
+
+export function moveTextHighlightHandle(
+  annotation: Extract<PdfAnnotation, { kind: 'textHighlight' }>,
+  handle: 'start' | 'end',
+  point: PdfPoint,
+  textRects: TextLayerRect[],
+  anchorIndex: number | null
+) {
+  if (textRects.length > 0 && anchorIndex !== null) {
+    const targetIndex = nearestTextRectIndex(textRects, point);
+    const startIndex =
+      handle === 'start'
+        ? Math.min(targetIndex, anchorIndex)
+        : Math.min(anchorIndex, targetIndex);
+    const endIndex =
+      handle === 'start'
+        ? Math.max(targetIndex, anchorIndex)
+        : Math.max(anchorIndex, targetIndex);
+    const nextTextRects = textRects.filter(
+      (textRect) => textRect.index >= startIndex && textRect.index <= endIndex
+    );
+    const nextRects = textLayerSegmentsToHighlightRects(nextTextRects);
+
+    if (nextRects.length > 0) {
+      return {
+        ...annotation,
+        rects: nextRects,
+        quadPoints: nextRects.map(rectToQuadPoints),
+        contents: joinTextLayerSegments(nextTextRects)
+      };
+    }
+  }
+
+  const rects = annotation.rects.map((rect) => ({ ...rect }));
+  const targetIndex = nearestRectIndex(rects, point);
+
+  if (handle === 'start') {
+    const nextRects = rects.slice(targetIndex);
+    const first = nextRects[0];
+    if (first) {
+      first.x1 = clamp(point.x, Math.min(first.x1, first.x2), first.x2 - 1);
+    }
+    return {
+      ...annotation,
+      rects: nextRects,
+      quadPoints: nextRects.map(rectToQuadPoints)
+    };
+  } else {
+    const nextRects = rects.slice(0, targetIndex + 1);
+    const last = nextRects.at(-1);
+    if (last) {
+      last.x2 = clamp(point.x, last.x1 + 1, Math.max(last.x1, last.x2));
+    }
+    return {
+      ...annotation,
+      rects: nextRects,
+      quadPoints: nextRects.map(rectToQuadPoints)
+    };
+  }
 }

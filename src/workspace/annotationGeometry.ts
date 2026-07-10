@@ -1,10 +1,158 @@
 import { clamp } from './viewerConfig';
+import { FREE_TEXT_MAX_WIDTH, FREE_TEXT_MIN_WIDTH } from './freeTextLayout';
 import type { PdfAnnotation, PdfPoint, PdfRect } from './types';
 
 export type InkPathCommand =
   | { point: PdfPoint; type: 'move' }
   | { point: PdfPoint; type: 'line' }
   | { control1: PdfPoint; control2: PdfPoint; point: PdfPoint; type: 'curve' };
+
+export type ImageStampResizeHandleKind =
+  | 'bottom-left'
+  | 'bottom-right'
+  | 'top-left'
+  | 'top-right';
+
+export function resizeFreeTextWidth(
+  annotation: Extract<PdfAnnotation, { kind: 'freeText' }>,
+  point: PdfPoint,
+  handle: 'left' | 'right'
+) {
+  const rotation = annotation.rotation ?? 0;
+  // `annotation.rect` is always the rotated on-page footprint (width/height
+  // swapped for 90/270, per rotatedAnnotationRect's convention) - the resize
+  // math below assumes an un-rotated rect, so it needs the local (un-rotated)
+  // bounds, not the on-page ones. rotatedAnnotationRect is its own inverse
+  // here (swapping width/height back undoes the earlier swap), so reusing it
+  // recovers the local rect without a separate function.
+  const localRect = rotatedAnnotationRect(annotation.rect, rotation);
+  const localPoint = unrotatePointForAnnotation(point, annotation.rect, rotation);
+  const left = Math.min(localRect.x1, localRect.x2);
+  const right = Math.max(localRect.x1, localRect.x2);
+  const top = Math.max(localRect.y1, localRect.y2);
+  const bottom = Math.min(localRect.y1, localRect.y2);
+
+  if (handle === 'left') {
+    const nextLeft = clamp(
+      localPoint.x,
+      right - FREE_TEXT_MAX_WIDTH,
+      right - FREE_TEXT_MIN_WIDTH
+    );
+    return {
+      ...annotation,
+      layoutWidth: right - nextLeft,
+      rect: rotatedAnnotationRect(
+        { x1: nextLeft, y1: bottom, x2: right, y2: top },
+        rotation
+      )
+    };
+  }
+
+  const nextRight = clamp(
+    localPoint.x,
+    left + FREE_TEXT_MIN_WIDTH,
+    left + FREE_TEXT_MAX_WIDTH
+  );
+  return {
+    ...annotation,
+    layoutWidth: nextRight - left,
+    rect: rotatedAnnotationRect(
+      { x1: left, y1: bottom, x2: nextRight, y2: top },
+      rotation
+    )
+  };
+}
+
+export function resizeImageStampRect(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  point: PdfPoint,
+  handle: ImageStampResizeHandleKind,
+  scale: number
+) {
+  const rotation = annotation.rotation ?? 0;
+  // See resizeFreeTextWidth's comment - the resize math here assumes an
+  // un-rotated rect, so it works in the local (un-rotated) frame throughout
+  // and only converts back to the on-page footprint at the very end.
+  const rect = rotatedAnnotationRect(annotation.rect, rotation);
+  const localPoint = unrotatePointForAnnotation(
+    point,
+    annotation.rect,
+    rotation
+  );
+  const aspectRatio = imageStampAspectRatio(annotation);
+  const minSize = Math.max(4, 12 / scale);
+  const anchors = {
+    'top-left': { x: rect.x2, y: rect.y1 },
+    'top-right': { x: rect.x1, y: rect.y1 },
+    'bottom-left': { x: rect.x2, y: rect.y2 },
+    'bottom-right': { x: rect.x1, y: rect.y2 }
+  };
+  const anchor = anchors[handle];
+  const requestedWidth = Math.max(minSize, Math.abs(localPoint.x - anchor.x));
+  const requestedHeight = Math.max(minSize, Math.abs(localPoint.y - anchor.y));
+  const width = Math.max(requestedWidth, requestedHeight * aspectRatio);
+  const height = width / aspectRatio;
+  const right = handle.endsWith('right');
+  const top = handle.startsWith('top');
+  const x1 = right ? anchor.x : anchor.x - width;
+  const x2 = right ? anchor.x + width : anchor.x;
+  const y1 = top ? anchor.y : anchor.y - height;
+  const y2 = top ? anchor.y + height : anchor.y;
+
+  return {
+    ...annotation,
+    rect: rotatedAnnotationRect(normalizedRect({ x1, x2, y1, y2 }), rotation)
+  };
+}
+
+export function resizeImageStampToWidth(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  width: number
+) {
+  const rect = annotation.rect;
+  const nextWidth = Math.max(1, width);
+  const height = nextWidth / imageStampAspectRatio(annotation);
+  return {
+    ...annotation,
+    rect: {
+      ...rect,
+      x2: rect.x1 + nextWidth,
+      y1: rect.y2 - height
+    }
+  };
+}
+
+export function resizeImageStampToHeight(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>,
+  height: number
+) {
+  const rect = annotation.rect;
+  const nextHeight = Math.max(1, height);
+  const width = nextHeight * imageStampAspectRatio(annotation);
+  return {
+    ...annotation,
+    rect: {
+      ...rect,
+      x2: rect.x1 + width,
+      y1: rect.y2 - nextHeight
+    }
+  };
+}
+
+export function imageStampAspectRatio(
+  annotation: Extract<PdfAnnotation, { kind: 'imageStamp' }>
+) {
+  return Math.max(0.01, annotation.widthPx / Math.max(1, annotation.heightPx));
+}
+
+export function normalizedRect(rect: PdfRect): PdfRect {
+  return {
+    x1: Math.min(rect.x1, rect.x2),
+    y1: Math.min(rect.y1, rect.y2),
+    x2: Math.max(rect.x1, rect.x2),
+    y2: Math.max(rect.y1, rect.y2)
+  };
+}
 
 export function rectToQuadPoints(rect: PdfRect) {
   return [
@@ -92,11 +240,153 @@ export function annotationBounds(annotation: PdfAnnotation): PdfRect {
     case 'freehandHighlight':
       return boundsForPointPaths(annotation.paths);
 
+    // `rect` always stores the un-rotated footprint for these two kinds -
+    // rotatedAnnotationRect returns the actual on-screen footprint, which is
+    // what every caller of annotationBounds needs (hit-testing, the eraser's
+    // spatial index, lasso containment, page-membership/scroll-to checks).
     case 'freeText':
     case 'imageStamp':
+      return rotatedAnnotationRect(annotation.rect, annotation.rotation ?? 0);
+
     case 'stickyNote':
       return annotation.rect;
   }
+}
+
+// The four appearance-stream rotation matrices this app's writer can
+// produce (the [a b c d] part; translation depends on the local width/height
+// and is applied separately below), keyed by clockwise degrees. Kept as one
+// literal table so the write side (pdfWriter.ts's appearanceRotationMatrix)
+// and the reverse lookup used on reimport (annotationImport.ts's
+// rotationFromMatrix) can never drift out of sync with each other - adding a
+// rotation option only ever means editing this one table.
+const ROTATION_APPEARANCE_MATRIX_ABCD: Record<
+  number,
+  [number, number, number, number]
+> = {
+  0: [1, 0, 0, 1],
+  90: [0, -1, 1, 0],
+  180: [-1, 0, 0, -1],
+  270: [0, 1, -1, 0]
+};
+
+// Builds the full 6-entry Form XObject /Matrix for a given rotation, given
+// the appearance's local (un-rotated) width/height - matches the PDF spec's
+// "rotate BBox content, then translate so the transformed BBox lands back at
+// the origin" requirement so the viewer's automatic BBox-to-Rect fit is a
+// pure translate, never an unwanted rescale.
+export function appearanceRotationMatrix(
+  rotation: number,
+  width: number,
+  height: number
+): number[] {
+  const normalized = ((rotation % 360) + 360) % 360;
+  const abcd = ROTATION_APPEARANCE_MATRIX_ABCD[normalized] ?? ROTATION_APPEARANCE_MATRIX_ABCD[0];
+  switch (normalized) {
+    case 90:
+      return [...abcd, 0, width];
+    case 180:
+      return [...abcd, width, height];
+    case 270:
+      return [...abcd, height, 0];
+    default:
+      return [...abcd, 0, 0];
+  }
+}
+
+// Inverse of appearanceRotationMatrix's [a b c d] part: given the four
+// leading Matrix entries (already rounded to the nearest integer, since
+// pdf-lib round-trips these as plain numbers with no meaningful drift for
+// this app's own output), returns which rotation produced them, or `null`
+// if the matrix doesn't match any of the four this app ever writes. `null`
+// is deliberately distinct from `0` - a present-but-unrecognized Matrix
+// means the caller can't safely assume any particular rotation and should
+// decline to import rather than silently guessing unrotated.
+export function rotationFromAppearanceMatrix(
+  a: number,
+  b: number,
+  c: number,
+  d: number
+): number | null {
+  const roundedA = Math.round(a);
+  const roundedB = Math.round(b);
+  const roundedC = Math.round(c);
+  const roundedD = Math.round(d);
+
+  for (const [rotation, abcd] of Object.entries(ROTATION_APPEARANCE_MATRIX_ABCD)) {
+    if (
+      abcd[0] === roundedA &&
+      abcd[1] === roundedB &&
+      abcd[2] === roundedC &&
+      abcd[3] === roundedD
+    ) {
+      return Number(rotation);
+    }
+  }
+
+  return null;
+}
+
+function rotationTrig(rotation: number) {
+  switch (((rotation % 360) + 360) % 360) {
+    case 90:
+      return { cos: 0, sin: 1 };
+    case 180:
+      return { cos: -1, sin: 0 };
+    case 270:
+      return { cos: 0, sin: -1 };
+    default:
+      return { cos: 1, sin: 0 };
+  }
+}
+
+// A freeText/imageStamp annotation's own `rotation` field spins its content
+// independently of the page - `rect` always stores the un-rotated (reading
+// direction) footprint. This returns the on-screen footprint after that spin:
+// unchanged at 0/180, width/height swapped around the same center at 90/270.
+export function rotatedAnnotationRect(rect: PdfRect, rotation: number): PdfRect {
+  const normalized = ((rotation % 360) + 360) % 360;
+  if (normalized !== 90 && normalized !== 270) {
+    return rect;
+  }
+
+  const width = Math.abs(rect.x2 - rect.x1);
+  const height = Math.abs(rect.y2 - rect.y1);
+  const cx = (rect.x1 + rect.x2) / 2;
+  const cy = (rect.y1 + rect.y2) / 2;
+  return {
+    x1: cx - height / 2,
+    x2: cx + height / 2,
+    y1: cy - width / 2,
+    y2: cy + width / 2
+  };
+}
+
+// Converts a point from "as displayed" (post-rotation) space back into the
+// annotation's own local/un-rotated space, so existing left/right or corner
+// resize math (written assuming no rotation) keeps working unchanged. PDF
+// space is Y-up while the on-screen rotation is clockwise in Y-down screen
+// space, so undoing it here uses the standard (Y-up, counterclockwise-positive)
+// rotation formula with the angle taken as-is, not negated.
+export function unrotatePointForAnnotation(
+  point: PdfPoint,
+  rect: PdfRect,
+  rotation: number
+): PdfPoint {
+  const normalized = ((rotation % 360) + 360) % 360;
+  if (normalized === 0) {
+    return point;
+  }
+
+  const { cos, sin } = rotationTrig(normalized);
+  const cx = (rect.x1 + rect.x2) / 2;
+  const cy = (rect.y1 + rect.y2) / 2;
+  const dx = point.x - cx;
+  const dy = point.y - cy;
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos
+  };
 }
 
 export function boundsForRects(rects: PdfRect[]): PdfRect {

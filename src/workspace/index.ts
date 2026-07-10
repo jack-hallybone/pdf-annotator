@@ -3,6 +3,8 @@ import './styles.css';
 export { PdfWorkspace as PdfAnnotatorWorkspace, PdfWorkspace } from './PdfWorkspace';
 export { attachPdfSourceId } from './host';
 export { createPdfFileLoader, readPdfFile } from './pdfFile';
+export { WorkspaceNoticeStack } from './components/WorkspaceNotices';
+export type { WorkspaceNotice } from './components/WorkspaceNotices';
 export type { AppTheme } from '../theme';
 export type {
   PdfExternalLinkContext,

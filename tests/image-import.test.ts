@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readImageHeaderDimensions } from '../src/annotator/imageImport';
+import { readImageHeaderDimensions } from '../src/workspace/imageImport';
 
 test('reads PNG dimensions from IHDR without decoding image pixels', () => {
   const bytes = new Uint8Array(24);

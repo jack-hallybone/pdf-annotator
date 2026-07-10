@@ -118,6 +118,7 @@
   box-sizing: border-box;
   height: 100%;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding:
     1rem
     calc(1rem + var(--pdfa-floating-safe-inline) + var(--pdfa-scrollbar-inline))
@@ -959,8 +960,22 @@
   width: 1.875rem;
 }
 
+.selection-rotate-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
+  border-radius: 4px;
+  color: var(--pdfa-ink);
+  cursor: pointer;
+  display: grid;
+  height: 1.875rem;
+  place-items: center;
+  width: 1.875rem;
+}
+
 .selection-copy-button:hover,
-.selection-delete-button:hover { background: var(--pdfa-bg); }
+.selection-delete-button:hover,
+.selection-rotate-button:hover { background: var(--pdfa-bg); }
 
 .note-popover {
   background: rgb(var(--pdfa-ink-rgb) / 0.04);

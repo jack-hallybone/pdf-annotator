@@ -6,6 +6,7 @@ import {
   sameRgbColor
 } from './annotationColors';
 import type { RgbColor } from './annotationColors';
+import { clamp } from './viewerConfig';
 export type { RgbColor } from './annotationColors';
 
 export function SettingsPanelShell({
@@ -118,8 +119,4 @@ export function NumberSetting({
 
 function formatValue(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }

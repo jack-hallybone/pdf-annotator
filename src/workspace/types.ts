@@ -74,6 +74,8 @@ export type FreeTextAnnotation = {
   color: [number, number, number];
   opacity: number;
   layoutWidth?: number;
+  // Clockwise degrees (0/90/180/270), independent of the page's own rotation.
+  rotation?: number;
 };
 
 export type StickyNoteAnnotation = {
@@ -96,6 +98,8 @@ export type ImageStampAnnotation = {
   mimeType: 'image/png';
   widthPx: number;
   heightPx: number;
+  // Clockwise degrees (0/90/180/270), independent of the page's own rotation.
+  rotation?: number;
 };
 
 export type PdfAnnotation =
@@ -107,6 +111,11 @@ export type PdfAnnotation =
 
 export type PageViewport = ReturnType<PDFPageProxy['getViewport']>;
 export type LoadedPage = PDFPageProxy | null;
+
+export type PageDisplaySize = {
+  height: number;
+  width: number;
+};
 
 export type PageSize = {
   width: number;

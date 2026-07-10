@@ -1,54 +1,47 @@
 import {
   PDFArray,
   PDFDict,
-  PDFDocument,
   PDFHexString,
   PDFName,
   PDFPage,
   PDFRef,
   PDFNumber,
   PDFString,
-  ParseSpeeds,
   PDFFont,
-  StandardFonts,
-  degrees,
-  rgb
+  StandardFonts
 } from 'pdf-lib';
+import type { PDFDocument } from 'pdf-lib';
 import {
+  appearanceRotationMatrix,
   dotPath,
   inkPathCommands,
   pathLooksClosed,
-  rectToQuadPoints
+  rectToQuadPoints,
+  rotatedAnnotationRect
 } from './annotationGeometry';
+import {
+  clampPdfNumber,
+  normalizedRectValues,
+  sourceKeyNumber,
+  textHash
+} from './annotationSourceKey';
 import {
   FREE_TEXT_LINE_HEIGHT,
   freeTextContentRect,
   freeTextVisualLines
 } from './freeTextLayout';
+import { loadEditablePdf, saveEditedPdf } from './pdfPageOperations';
 import type { InkAnnotation, PdfAnnotation, PdfPoint, PdfRect } from './types';
 
 const printFlag = 4;
 const PDF_COORDINATE_PRECISION = 0.01;
 const PDF_RATIO_PRECISION = 0.001;
-const linedPageLineColor = rgb(0.58, 0.66, 0.7);
-const linedPageMarginColor = rgb(0.68, 0.72, 0.74);
-const millimetresPerInch = 25.4;
-const pdfPointsPerInch = 72;
-const linedPageLineSpacing = (8 / millimetresPerInch) * pdfPointsPerInch;
 const supportedAnnotationSubtypes = new Set([
   'Highlight',
   'Ink',
   'FreeText',
   'Text'
 ]);
-const pdfLoadOptions = {
-  parseSpeed: ParseSpeeds.Fastest,
-  updateMetadata: false
-};
-const pdfSaveOptions = {
-  objectsPerTick: Infinity,
-  updateFieldAppearances: false
-};
 const freeTextFontResourceName = 'Helvetica';
 const winAnsiExtraCodePoints = new Set([
   0x0152,
@@ -110,117 +103,6 @@ export class UnsupportedAnnotationTextError extends Error {
   }
 }
 
-function loadEditablePdf(bytes: Uint8Array) {
-  return PDFDocument.load(bytes, pdfLoadOptions);
-}
-
-function saveEditedPdf(pdfDoc: PDFDocument) {
-  return pdfDoc.save(pdfSaveOptions);
-}
-
-export async function addBlankPageAt(
-  bytes: Uint8Array,
-  pageIndex: number,
-  templatePageIndex: number
-) {
-  const pdfDoc = await loadEditablePdf(bytes);
-  const sourcePage = pdfDoc.getPage(templatePageIndex);
-  const { width, height } = sourcePage.getSize();
-  pdfDoc.insertPage(pageIndex, [width, height]);
-  return saveEditedPdf(pdfDoc);
-}
-
-export async function addLinedPageAt(
-  bytes: Uint8Array,
-  pageIndex: number,
-  templatePageIndex: number
-) {
-  const pdfDoc = await loadEditablePdf(bytes);
-  const sourcePage = pdfDoc.getPage(templatePageIndex);
-  const { width, height } = sourcePage.getSize();
-  const page = pdfDoc.insertPage(pageIndex, [width, height]);
-  drawLinedPage(page, width, height);
-  return saveEditedPdf(pdfDoc);
-}
-
-export async function removePage(bytes: Uint8Array, pageIndex: number) {
-  const pdfDoc = await loadEditablePdf(bytes);
-  if (pdfDoc.getPageCount() <= 1) {
-    throw new Error('A PDF must keep at least one page.');
-  }
-
-  pdfDoc.removePage(pageIndex);
-  return saveEditedPdf(pdfDoc);
-}
-
-export async function rotatePageClockwise(bytes: Uint8Array, pageIndex: number) {
-  const pdfDoc = await loadEditablePdf(bytes);
-  const page = pdfDoc.getPage(pageIndex);
-  const currentAngle = page.getRotation().angle;
-  page.setRotation(degrees((currentAngle + 90) % 360));
-  return saveEditedPdf(pdfDoc);
-}
-
-export async function mergePdfAfterPage(
-  bytes: Uint8Array,
-  mergeBytes: Uint8Array,
-  afterPageIndex: number
-) {
-  const pdfDoc = await loadEditablePdf(bytes);
-  const mergeDoc = await loadEditablePdf(mergeBytes);
-  const pageIndexes = mergeDoc.getPageIndices();
-  const copiedPages = await pdfDoc.copyPages(mergeDoc, pageIndexes);
-  const insertAt = Math.min(
-    Math.max(afterPageIndex + 1, 0),
-    pdfDoc.getPageCount()
-  );
-
-  copiedPages.forEach((page, index) => {
-    pdfDoc.insertPage(insertAt + index, page);
-  });
-
-  return {
-    bytes: await saveEditedPdf(pdfDoc),
-    insertedPageCount: copiedPages.length
-  };
-}
-
-function drawLinedPage(page: PDFPage, width: number, height: number) {
-  const marginX = Math.min(36, width * 0.075);
-  const top = height - Math.min(60, height * 0.08);
-  const bottom = Math.max(
-    0,
-    Math.min(60, height * 0.08) - linedPageLineSpacing
-  );
-  const guideX = marginX + Math.min(24, width * 0.04);
-
-  page.drawLine({
-    start: { x: guideX, y: 0 },
-    end: { x: guideX, y: height },
-    color: linedPageMarginColor,
-    opacity: 0.34,
-    thickness: 0.6
-  });
-
-  const lineYs: number[] = [];
-  for (let y = bottom; y <= top; y += linedPageLineSpacing) {
-    lineYs.push(y);
-  }
-  for (const y of lineYs.reverse()) {
-    drawLinedPageRule(page, width, y);
-  }
-}
-
-function drawLinedPageRule(page: PDFPage, width: number, y: number) {
-  page.drawLine({
-    start: { x: 0, y },
-    end: { x: width, y },
-    color: linedPageLineColor,
-    opacity: 0.58,
-    thickness: 0.6
-  });
-}
-
 export async function writePdfAnnotations(
   bytes: Uint8Array,
   annotations: PdfAnnotation[],
@@ -229,6 +111,7 @@ export async function writePdfAnnotations(
     removeUnmatchedSupportedAnnotations?: boolean;
     replaceAnnotationSourceIds?: Iterable<string>;
     replacePageIndexes?: Iterable<number>;
+    onMalformedExistingAnnotations?: (count: number) => void;
   } = {}
 ) {
   assertAnnotationsTextIsSupported(annotations);
@@ -245,13 +128,16 @@ export async function writePdfAnnotations(
     options.removeUnmatchedSupportedAnnotations ||
     (replaceAnnotationSourceIds && replaceAnnotationSourceIds.size > 0)
   ) {
-    removeSupportedExistingAnnotations(
+    const malformedCount = removeSupportedExistingAnnotations(
       pdfDoc,
       replacePageIndexes,
       options.removeUnmatchedSupportedAnnotations
         ? null
         : replaceAnnotationSourceIds
     );
+    if (malformedCount > 0) {
+      options.onMalformedExistingAnnotations?.(malformedCount);
+    }
   }
 
   let freeTextFont: PDFFont | null = null;
@@ -329,8 +215,13 @@ export async function writePdfAnnotations(
 
       const fontSize = pdfFontSize(annotation.fontSize);
       const [r, g, b] = pdfColor(annotation.color);
+      const rotation = annotation.rotation ?? 0;
+      // `annotation.rect` is the rotated on-page footprint (width/height
+      // swapped for 90/270) - freeTextContentRect lays out content assuming
+      // an un-rotated rect, so it needs the local footprint here, not the
+      // on-page one (rotatedAnnotationRect is its own inverse for this).
       const rect = freeTextContentRect(
-        annotation.rect,
+        rotatedAnnotationRect(annotation.rect, rotation),
         text,
         fontSize,
         { layoutWidth: annotation.layoutWidth }
@@ -339,7 +230,7 @@ export async function writePdfAnnotations(
       addAnnotation(page, {
         Type: 'Annot',
         Subtype: 'FreeText',
-        Rect: rectToArray(rect),
+        Rect: rectToArray(rotatedAnnotationRect(rect, rotation)),
         Contents: pdfTextString(text),
         ...annotationBase(annotation.id),
         CA: pdfOpacity(annotation.opacity),
@@ -359,7 +250,8 @@ export async function writePdfAnnotations(
             fontSize,
             annotation.color,
             annotation.opacity,
-            freeTextFont
+            freeTextFont,
+            rotation
           )
         },
         IT: 'FreeTextTypeWriter',
@@ -405,14 +297,15 @@ export async function writePdfAnnotations(
       }
 
       const image = await pdfDoc.embedPng(base64ToBytes(annotation.imageData));
+      const imageRotation = annotation.rotation ?? 0;
       addAnnotation(page, {
         Type: 'Annot',
         Subtype: 'Stamp',
-        Rect: rectToArray(annotation.rect),
+        Rect: rectToArray(rotatedAnnotationRect(annotation.rect, imageRotation)),
         ...annotationBase(annotation.id),
         Name: 'Image',
         AP: {
-          N: imageStampAppearance(page, annotation.rect, image.ref)
+          N: imageStampAppearance(page, annotation.rect, image.ref, imageRotation)
         }
       });
     }
@@ -506,7 +399,8 @@ function freeTextAppearance(
   fontSize: number,
   color: [number, number, number],
   opacity: number,
-  font: PDFFont
+  font: PDFFont,
+  rotation = 0
 ) {
   const context = page.doc.context;
   const [x1, y1, x2, y2] = rectToArray(rect);
@@ -537,7 +431,7 @@ function freeTextAppearance(
       Subtype: 'Form',
       FormType: 1,
       BBox: [0, 0, width, height],
-      Matrix: [1, 0, 0, 1, 0, 0],
+      Matrix: appearanceRotationMatrix(rotation, width, height),
       Resources: {
         ExtGState: {
           GS0: {
@@ -590,7 +484,12 @@ function stickyNoteAppearance(
   );
 }
 
-function imageStampAppearance(page: PDFPage, rect: PdfRect, imageRef: PDFRef) {
+function imageStampAppearance(
+  page: PDFPage,
+  rect: PdfRect,
+  imageRef: PDFRef,
+  rotation = 0
+) {
   const context = page.doc.context;
   const [x1, y1, x2, y2] = rectToArray(rect);
   const width = pdfCoordinate(x2 - x1);
@@ -608,7 +507,7 @@ function imageStampAppearance(page: PDFPage, rect: PdfRect, imageRef: PDFRef) {
       Subtype: 'Form',
       FormType: 1,
       BBox: [0, 0, width, height],
-      Matrix: [1, 0, 0, 1, 0, 0],
+      Matrix: appearanceRotationMatrix(rotation, width, height),
       Resources: {
         XObject: {
           Im0: imageRef
@@ -968,6 +867,10 @@ function removeSupportedExistingAnnotations(
   replacePageIndexes: Set<number> | null,
   replaceAnnotationSourceIds: Set<string> | null
 ) {
+  // Keyed by "pageIndex:index" so the same malformed annotation isn't
+  // double-counted across the two passes below.
+  const malformedAnnotationKeys = new Set<string>();
+
   for (const [pageIndex, page] of pdfDoc.getPages().entries()) {
     if (replacePageIndexes && !replacePageIndexes.has(pageIndex)) {
       continue;
@@ -981,47 +884,64 @@ function removeSupportedExistingAnnotations(
 
     const supportedAnnotationRefs = new Set<string>();
     for (let index = 0; index < annots.size(); index += 1) {
-      const annotation = annots.lookupMaybe(index, PDFDict);
-      const subtype = annotationSubtype(annotation);
-      const annotationRef = annots.get(index);
+      try {
+        const annotation = annots.lookupMaybe(index, PDFDict);
+        const subtype = annotationSubtype(annotation);
+        const annotationRef = annots.get(index);
 
-      if (
-        subtype &&
-        isRemovableAnnotationSubtype(subtype, replaceAnnotationSourceIds) &&
-        shouldRemoveSupportedAnnotation(
-          annotation,
-          annotationRef,
-          pageIndex,
-          index,
-          replaceAnnotationSourceIds
-        )
-      ) {
-        if (annotationRef instanceof PDFRef) {
-          supportedAnnotationRefs.add(annotationRef.toString());
+        if (
+          subtype &&
+          isRemovableAnnotationSubtype(subtype, replaceAnnotationSourceIds) &&
+          shouldRemoveSupportedAnnotation(
+            annotation,
+            annotationRef,
+            pageIndex,
+            index,
+            replaceAnnotationSourceIds
+          )
+        ) {
+          if (annotationRef instanceof PDFRef) {
+            supportedAnnotationRefs.add(annotationRef.toString());
+          }
         }
+      } catch {
+        // A malformed pre-existing annotation (a wrong-typed Rect, Subtype,
+        // etc. - pdf-lib's lookupMaybe throws rather than returning undefined
+        // for a present-but-wrong-typed value) shouldn't be able to abort the
+        // whole save. Leave whatever we can't safely inspect alone, and count
+        // it so the caller can let the user know something was skipped.
+        malformedAnnotationKeys.add(`${pageIndex}:${index}`);
       }
     }
 
     for (let index = annots.size() - 1; index >= 0; index -= 1) {
-      const annotation = annots.lookupMaybe(index, PDFDict);
-      const subtype = annotationSubtype(annotation);
-      const annotationRef = annots.get(index);
+      try {
+        const annotation = annots.lookupMaybe(index, PDFDict);
+        const subtype = annotationSubtype(annotation);
+        const annotationRef = annots.get(index);
 
-      if (
-        shouldRemoveExistingAnnotation(
-          annotation,
-          annotationRef,
-          subtype,
-          supportedAnnotationRefs,
-          replaceAnnotationSourceIds,
-          pageIndex,
-          index
-        )
-      ) {
-        annots.remove(index);
+        if (
+          shouldRemoveExistingAnnotation(
+            annotation,
+            annotationRef,
+            subtype,
+            supportedAnnotationRefs,
+            replaceAnnotationSourceIds,
+            pageIndex,
+            index
+          )
+        ) {
+          annots.remove(index);
+        }
+      } catch {
+        // Same as above - a single malformed existing annotation must not
+        // block removal/preservation decisions for the rest of the page.
+        malformedAnnotationKeys.add(`${pageIndex}:${index}`);
       }
     }
   }
+
+  return malformedAnnotationKeys.size;
 }
 
 function removeAllExistingAnnotations(pdfDoc: PDFDocument) {
@@ -1169,28 +1089,6 @@ function isFiniteNumberArray(values: Array<number | null>): values is number[] {
   return values.every(
     (value) => typeof value === 'number' && Number.isFinite(value)
   );
-}
-
-function normalizedRectValues(values: number[]) {
-  return [
-    Math.min(values[0], values[2]),
-    Math.min(values[1], values[3]),
-    Math.max(values[0], values[2]),
-    Math.max(values[1], values[3])
-  ];
-}
-
-function sourceKeyNumber(value: number) {
-  return Number(value.toFixed(2)).toString();
-}
-
-function textHash(text: string) {
-  let hash = 2166136261;
-  for (const character of text) {
-    hash ^= character.codePointAt(0) ?? 0;
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16);
 }
 
 function pdfStringEntry(annotation: PDFDict | undefined, key: string) {
@@ -1394,19 +1292,6 @@ function pdfRatio(value: number) {
 function roundPdfNumber(value: number, precision: number) {
   const decimals = Math.max(0, Math.ceil(-Math.log10(precision)));
   return Number((Math.round(value / precision) * precision).toFixed(decimals));
-}
-
-function clampPdfNumber(
-  value: number,
-  min: number,
-  max: number,
-  fallback: number
-) {
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-
-  return Math.min(max, Math.max(min, value));
 }
 
 function pdfDate(date = new Date()) {

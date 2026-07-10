@@ -86,9 +86,13 @@ function BrowserShellInner() {
   useEffect(
     () =>
       setPwaFileLaunchHandler(async (handles) => {
-        const launchedDocuments =
-          await browserFileHandlesToHostDocuments(handles);
-        shellRef.current?.openDocuments(launchedDocuments);
+        try {
+          const launchedDocuments =
+            await browserFileHandlesToHostDocuments(handles);
+          shellRef.current?.openDocuments(launchedDocuments);
+        } catch {
+          shellRef.current?.showNotice('Could not open this file.');
+        }
       }),
     []
   );

@@ -1,5 +1,6 @@
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
+import { clamp } from './viewerConfig';
 
 const pdfjsAssetBase = `${import.meta.env.BASE_URL}pdfjs/`;
 
@@ -104,8 +105,4 @@ function emptyCanvasContext() {
     willReadFrequently: true
   });
   return emptyCanvasSampleContext;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }

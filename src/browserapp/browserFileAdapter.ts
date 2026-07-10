@@ -1,9 +1,9 @@
-import { createPdfFileLoader, readPdfFile } from '../annotator';
+import { createPdfFileLoader, readPdfFile } from '../workspace';
 import type {
   PdfDownloadTarget,
   PdfSaveAsTarget,
   PdfSaveTarget
-} from '../annotator';
+} from '../workspace';
 import { uint8ArrayToArrayBuffer } from '../bytes';
 import { safePdfFileName } from '../fileNames';
 import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
@@ -51,8 +51,9 @@ export const browserFileAdapter: PdfHostAdapter = {
       if (localFiles.length > 0) {
         return browserFilesToHostDocuments(localFiles);
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // Falls back to the plain File-object path below, which still opens
+      // the dropped file(s) - just without in-place-save support for them.
     }
 
     return browserFilesToHostDocuments(filesToBrowserFiles(dataTransfer.files));
@@ -95,6 +96,7 @@ function browserFilesToHostDocuments(
   return files
     .filter(({ file }) => isPdfFile(file))
     .map(({ file, handle }, index) => ({
+      fileKey: browserFileKey(file),
       source: {
         kind: 'loader',
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
@@ -104,6 +106,14 @@ function browserFilesToHostDocuments(
       },
       title: file.name
     }));
+}
+
+// Identifies "the same file" for the already-open-tab check without reading
+// file contents (pdfDocumentsFromFileInput is synchronous, so a content hash
+// isn't an option here) - name/size/lastModified is the same heuristic
+// pdfFileVersion below uses for save-conflict detection.
+function browserFileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 function filesToBrowserFiles(files: FileList | File[]) {
@@ -159,25 +169,22 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
     return null;
   }
 
-  return {
-    async saveAs(createBytes, suggestedName: string) {
-      const handle = await pickLocalPdfSaveFile(suggestedName);
-      if (!handle) {
-        return null;
-      }
-
-      const bytes = await createBytes();
-      await savePdfToLocalFile(handle, bytes);
-      const saveTarget = createBrowserPdfSaveTarget(
-        handle,
-        await handle.getFile()
-      );
-      return {
-        bytes,
-        fileName: handle.name,
-        saveTarget
-      };
+  return async (createBytes, suggestedName: string) => {
+    const handle = await pickLocalPdfSaveFile(suggestedName);
+    if (!handle) {
+      return null;
     }
+
+    const bytes = await createBytes();
+    await savePdfToLocalFile(handle, bytes);
+    const savedFile = await handle.getFile();
+    const saveTarget = createBrowserPdfSaveTarget(handle, savedFile);
+    return {
+      bytes,
+      fileKey: browserFileKey(savedFile),
+      fileName: handle.name,
+      saveTarget
+    };
   };
 }
 
@@ -195,24 +202,27 @@ export function createBrowserPdfSaveTarget(
     .normalize('NFC')
     .toLocaleLowerCase()}`;
 
-  return {
-    async save(bytes) {
-      await withBrowserFileLock(lockName, async () => {
-        const currentFile = await fileHandle.getFile();
-        if (!samePdfFileVersion(expectedVersion, pdfFileVersion(currentFile))) {
-          throw new Error(
-            'The PDF changed outside this window. Use Save As to avoid overwriting newer changes.'
-          );
-        }
+  return (bytes) =>
+    withBrowserFileLock(lockName, async () => {
+      const currentFile = await fileHandle.getFile();
+      if (!samePdfFileVersion(expectedVersion, pdfFileVersion(currentFile))) {
+        throw new Error(
+          'The PDF changed outside this window. Use Save As to avoid overwriting newer changes.'
+        );
+      }
 
-        await savePdfToLocalFile(fileHandle, bytes, {
-          expectedCurrentFingerprint: await getExpectedFingerprint()
-        });
-        expectedVersion = pdfFileVersion(await fileHandle.getFile());
-        expectedFingerprint = fingerprintPdfBytes(bytes);
+      await savePdfToLocalFile(fileHandle, bytes, {
+        expectedCurrentFingerprint: await getExpectedFingerprint()
       });
-    }
-  };
+      const savedFile = await fileHandle.getFile();
+      expectedVersion = pdfFileVersion(savedFile);
+      expectedFingerprint = fingerprintPdfBytes(bytes);
+      // The save just changed this file's mtime/size, so the tabbed shell's
+      // already-open-tab dedup key must be refreshed too - otherwise
+      // reopening this same file from disk after saving would no longer
+      // match this tab and would duplicate it.
+      return { fileKey: browserFileKey(savedFile) };
+    });
 }
 
 type BrowserLockManager = {
@@ -246,9 +256,7 @@ function samePdfFileVersion(
 }
 
 function browserFileDownloadTarget(): PdfDownloadTarget {
-  return {
-    download: browserDownloadPdf
-  };
+  return browserDownloadPdf;
 }
 
 function browserDownloadPdf(bytes: Uint8Array, suggestedName: string) {

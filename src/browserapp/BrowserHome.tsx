@@ -115,7 +115,7 @@ export function BrowserHome({
             rel="noopener noreferrer"
             target="_blank"
           >
-            Made by Jack and Codex
+            Made by Jack (and the machines)
           </a>
           <span className="browserapp-build-info" title={buildInfoTitle}>
             {buildInfoLabel}

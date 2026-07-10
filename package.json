@@ -13,7 +13,8 @@
     "preview": "vite preview",
     "prepare-assets": "node scripts/prepare-renderer-assets.mjs",
     "test": "node --import tsx --test tests/*.test.ts",
-    "security:audit": "npm audit && npm audit signatures"
+    "security:audit": "npm audit && npm audit signatures",
+    "lint": "eslint ."
   },
   "dependencies": {
     "lucide-react": "1.17.0",
@@ -27,8 +28,13 @@
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^17.7.0",
     "tsx": "^4.22.4",
     "typescript": "6.0.3",
+    "typescript-eslint": "^8.63.0",
     "vite": "8.0.16"
   }
 }

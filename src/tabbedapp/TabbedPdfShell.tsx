@@ -36,16 +36,18 @@ import {
 import type { PdfHostAdapter, PdfHostDocument } from './fileHost';
 import {
   attachPdfSourceId,
-  PdfWorkspace
-} from '../annotator';
+  PdfWorkspace,
+  WorkspaceNoticeStack
+} from '../workspace';
 import type {
   PdfAnnotation,
   PdfWorkspaceHandle,
   PdfWorkspaceProps,
   SensitivePdfWorkspaceSession,
   PdfWorkspaceSourceInput,
-  PdfWorkspaceSource
-} from '../annotator';
+  PdfWorkspaceSource,
+  WorkspaceNotice
+} from '../workspace';
 import {
   CORNELL_CONTENT_BOUNDS,
   createPdfTemplate
@@ -172,6 +174,7 @@ export type TabbedPdfShellHandle = {
     source: PdfWorkspaceSourceInput,
     options?: { fileKey?: string; title?: string }
   ) => void;
+  showNotice: (message: string) => void;
 };
 
 export type TabbedPdfShellProps = {
@@ -207,6 +210,7 @@ export const TabbedPdfShell = forwardRef<
   workspaceOptions = DEFAULT_WORKSPACE_OPTIONS
 }: TabbedPdfShellProps, ref) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const tabsNavRef = useRef<HTMLElement>(null);
   const initialDocumentsOpenedRef = useRef(false);
   const nextDocumentIdRef = useRef(0);
   const workspaceRefs = useRef(new Map<string, PdfWorkspaceHandle>());
@@ -230,6 +234,9 @@ export const TabbedPdfShell = forwardRef<
     () => new Set()
   );
   const [shellCommandBusy, setShellCommandBusy] = useState(false);
+  const [notices, setNotices] = useState<WorkspaceNotice[]>([]);
+  const noticeIdRef = useRef(0);
+  const noticeTimersRef = useRef(new Map<number, number>());
   const activeDocumentIdRef = useLatestRef(activeDocumentId);
   const activeWorkspaceBusy =
     activeDocumentId !== null && busyDocumentIds.has(activeDocumentId);
@@ -245,6 +252,51 @@ export const TabbedPdfShell = forwardRef<
   const documentsRef = useLatestRef(documents);
   const nextCloseConfirmationIdRef = useRef(0);
   const pendingHostDocumentsRef = useRef<PdfHostDocument[]>([]);
+
+  function dismissNotice(id: number) {
+    const timer = noticeTimersRef.current.get(id);
+    if (timer !== undefined) {
+      window.clearTimeout(timer);
+      noticeTimersRef.current.delete(id);
+    }
+    setNotices((current) => current.filter((notice) => notice.id !== id));
+  }
+
+  function showNotice(message: string, durationMs = 10000) {
+    const id = noticeIdRef.current + 1;
+    noticeIdRef.current = id;
+    setNotices((current) => {
+      const next: WorkspaceNotice[] = [];
+      for (const notice of current) {
+        if (notice.message === message) {
+          const existingTimer = noticeTimersRef.current.get(notice.id);
+          if (existingTimer !== undefined) {
+            window.clearTimeout(existingTimer);
+            noticeTimersRef.current.delete(notice.id);
+          }
+        } else {
+          next.push(notice);
+        }
+      }
+      next.push({ id, message });
+      return next;
+    });
+
+    const timer = window.setTimeout(() => {
+      noticeTimersRef.current.delete(id);
+      setNotices((current) => current.filter((notice) => notice.id !== id));
+    }, durationMs);
+    noticeTimersRef.current.set(id, timer);
+  }
+
+  useEffect(
+    () => () => {
+      for (const timer of noticeTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+    },
+    []
+  );
 
   function visibleDocumentIds() {
     return activeDocumentIdRef.current ? [activeDocumentIdRef.current] : [];
@@ -288,8 +340,8 @@ export const TabbedPdfShell = forwardRef<
     if (confirmCloseDocuments) {
       try {
         return (await confirmCloseDocuments(request)) ? 'discard' : 'cancel';
-      } catch (error) {
-        console.error(error);
+      } catch {
+        showNotice('Could not confirm. Nothing was closed.');
         return 'cancel' as const;
       }
     }
@@ -338,7 +390,8 @@ export const TabbedPdfShell = forwardRef<
           source,
           title: options.title
         }
-      ])
+      ]),
+    showNotice
   }));
 
   useEffect(() => {
@@ -396,6 +449,41 @@ export const TabbedPdfShell = forwardRef<
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [enableCloseTabShortcut]);
+
+  // Registered once for the shell's lifetime, so it exists before a newly
+  // opened tab's own PdfWorkspace has mounted (and registered its own
+  // Ctrl+P/Ctrl+S handling) - without this, a shortcut pressed in that brief
+  // window would fall through to the browser's native page print/save
+  // dialog instead of our PDF print/save route. Since this listener is added
+  // to `window` before any tab's own listener ever could be,
+  // stopImmediatePropagation here also keeps the (usually-already-
+  // registered) active tab's own handler from firing a second time for the
+  // same keypress.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      const command = key === 'p' ? 'print' : key === 's' ? 'save' : null;
+      if (!command) {
+        return;
+      }
+
+      const activeDocumentId = activeDocumentIdRef.current;
+      if (!activeDocumentId) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void runWorkspaceCommand(activeDocumentId, command);
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     document.title = documents.some((document) => document.hasUnsavedChanges)
@@ -604,7 +692,7 @@ export const TabbedPdfShell = forwardRef<
     workspaceRefs.current.delete(documentId);
     handleWorkspaceBusyChange(documentId, false);
     window.setTimeout(() => {
-      void handle.releaseRenderResources().catch(console.error);
+      void handle.releaseRenderResources().catch(() => undefined);
     }, 0);
   }
 
@@ -1033,8 +1121,8 @@ export const TabbedPdfShell = forwardRef<
     const stem = filenameStem(document.title);
     try {
       await navigator.clipboard.writeText(stem);
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showNotice('Could not copy filename.');
     } finally {
       closeTabContextMenu();
     }
@@ -1107,8 +1195,8 @@ export const TabbedPdfShell = forwardRef<
         markDirty: true,
         name: 'Untitled.pdf'
       });
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showNotice('Could not create a new document.');
     }
   }
 
@@ -1132,8 +1220,8 @@ export const TabbedPdfShell = forwardRef<
         markDirty: true,
         name: `${noteTitle}.pdf`
       });
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showNotice('Could not create a new document.');
     }
   }
 
@@ -1259,33 +1347,45 @@ export const TabbedPdfShell = forwardRef<
     }
 
     const tabElements = Array.from(
-      document.querySelectorAll<HTMLElement>('[data-tabbedapp-tab-id]')
+      tabsNavRef.current?.querySelectorAll<HTMLElement>(
+        '[data-tabbedapp-tab-id]'
+      ) ?? []
     );
     let targetId = tabDragState.targetId;
     let placement = tabDragState.placement;
 
-    for (const tabElement of tabElements) {
-      const tabId = tabElement.dataset.tabbedappTabId;
-      if (!tabId) {
-        continue;
-      }
-
-      const bounds = tabElement.getBoundingClientRect();
-      if (clientX < bounds.left) {
-        targetId = tabId;
-        placement = 'before';
-        break;
-      }
-
-      if (clientX <= bounds.right) {
-        targetId = tabId;
-        placement =
-          clientX < bounds.left + bounds.width / 2 ? 'before' : 'after';
-        break;
-      }
-
-      targetId = tabId;
+    const lastTab = tabElements.at(-1);
+    const lastTabId = lastTab?.dataset.tabbedappTabId;
+    if (lastTabId && clientX > lastTab.getBoundingClientRect().right) {
+      // Tabs are laid out in a single row in DOM order, so once the
+      // cursor is past the last tab's right edge, that's the answer -
+      // no need to measure every other tab to confirm it.
+      targetId = lastTabId;
       placement = 'after';
+    } else {
+      for (const tabElement of tabElements) {
+        const tabId = tabElement.dataset.tabbedappTabId;
+        if (!tabId) {
+          continue;
+        }
+
+        const bounds = tabElement.getBoundingClientRect();
+        if (clientX < bounds.left) {
+          targetId = tabId;
+          placement = 'before';
+          break;
+        }
+
+        if (clientX <= bounds.right) {
+          targetId = tabId;
+          placement =
+            clientX < bounds.left + bounds.width / 2 ? 'before' : 'after';
+          break;
+        }
+
+        targetId = tabId;
+        placement = 'after';
+      }
     }
 
     if (
@@ -1433,8 +1533,8 @@ export const TabbedPdfShell = forwardRef<
         openHostDocuments(documents);
         return;
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showNotice('Could not open the dropped file(s).');
     }
   }
 
@@ -1456,8 +1556,9 @@ export const TabbedPdfShell = forwardRef<
       if (result.useFileInputFallback && fileAdapter.fileInput) {
         fileInputRef.current?.click();
       }
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // Falls back to the native file input below, which still lets the
+      // user open a file - no separate notice needed for that continuation.
       if (fileAdapter.fileInput) {
         fileInputRef.current?.click();
       }
@@ -1472,8 +1573,8 @@ export const TabbedPdfShell = forwardRef<
     closeNewTabMenu();
     try {
       await action.onSelect();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      showNotice('Could not complete that action.');
     }
   }
 
@@ -1549,6 +1650,8 @@ export const TabbedPdfShell = forwardRef<
       onDrop={(event) => void handleDrop(event)}
       style={shellStyle}
     >
+      <WorkspaceNoticeStack notices={notices} onDismissNotice={dismissNotice} />
+
       {fileAdapter.fileInput &&
       fileAdapter.pdfDocumentsFromFileInput ? (
         <input
@@ -1581,7 +1684,7 @@ export const TabbedPdfShell = forwardRef<
         >
           <Home size={18} />
         </button>
-        <nav aria-label="Open PDFs" className="tabbedapp-tabs">
+        <nav aria-label="Open PDFs" className="tabbedapp-tabs" ref={tabsNavRef}>
           {documents.map((document, index) => (
             <Fragment key={document.id}>
               <span
@@ -2168,6 +2271,8 @@ function filenameStem(title: string) {
 
 function pdfFileNameFromStem(stem: string) {
   const cleaned = stem
+    // Intentionally strips ASCII control characters from filenames.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

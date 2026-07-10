@@ -28,14 +28,15 @@ export function registerBrowserServiceWorker() {
   }
 
   const register = () => {
+    // Offline/installable support is a bonus, not a feature the user directly
+    // invoked - if registration fails the app still works as a normal page,
+    // so there's nothing actionable to surface here.
     void navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`, {
         scope: import.meta.env.BASE_URL,
         updateViaCache: 'none'
       })
-      .catch((error) =>
-        console.error('Service worker registration failed.', error)
-      );
+      .catch(() => undefined);
   };
 
   if (document.readyState === 'complete') {
@@ -99,7 +100,9 @@ function enqueueFileLaunch(handles: LocalPdfFileHandle[]) {
 async function deliverFileLaunch(handles: LocalPdfFileHandle[]) {
   try {
     await fileLaunchHandler?.(handles);
-  } catch (error) {
-    console.error('Unable to open a launched PDF.', error);
+  } catch {
+    // The registered handler (see BrowserShell) is responsible for reporting
+    // its own failures to the user via the shell's notice UI - this is only
+    // a backstop so a rejected delivery can't break the queue for the next one.
   }
 }

@@ -1,4 +1,4 @@
-import type { PdfPrintTarget } from '../annotator';
+import type { PdfPrintTarget } from '../workspace';
 import { uint8ArrayToArrayBuffer } from '../bytes';
 import { safePdfFileName } from '../fileNames';
 
@@ -9,9 +9,7 @@ let printBlobUrl: string | null = null;
 let printFrame: HTMLIFrameElement | null = null;
 
 export function browserPrintTarget(): PdfPrintTarget {
-  return {
-    print: printPdfInFrame
-  };
+  return printPdfInFrame;
 }
 
 function printPdfInFrame(bytes: Uint8Array, outputName: string) {

@@ -1,19 +1,31 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  PDFArray,
+  PDFDict,
+  PDFHexString,
+  PDFName,
+  PDFNumber,
+  PDFRawStream,
+  PDFRef,
+  PDFString
+} from 'pdf-lib';
+import {
   detectReadOnlyReason,
   pdfLooksSignedOrCertified,
   pdfLooksEncrypted
-} from '../src/annotator/pdfProtection';
+} from '../src/workspace/pdfProtection';
+import {
+  UnsupportedAnnotationTextError,
+  writePdfAnnotations
+} from '../src/workspace/pdfWriter';
 import {
   addBlankPageAt,
   mergePdfAfterPage,
   removePage,
-  rotatePageClockwise,
-  UnsupportedAnnotationTextError,
-  writePdfAnnotations
-} from '../src/annotator/pdfWriter';
-import type { PdfAnnotation } from '../src/annotator/types';
+  rotatePageClockwise
+} from '../src/workspace/pdfPageOperations';
+import type { PdfAnnotation } from '../src/workspace/types';
 import {
   annotationContentsByName,
   annotationSubtypeCountsByPage,
@@ -227,6 +239,39 @@ test('text annotations normalize decomposed western accents before saving', asyn
   assert.equal(await annotationContentsByName(output, text.id), 'Caf\u00e9');
 });
 
+test('rotated freeText content is laid out against the local (un-rotated) width, not the on-page footprint', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  // The intended LOCAL (un-rotated) box is wide and short: 300x50, centered
+  // at (250, 525). `annotation.rect` always stores the on-page footprint, so
+  // for a 90-degree rotation that's the same box with width/height swapped
+  // around the same center: 50 wide, 300 tall. If the writer mistakenly
+  // measured layout against this on-page footprint instead of the local box,
+  // the requested 280pt-wide layout would get clamped down to ~50pt.
+  const text: PdfAnnotation = {
+    color: [0, 0, 0],
+    fontSize: 12,
+    id: 'test-rotated-freetext-layout',
+    kind: 'freeText',
+    layoutWidth: 280,
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 225, x2: 275, y1: 375, y2: 675 },
+    rotation: 90,
+    text: 'a wide rotated label'
+  };
+
+  const output = await writePdfAnnotations(bytes, [text], {
+    replaceAnnotationSourceIds: [text.id],
+    replacePageIndexes: [0]
+  });
+
+  const bboxWidth = await freeTextAppearanceBBoxWidth(output, 0, text.id);
+  assert.ok(
+    bboxWidth > 250,
+    `expected BBox width close to the requested 280pt layout, got ${bboxWidth}`
+  );
+});
+
 test('sticky notes preserve unicode contents', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const note: PdfAnnotation = {
@@ -315,6 +360,38 @@ test('page mutation helpers keep expected page counts and rotations', async () =
   assert.equal((await loadTestPdf(rotated)).getPage(0).getRotation().angle, 90);
 });
 
+test('a malformed pre-existing annotation is skipped (not aborting the save) and reported via the callback', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const pdfDoc = await loadTestPdf(bytes);
+  const annots = pdfDoc.getPage(0).node.Annots();
+  assert.ok(annots && annots.size() > 0, 'fixture must have at least one annotation');
+
+  const firstRef = annots.get(0);
+  assert.ok(firstRef instanceof PDFRef);
+  const annotationDict = pdfDoc.context.lookup(firstRef, PDFDict);
+  // A /Subtype present but wrong-typed (a string instead of a name) makes
+  // pdf-lib's lookupMaybe throw instead of returning undefined - this is
+  // the "malformed pre-existing annotation" case the writer must survive.
+  annotationDict.set(PDFName.of('Subtype'), PDFString.of('Highlight'));
+  const corruptedBytes = await pdfDoc.save();
+  const annotationCountBefore = annots.size();
+
+  const malformedCounts: number[] = [];
+  const output = await withoutConsoleWarnings(() =>
+    writePdfAnnotations(corruptedBytes, [], {
+      replaceAnnotationSourceIds: ['does-not-match-anything'],
+      replacePageIndexes: [0],
+      onMalformedExistingAnnotations: (count) => malformedCounts.push(count)
+    })
+  );
+
+  assert.deepEqual(malformedCounts, [1]);
+
+  const outputDoc = await loadTestPdf(output);
+  const outputAnnots = outputDoc.getPage(0).node.Annots();
+  assert.equal(outputAnnots?.size(), annotationCountBefore);
+});
+
 test('print-with-hidden-annotations removes all PDF annotations from output copy only', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const before = await annotationSummary(bytes);
@@ -351,4 +428,50 @@ async function withoutConsoleWarnings<T>(task: () => Promise<T>) {
     console.error = originalError;
     console.warn = originalWarn;
   }
+}
+
+async function freeTextAppearanceBBoxWidth(
+  bytes: Uint8Array,
+  pageIndex: number,
+  nm: string
+) {
+  const pdfDoc = await loadTestPdf(bytes);
+  const annots = pdfDoc.getPage(pageIndex).node.Annots();
+  if (!annots) {
+    throw new Error('no annotations on page');
+  }
+
+  for (let index = 0; index < annots.size(); index += 1) {
+    const ref = annots.get(index);
+    if (!(ref instanceof PDFRef)) {
+      continue;
+    }
+
+    const dict = pdfDoc.context.lookup(ref, PDFDict);
+    const name = dict
+      .lookupMaybe(PDFName.of('NM'), PDFString, PDFHexString)
+      ?.decodeText();
+    if (name !== nm) {
+      continue;
+    }
+
+    const apDict = dict.lookupMaybe(PDFName.of('AP'), PDFDict);
+    const formRef = apDict?.get(PDFName.of('N'));
+    const formStream =
+      formRef instanceof PDFRef ? pdfDoc.context.lookup(formRef) : formRef;
+    if (!(formStream instanceof PDFRawStream)) {
+      throw new Error('expected a Form XObject appearance stream');
+    }
+
+    const bbox = formStream.dict.lookupMaybe(PDFName.of('BBox'), PDFArray);
+    if (!bbox || bbox.size() < 4) {
+      throw new Error('expected a BBox array');
+    }
+
+    const x1 = bbox.lookupMaybe(0, PDFNumber)?.asNumber() ?? 0;
+    const x2 = bbox.lookupMaybe(2, PDFNumber)?.asNumber() ?? 0;
+    return Math.abs(x2 - x1);
+  }
+
+  throw new Error(`annotation ${nm} not found`);
 }

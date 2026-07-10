@@ -22,6 +22,56 @@ export function groupAnnotationsByPage(annotations: PdfAnnotation[]) {
   return byPage;
 }
 
+// Groups annotations by page like groupAnnotationsByPage, but reuses a
+// page's previous bucket array (by reference) when nothing on that page
+// changed, so unaffected pages don't re-render downstream. Tracks
+// per-page match status in the same pass that builds the buckets, instead
+// of a separate full comparison pass afterward - editing one annotation
+// touches every element once, not twice, regardless of document size.
+export function groupAnnotationsByPageStable(
+  annotations: PdfAnnotation[],
+  previousByPage: Map<number, PdfAnnotation[]>
+) {
+  const grouped = new Map<number, PdfAnnotation[]>();
+  const matchesPrevious = new Map<number, boolean>();
+
+  for (const annotation of annotations) {
+    const pageIndex = annotation.pageIndex;
+    let bucket = grouped.get(pageIndex);
+    if (!bucket) {
+      bucket = [];
+      grouped.set(pageIndex, bucket);
+      matchesPrevious.set(pageIndex, true);
+    }
+
+    if (matchesPrevious.get(pageIndex)) {
+      const previousBucket = previousByPage.get(pageIndex);
+      if (previousBucket?.[bucket.length] !== annotation) {
+        matchesPrevious.set(pageIndex, false);
+      }
+    }
+
+    bucket.push(annotation);
+  }
+
+  for (const [pageIndex, bucket] of grouped) {
+    const previousBucket = previousByPage.get(pageIndex);
+    if (
+      matchesPrevious.get(pageIndex) &&
+      previousBucket &&
+      previousBucket.length === bucket.length
+    ) {
+      grouped.set(pageIndex, previousBucket);
+    }
+  }
+
+  previousByPage.clear();
+  for (const [pageIndex, bucket] of grouped) {
+    previousByPage.set(pageIndex, bucket);
+  }
+  return grouped;
+}
+
 export function annotationReplacementPageIndexes(
   managedPageIndexes: Set<number>,
   annotations: PdfAnnotation[]
@@ -89,6 +139,30 @@ export function remapPageSetAfterInsert(
     next.add(pageIndex >= insertIndex ? pageIndex + 1 : pageIndex);
   }
   return next;
+}
+
+export function remapAnnotationsAfterDelete(
+  annotations: PdfAnnotation[],
+  deletedPageIndex: number
+) {
+  return annotations
+    .filter((annotation) => annotation.pageIndex !== deletedPageIndex)
+    .map((annotation) =>
+      annotation.pageIndex > deletedPageIndex
+        ? { ...annotation, pageIndex: annotation.pageIndex - 1 }
+        : annotation
+    );
+}
+
+export function remapAnnotationsAfterInsert(
+  annotations: PdfAnnotation[],
+  insertIndex: number
+) {
+  return annotations.map((annotation) =>
+    annotation.pageIndex >= insertIndex
+      ? { ...annotation, pageIndex: annotation.pageIndex + 1 }
+      : annotation
+  );
 }
 
 export function createWorkSignature(

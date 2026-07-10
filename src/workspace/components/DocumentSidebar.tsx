@@ -1,9 +1,14 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
 import { ChevronLeft, FilePlus2, MoreVertical, RotateCw, Trash2 } from 'lucide-react';
 import { rgbToHex } from '../annotationColors';
-import { pathToViewportD, pdfRectToViewportRect } from '../pdfGeometry';
+import { FREE_TEXT_LINE_HEIGHT, freeTextVisualLines } from '../freeTextLayout';
+import {
+  annotationContentTransform,
+  pathToViewportD,
+  pdfRectToViewportRect
+} from '../pdfGeometry';
 import {
   cachePageBaseRenderMode,
   cachedPageBaseRenderMode,
@@ -15,7 +20,10 @@ import type { LoadedPage, PageSize, PageViewport, PdfAnnotation } from '../types
 import {
   clamp,
   SIDEBAR_MAX_WIDTH,
-  SIDEBAR_MIN_WIDTH
+  SIDEBAR_MIN_ROW_HEIGHT,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_ROW_BUFFER,
+  SIDEBAR_ROW_CHROME_HEIGHT
 } from '../viewerConfig';
 
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
@@ -75,6 +83,16 @@ export function DocumentSidebar({
   width
 }: DocumentSidebarProps) {
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
+  const [scrollMetrics, setScrollMetrics] = useState({
+    clientHeight: 0,
+    scrollTop: 0
+  });
+  const thumbnailWidth = Math.round(clamp(width - 52, 108, 284));
+  const estimatedRowHeight = Math.max(
+    SIDEBAR_MIN_ROW_HEIGHT,
+    thumbnailWidth * ((pageSize?.height ?? 792) / (pageSize?.width ?? 612)) +
+      SIDEBAR_ROW_CHROME_HEIGHT
+  );
 
   useEffect(() => {
     if (busy && pageMenuIndex !== null) {
@@ -82,16 +100,79 @@ export function DocumentSidebar({
     }
   }, [busy, pageMenuIndex, setPageMenuIndex]);
 
+  // Tracks scroll position/viewport height so only thumbnails near the
+  // visible range are mounted (see thumbnail windowing below), instead of
+  // every page's thumbnail mounting a DOM node + IntersectionObserver
+  // registration upfront regardless of document length.
+  useLayoutEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const container = sidebarScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const updateMetrics = () => {
+      setScrollMetrics((current) => {
+        const next = {
+          clientHeight: container.clientHeight,
+          scrollTop: container.scrollTop
+        };
+        return current.clientHeight === next.clientHeight &&
+          current.scrollTop === next.scrollTop
+          ? current
+          : next;
+      });
+    };
+
+    updateMetrics();
+    container.addEventListener('scroll', updateMetrics, { passive: true });
+    const observer = new ResizeObserver(updateMetrics);
+    observer.observe(container);
+    return () => {
+      container.removeEventListener('scroll', updateMetrics);
+      observer.disconnect();
+    };
+  }, [open]);
+
   useEffect(() => {
     if (!open) {
       return;
     }
 
     const scrollContainer = sidebarScrollRef.current;
-    const activeThumbnail = scrollContainer?.querySelector<HTMLElement>(
+    if (!scrollContainer) {
+      return;
+    }
+
+    const activeThumbnail = scrollContainer.querySelector<HTMLElement>(
       `[data-thumbnail-index="${activePageIndex}"]`
     );
-    if (!scrollContainer || !activeThumbnail) {
+
+    if (!activeThumbnail) {
+      // The active page's thumbnail isn't currently mounted (windowing
+      // above only renders thumbnails near the current scroll position).
+      // Jump to an estimated position instead of forcing it into the
+      // render range - that would require rendering everything between
+      // the current scroll position and the active page, which can be
+      // most of the document if they're far apart. The jump changes
+      // scroll position, which updates the rendered window naturally, so
+      // this doesn't need pixel-perfect centering.
+      const maxScrollTop = Math.max(
+        0,
+        scrollContainer.scrollHeight - scrollContainer.clientHeight
+      );
+      scrollContainer.scrollTo({
+        top: clamp(
+          activePageIndex * estimatedRowHeight -
+            scrollContainer.clientHeight / 2,
+          0,
+          maxScrollTop
+        ),
+        behavior: 'auto'
+      });
       return;
     }
 
@@ -113,13 +194,34 @@ export function DocumentSidebar({
         (scrollContainer.clientHeight - activeThumbnail.offsetHeight) / 2,
       behavior: 'auto'
     });
-  }, [activePageIndex, open]);
+  }, [activePageIndex, estimatedRowHeight, open]);
 
   if (!open) {
     return null;
   }
 
-  const thumbnailWidth = Math.round(clamp(width - 52, 108, 284));
+  // The active page's thumbnail is handled separately above: if it's ever
+  // outside this window, the scroll-to-active effect jumps the scroll
+  // position toward it (updating scrollMetrics, which re-derives this
+  // window), rather than this window being forced to always span it -
+  // that could otherwise force-render most of the document when the
+  // active page and current scroll position are far apart.
+  const pageCount = pages.length;
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollMetrics.scrollTop / estimatedRowHeight) -
+      SIDEBAR_ROW_BUFFER
+  );
+  const endIndex = Math.min(
+    pageCount - 1,
+    Math.ceil(
+      (scrollMetrics.scrollTop + scrollMetrics.clientHeight) /
+        estimatedRowHeight
+    ) + SIDEBAR_ROW_BUFFER
+  );
+  const topSpacerHeight = Math.max(0, startIndex) * estimatedRowHeight;
+  const bottomSpacerHeight =
+    Math.max(0, pageCount - 1 - endIndex) * estimatedRowHeight;
 
   return (
     <aside
@@ -138,34 +240,43 @@ export function DocumentSidebar({
       </div>
 
       <div className="document-sidebar-scroll" ref={sidebarScrollRef}>
-        {pages.map((page, index) => (
-          <PageThumbnail
-            active={index === activePageIndex}
-            annotations={annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS}
-            key={index}
-            menuOpen={pageMenuIndex === index}
-            onAddBlankAfter={() => onAddPage(index, 'after', 'blank')}
-            onAddBlankBefore={() => onAddPage(index, 'before', 'blank')}
-            onAddLinedAfter={() => onAddPage(index, 'after', 'lined')}
-            onAddLinedBefore={() => onAddPage(index, 'before', 'lined')}
-            onDelete={() => onDeletePage(index)}
-            onMenuToggle={() =>
-              setPageMenuIndex(pageMenuIndex === index ? null : index)
-            }
-            onRotate={() => onRotatePage(index)}
-            onSelect={() => onSelectPage(index)}
-            page={page}
-            pageCount={pages.length}
-            pageIndex={index}
-            pageSize={pageSize}
-            pdfDoc={pdfDoc}
-            readOnly={readOnly}
-            busy={busy}
-            showAnnotations={showAnnotations}
-            onThumbnailPageLoad={onThumbnailPageLoad}
-            thumbnailWidth={thumbnailWidth}
-          />
-        ))}
+        {topSpacerHeight > 0 ? (
+          <div aria-hidden="true" style={{ height: topSpacerHeight }} />
+        ) : null}
+        {pages.slice(startIndex, endIndex + 1).map((page, offset) => {
+          const index = startIndex + offset;
+          return (
+            <PageThumbnail
+              active={index === activePageIndex}
+              annotations={annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS}
+              key={index}
+              menuOpen={pageMenuIndex === index}
+              onAddBlankAfter={() => onAddPage(index, 'after', 'blank')}
+              onAddBlankBefore={() => onAddPage(index, 'before', 'blank')}
+              onAddLinedAfter={() => onAddPage(index, 'after', 'lined')}
+              onAddLinedBefore={() => onAddPage(index, 'before', 'lined')}
+              onDelete={() => onDeletePage(index)}
+              onMenuToggle={() =>
+                setPageMenuIndex(pageMenuIndex === index ? null : index)
+              }
+              onRotate={() => onRotatePage(index)}
+              onSelect={() => onSelectPage(index)}
+              page={page}
+              pageCount={pages.length}
+              pageIndex={index}
+              pageSize={pageSize}
+              pdfDoc={pdfDoc}
+              readOnly={readOnly}
+              busy={busy}
+              showAnnotations={showAnnotations}
+              onThumbnailPageLoad={onThumbnailPageLoad}
+              thumbnailWidth={thumbnailWidth}
+            />
+          );
+        })}
+        {bottomSpacerHeight > 0 ? (
+          <div aria-hidden="true" style={{ height: bottomSpacerHeight }} />
+        ) : null}
         {canMergePdf && pages.length > 0 ? (
           <button
             className="merge-pdf-button ui-button"
@@ -290,10 +401,9 @@ function PageThumbnail({
         setThumbnailPage(nextPage);
         onThumbnailPageLoad(nextPage, pageIndex);
       })
-      .catch((error) => {
-        if (!cancelled) {
-          console.error(error);
-        }
+      .catch(() => {
+        // Thumbnail stays a blank placeholder, which is visible feedback on
+        // its own - not worth a separate notice for every failed thumbnail.
       });
 
     return () => {
@@ -446,8 +556,8 @@ function scheduleTemporaryPageCleanup(page: PDFPageProxy) {
   const cleanup = () => {
     try {
       page.cleanup();
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // Internal resource bookkeeping only - nothing for the user to act on.
     }
   };
 
@@ -456,6 +566,35 @@ function scheduleTemporaryPageCleanup(page: PDFPageProxy) {
   } else {
     window.setTimeout(cleanup, 0);
   }
+}
+
+// Page thumbnails (one per PDF page, potentially hundreds) each call
+// useElementVisibility. A shared IntersectionObserver per rootMargin, keyed
+// by target element, avoids spinning up a separate observer per thumbnail.
+const sharedIntersectionObservers = new Map<
+  string,
+  {
+    observer: IntersectionObserver;
+    callbacks: WeakMap<Element, (visible: boolean) => void>;
+  }
+>();
+
+function getSharedIntersectionObserver(rootMargin: string) {
+  let entry = sharedIntersectionObservers.get(rootMargin);
+  if (!entry) {
+    const callbacks = new WeakMap<Element, (visible: boolean) => void>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          callbacks.get(entry.target)?.(entry.isIntersecting);
+        }
+      },
+      { rootMargin }
+    );
+    entry = { observer, callbacks };
+    sharedIntersectionObservers.set(rootMargin, entry);
+  }
+  return entry;
 }
 
 function useElementVisibility<T extends Element>(rootMargin: string) {
@@ -473,17 +612,13 @@ function useElementVisibility<T extends Element>(rootMargin: string) {
       return;
     }
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries[0];
-        if (entry) {
-          setVisible(entry.isIntersecting);
-        }
-      },
-      { rootMargin }
-    );
+    const { observer, callbacks } = getSharedIntersectionObserver(rootMargin);
+    callbacks.set(element, setVisible);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.unobserve(element);
+      callbacks.delete(element);
+    };
   }, [rootMargin]);
 
   return [ref, visible] as const;
@@ -574,10 +709,9 @@ function ThumbnailPageCanvas({
         } else if (!cancelled) {
           cachePageBaseRenderMode(page, 'normal');
         }
-      } catch (error) {
-        if (!cancelled && !isRenderCancellation(error)) {
-          console.error(error);
-        }
+      } catch {
+        // Thumbnail stays a blank placeholder, which is visible feedback on
+        // its own - not worth a separate notice for every failed thumbnail.
       }
     }
 
@@ -591,14 +725,6 @@ function ThumbnailPageCanvas({
   }, [page, width]);
 
   return <canvas className="thumbnail-canvas" ref={canvasRef} />;
-}
-
-function isRenderCancellation(error: unknown) {
-  return (
-    error instanceof Error &&
-    (error.name === 'RenderingCancelledException' ||
-      error.message.includes('cancelled'))
-  );
 }
 
 function releaseCanvasBuffer(canvas: HTMLCanvasElement) {
@@ -662,16 +788,34 @@ function ThumbnailAnnotations({
 
           case 'freeText': {
             const bounds = pdfRectToViewportRect(annotation.rect, viewport);
+            const { transform } = annotationContentTransform(
+              bounds,
+              viewport,
+              annotation.rotation ?? 0
+            );
+            const fontSize = Math.max(4, annotation.fontSize * viewport.scale);
+            const lineHeight = fontSize * FREE_TEXT_LINE_HEIGHT;
+            const lines = freeTextVisualLines(
+              annotation.text,
+              annotation.fontSize,
+              Math.abs(annotation.rect.x2 - annotation.rect.x1)
+            );
             return (
-              <rect
-                fill={rgbToHex(annotation.color)}
-                height={Math.max(2, bounds.height)}
-                key={annotation.id}
-                opacity={annotation.opacity}
-                width={Math.max(4, bounds.width)}
-                x={bounds.x}
-                y={bounds.y}
-              />
+              <g key={annotation.id} transform={transform}>
+                {lines.map((line, index) => (
+                  <text
+                    dominantBaseline="text-before-edge"
+                    fill={rgbToHex(annotation.color)}
+                    fontSize={fontSize}
+                    key={index}
+                    opacity={annotation.opacity}
+                    x={0}
+                    y={index * lineHeight}
+                  >
+                    {line}
+                  </text>
+                ))}
+              </g>
             );
           }
 
@@ -694,15 +838,19 @@ function ThumbnailAnnotations({
 
           case 'imageStamp': {
             const bounds = pdfRectToViewportRect(annotation.rect, viewport);
+            const { localWidth, localHeight, transform } = annotationContentTransform(
+              bounds,
+              viewport,
+              annotation.rotation ?? 0
+            );
             return (
               <image
-                height={Math.max(4, bounds.height)}
+                height={Math.max(4, localHeight)}
                 href={`data:${annotation.mimeType};base64,${annotation.imageData}`}
                 key={annotation.id}
                 preserveAspectRatio="xMidYMid meet"
-                width={Math.max(4, bounds.width)}
-                x={bounds.x}
-                y={bounds.y}
+                transform={transform}
+                width={Math.max(4, localWidth)}
               />
             );
           }

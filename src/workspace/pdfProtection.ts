@@ -1,5 +1,6 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PDFDocument, ParseSpeeds } from 'pdf-lib';
+import { clamp } from './viewerConfig';
 
 const pdfProtectionLoadOptions = {
   ignoreEncryption: true,
@@ -141,8 +142,4 @@ function bytesContainAscii(
 
 function asciiLower(value: number) {
   return value >= 65 && value <= 90 ? value + 32 : value;
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
 }
