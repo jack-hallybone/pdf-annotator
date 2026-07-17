@@ -43,6 +43,12 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end smoke tests
+        run: npm run test:e2e
+
       - name: Set build metadata
         id: build-metadata
         run: |

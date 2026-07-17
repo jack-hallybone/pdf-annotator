@@ -39,8 +39,7 @@ import { DocumentSidebar } from './components/DocumentSidebar';
 import {
   ReadOnlyBanner,
   ReadOnlyNotice,
-  WorkspaceNoticeStack,
-  type WorkspaceNotice
+  WorkspaceNoticeStack
 } from './components/WorkspaceNotices';
 import {
   FloatingDocumentControls,
@@ -106,6 +105,7 @@ import {
   pickDrawSettings,
   tools
 } from './toolConfig';
+import { useWorkspaceNotices } from './useWorkspaceNotices';
 import type {
   LoadedPage,
   PageRenderPriority,
@@ -123,12 +123,20 @@ import {
   clamp,
   EAGER_PAGE_LIMIT,
   LAZY_PAGE_BUFFER,
-  MAX_LOADED_MAIN_PAGES,
-  MAX_ZOOM,
-  MIN_ZOOM,
   SIDEBAR_DEFAULT_WIDTH,
   ZOOM_STEP
 } from './viewerConfig';
+import {
+  pageElementForIndex,
+  pageTopInContainer,
+  scrollContainerPaddingTop
+} from './scrollGeometry';
+import { useWorkspaceZoom } from './useWorkspaceZoom';
+import { usePageCache } from './usePageCache';
+import {
+  useExternalLinks,
+  type PendingExternalLink
+} from './useExternalLinks';
 import { safePdfFileName } from '../fileNames';
 import { uint8ArrayToArrayBuffer } from '../bytes';
 import { appThemeStyle } from '../theme';
@@ -232,11 +240,6 @@ export type PdfWorkspaceHandle = {
   saveAs: (suggestedName?: string) => Promise<boolean>;
 };
 
-type PendingExternalLink = {
-  trustKey: string;
-  url: string;
-};
-
 type PasswordRequest = {
   failed: boolean;
   generation: number;
@@ -331,8 +334,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const redoStackRef = useRef<PdfWorkspaceHistoryEntry[]>([]);
   const pagesRef = useRef<LoadedPage[]>([]);
   const loadingPagesRef = useRef<Set<number>>(new Set());
-  const pageAccessClockRef = useRef(0);
-  const pageAccessOrderRef = useRef<Map<number, number>>(new Map());
   // Pages whose annotations came from the source PDF itself (vs. drawn by the user).
   const importedAnnotationPagesRef = useRef<Set<number>>(new Set());
   // Pages this session has taken ownership of writing annotations for.
@@ -349,21 +350,20 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   // Last-saved annotation state, used to detect unsaved changes and to restore on discard.
   const cleanAnnotationsRef = useRef<PdfAnnotation[]>([]);
   const cleanSignatureRefreshEnabledRef = useRef(true);
-  const pendingZoomAnchorRef = useRef<{
-    offsetRatio: number;
-    pageIndex: number;
-  } | null>(null);
   const passwordInputRef = useRef<HTMLInputElement | null>(null);
   const passwordProtectedLoadRef = useRef(false);
   const activePageIndexRef = useRef(0);
+  const {
+    markPageAccess,
+    evictOldLoadedPages,
+    scheduleLoadedPagesCleanup,
+    resetPageCache
+  } = usePageCache(activePageIndexRef);
   const initialVisualPageIndexRef = useRef(0);
   const initialBaseLayerReadyRef = useRef(false);
   const initialAnnotationsReadyRef = useRef(false);
   const initialVisualReadyRef = useRef(false);
   const afterInitialVisualReadyRef = useRef<Array<() => void>>([]);
-  const externalLinkOpenButtonRef = useRef<HTMLButtonElement | null>(null);
-  const noticeIdRef = useRef(0);
-  const noticeTimersRef = useRef<Map<number, number>>(new Map());
   const downloadTargetRef = useRef<PdfDownloadTarget | null>(null);
   const saveAsTargetRef = useRef<PdfSaveAsTarget | null>(null);
   const saveTargetRef = useRef<PdfSaveTarget | null>(null);
@@ -381,8 +381,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [pageSize, setPageSize] = useState<PageSize | null>(null);
   const [fileName, setFileName] = useState('document.pdf');
   const [initialVisualReady, setInitialVisualReady] = useState(false);
-  const [scale, setScale] = useState(ACTUAL_SIZE_ZOOM);
   const [activePageIndex, setActivePageIndex] = useState(0);
+  const {
+    scale,
+    setScale,
+    updateZoom,
+    resetZoom,
+    setZoom,
+    fitZoomToPageWidth,
+    fitZoomToPageHeight
+  } = useWorkspaceZoom({
+    scrollContainerRef,
+    pagesRef,
+    pages,
+    pageSize,
+    activePageIndex
+  });
   const [activeToolKey, setActiveToolKey] = useState('select');
   // `tool` is fully determined by `activeToolKey` (each toolbar item maps to
   // exactly one Tool) - derived instead of tracked as separate state so the
@@ -421,14 +435,25 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [settingsToolKey, setSettingsToolKey] = useState<string | null>(null);
   const [pageMenuIndex, setPageMenuIndex] = useState<number | null>(null);
-  const [pendingExternalLink, setPendingExternalLink] =
-    useState<PendingExternalLink | null>(null);
-  const [workspaceNotices, setWorkspaceNotices] = useState<WorkspaceNotice[]>(
-    []
-  );
-  const [trustedExternalLinkKeys, setTrustedExternalLinkKeys] = useState<
-    string[]
-  >([]);
+  const {
+    notices: workspaceNotices,
+    showNotice: showWorkspaceNotice,
+    dismissNotice: dismissWorkspaceNotice,
+    reportMalformedAnnotations
+  } = useWorkspaceNotices();
+  const {
+    pendingExternalLink,
+    openButtonRef: externalLinkOpenButtonRef,
+    requestExternalLink: handleExternalLinkRequest,
+    confirmExternalLink: confirmExternalLinkRequest,
+    cancelExternalLink: cancelExternalLinkRequest,
+    reset: resetExternalLinks
+  } = useExternalLinks({
+    onOpenExternalLink,
+    fileName,
+    sourceIdRef: workspaceSourceIdRef,
+    showNotice: showWorkspaceNotice
+  });
   const [scrollbarGutterBlock, setScrollbarGutterBlock] = useState(0);
   const [scrollbarGutterInline, setScrollbarGutterInline] = useState(0);
   // `annotations` filtered down to ones with actual content - what would be
@@ -707,74 +732,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     ]
   );
 
-  function dismissWorkspaceNotice(id: number) {
-    const timer = noticeTimersRef.current.get(id);
-    if (timer !== undefined) {
-      window.clearTimeout(timer);
-      noticeTimersRef.current.delete(id);
-    }
-    setWorkspaceNotices((current) =>
-      current.filter((notice) => notice.id !== id)
-    );
-  }
-
-  function showWorkspaceNotice(message: string, durationMs = 10000) {
-    const id = noticeIdRef.current + 1;
-    noticeIdRef.current = id;
-    setWorkspaceNotices((current) => {
-      const next: WorkspaceNotice[] = [];
-      for (const notice of current) {
-        if (notice.message === message) {
-          const existingTimer = noticeTimersRef.current.get(notice.id);
-          if (existingTimer !== undefined) {
-            window.clearTimeout(existingTimer);
-            noticeTimersRef.current.delete(notice.id);
-          }
-        } else {
-          next.push(notice);
-        }
-      }
-      next.push({ id, message });
-      return next;
-    });
-
-    const timer = window.setTimeout(() => {
-      noticeTimersRef.current.delete(id);
-      setWorkspaceNotices((current) =>
-        current.filter((notice) => notice.id !== id)
-      );
-    }, durationMs);
-    noticeTimersRef.current.set(id, timer);
-  }
-
-  // Some pre-existing annotation looked like one of our editable kinds but
-  // its own data failed our validation (bad image bit depth, a BBox/Rect
-  // relationship that isn't a pure translate, etc.) - not something this
-  // app produced or broke, so it's left untouched in the file, but it also
-  // can't be shown or edited. Let the user know it's there rather than
-  // letting it silently vanish from view.
-  function reportMalformedAnnotations(count: number) {
-    if (count <= 0) {
-      return;
-    }
-
-    showWorkspaceNotice(
-      count === 1
-        ? '1 annotation could not be displayed. It is preserved, untouched, in the file.'
-        : `${count} annotations could not be displayed. They are preserved, untouched, in the file.`
-    );
-  }
-
-  useEffect(
-    () => () => {
-      for (const timer of noticeTimersRef.current.values()) {
-        window.clearTimeout(timer);
-      }
-      noticeTimersRef.current.clear();
-    },
-    []
-  );
-
   useEffect(
     () => () => {
       onBusyChange?.(false);
@@ -873,215 +830,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     void loadWorkspaceSource(source, nextLoadKey);
   }, [initialSession, source, sourceRetryKey]);
 
-  function markPageAccess(pageIndex: number) {
-    pageAccessClockRef.current += 1;
-    pageAccessOrderRef.current.set(pageIndex, pageAccessClockRef.current);
-  }
-
-  function evictOldLoadedPages(
-    candidatePages: LoadedPage[],
-    protectedPageIndex: number
-  ) {
-    if (candidatePages.length <= EAGER_PAGE_LIMIT) {
-      return candidatePages;
-    }
-
-    const loaded = candidatePages
-      .map((page, pageIndex) => ({ page, pageIndex }))
-      .filter(
-        (item): item is { page: PDFPageProxy; pageIndex: number } =>
-          Boolean(item.page)
-      );
-    if (loaded.length <= MAX_LOADED_MAIN_PAGES) {
-      return candidatePages;
-    }
-
-    const currentActivePageIndex = activePageIndexRef.current;
-    const protectedIndexes = new Set<number>([
-      protectedPageIndex,
-      currentActivePageIndex
-    ]);
-    const start = Math.max(0, currentActivePageIndex - LAZY_PAGE_BUFFER);
-    const end = Math.min(
-      candidatePages.length - 1,
-      currentActivePageIndex + LAZY_PAGE_BUFFER
-    );
-    for (let pageIndex = start; pageIndex <= end; pageIndex += 1) {
-      protectedIndexes.add(pageIndex);
-    }
-
-    let next = candidatePages;
-    let loadedCount = loaded.length;
-    const evictionCandidates = loaded
-      .filter(({ pageIndex }) => !protectedIndexes.has(pageIndex))
-      .sort(
-        (a, b) =>
-          (pageAccessOrderRef.current.get(a.pageIndex) ?? 0) -
-          (pageAccessOrderRef.current.get(b.pageIndex) ?? 0)
-      );
-
-    for (const { page, pageIndex } of evictionCandidates) {
-      if (loadedCount <= MAX_LOADED_MAIN_PAGES) {
-        break;
-      }
-
-      if (next === candidatePages) {
-        next = [...candidatePages];
-      }
-      next[pageIndex] = null;
-      loadedCount -= 1;
-      pageAccessOrderRef.current.delete(pageIndex);
-      schedulePageCleanup(page);
-    }
-
-    return next;
-  }
-
-  function schedulePageCleanup(page: PDFPageProxy) {
-    schedulePdfPageCleanup(page);
-  }
-
-  function scheduleLoadedPagesCleanup(loadedPages: LoadedPage[]) {
-    const pagesToClean = new Set(
-      loadedPages.filter((page): page is PDFPageProxy => Boolean(page))
-    );
-    for (const page of pagesToClean) {
-      schedulePdfPageCleanup(page);
-    }
-  }
-
-  function schedulePdfPageCleanup(page: PDFPageProxy, retries = 2) {
-    const cleanup = () => {
-      try {
-        page.cleanup();
-      } catch {
-        if (retries > 0) {
-          window.setTimeout(
-            () => schedulePdfPageCleanup(page, retries - 1),
-            100
-          );
-          return;
-        }
-
-        // Internal resource bookkeeping only - nothing for the user to act on.
-      }
-    };
-
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(cleanup, { timeout: 1000 });
-    } else {
-      window.setTimeout(cleanup, 0);
-    }
-  }
-
-  useEffect(() => {
-    if (!pendingExternalLink) {
-      return;
-    }
-
-    externalLinkOpenButtonRef.current?.focus({ preventScroll: true });
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setPendingExternalLink(null);
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pendingExternalLink]);
-
-  function updateZoom(delta: number) {
-    captureZoomAnchor();
-    setScale((value) => clampZoom(value + delta));
-  }
-
-  function resetZoom() {
-    setZoom(ACTUAL_SIZE_ZOOM);
-  }
-
-  function setZoom(nextScale: number) {
-    captureZoomAnchor();
-    setScale(clampZoom(nextScale));
-  }
-
-  function captureZoomAnchor() {
-    const container = scrollContainerRef.current;
-    if (!container || pages.length === 0) {
-      return;
-    }
-
-    const anchorPage = pageElementForIndex(container, activePageIndex);
-    if (!anchorPage) {
-      return;
-    }
-
-    const pageTop = pageTopInContainer(container, anchorPage);
-    pendingZoomAnchorRef.current = {
-      offsetRatio:
-        (container.scrollTop + scrollContainerPaddingTop(container) - pageTop) /
-        Math.max(1, anchorPage.offsetHeight),
-      pageIndex: activePageIndex
-    };
-  }
-
-  function fitZoomToPageWidth() {
-    const container = scrollContainerRef.current;
-    const page = activePageBaseSize();
-    if (!container || !page) {
-      return;
-    }
-
-    const availableWidth = container.clientWidth - 32;
-    setZoom(Math.max(120, availableWidth) / page.width);
-  }
-
-  function fitZoomToPageHeight() {
-    const container = scrollContainerRef.current;
-    const page = activePageBaseSize();
-    if (!container || !page) {
-      return;
-    }
-
-    setZoom(Math.max(160, container.clientHeight - 40) / page.height);
-  }
-
-  function activePageBaseSize() {
-    const activePage = pagesRef.current[activePageIndex];
-    if (activePage) {
-      const viewport = activePage.getViewport({ scale: 1 });
-      return { width: viewport.width, height: viewport.height };
-    }
-
-    return pageSize;
-  }
-
   useEffect(() => {
     pagesRef.current = pages;
   }, [pages]);
-
-  useLayoutEffect(() => {
-    const anchor = pendingZoomAnchorRef.current;
-    const container = scrollContainerRef.current;
-    if (!anchor || !container) {
-      return;
-    }
-
-    const anchorPage = pageElementForIndex(container, anchor.pageIndex);
-    if (!anchorPage) {
-      return;
-    }
-
-    pendingZoomAnchorRef.current = null;
-    const pageTop = pageTopInContainer(container, anchorPage);
-    container.scrollTo({
-      top:
-        pageTop +
-        anchor.offsetRatio * anchorPage.offsetHeight -
-        scrollContainerPaddingTop(container),
-      behavior: 'auto'
-    });
-  }, [pages.length, scale]);
 
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
@@ -1745,8 +1496,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     scheduleLoadedPagesCleanup(pagesRef.current);
     pagesRef.current = [];
     loadingPagesRef.current.clear();
-    pageAccessClockRef.current = 0;
-    pageAccessOrderRef.current.clear();
+    resetPageCache();
     importedAnnotationPagesRef.current.clear();
     liveAnnotationEditRef.current = { kind: 'idle' };
     structureReloadInProgressRef.current = false;
@@ -1774,11 +1524,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     setShowAnnotations(true);
     setPageMenuIndex(null);
     setSettingsToolKey(null);
-    setPendingExternalLink(null);
+    resetExternalLinks();
     setPasswordRequest(null);
     setReadOnlyReason(null);
     setEditingEnabled(false);
-    setTrustedExternalLinkKeys([]);
     setSidebarOpen(false);
     if (clearFileInfo) {
       setFileName('document.pdf');
@@ -1825,8 +1574,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     scheduleLoadedPagesCleanup(pagesRef.current);
     pagesRef.current = [];
     loadingPagesRef.current.clear();
-    pageAccessClockRef.current = 0;
-    pageAccessOrderRef.current.clear();
+    resetPageCache();
     afterInitialVisualReadyRef.current = [];
     initialBaseLayerReadyRef.current = false;
     initialAnnotationsReadyRef.current = false;
@@ -1974,55 +1722,6 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       );
     } finally {
       finishBusyOperation();
-    }
-  }
-
-  function handleExternalLinkRequest(url: string) {
-    const trustKey = externalLinkTrustKey(url);
-    if (!trustKey) {
-      return;
-    }
-
-    if (trustedExternalLinkKeys.includes(trustKey)) {
-      void openExternalLink(url);
-      return;
-    }
-
-    setPendingExternalLink({ trustKey, url });
-  }
-
-  function cancelExternalLinkRequest() {
-    setPendingExternalLink(null);
-  }
-
-  function confirmExternalLinkRequest({ always = false } = {}) {
-    const link = pendingExternalLink;
-    if (!link) {
-      return;
-    }
-
-    setPendingExternalLink(null);
-    if (always) {
-      setTrustedExternalLinkKeys((current) =>
-        current.includes(link.trustKey) ? current : [...current, link.trustKey]
-      );
-    }
-    void openExternalLink(link.url);
-  }
-
-  async function openExternalLink(url: string) {
-    try {
-      if (onOpenExternalLink) {
-        await onOpenExternalLink(url, {
-          fileName,
-          sourceId: workspaceSourceIdRef.current
-        });
-        return;
-      }
-
-      openExternalLinkInNewTab(url);
-    } catch {
-      showWorkspaceNotice('Could not open this link.');
     }
   }
 
@@ -2236,7 +1935,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         setShowAnnotations(restoredSession.showAnnotations);
         setSidebarOpen(restoredSession.sidebarOpen);
         setSidebarWidth(restoredSession.sidebarWidth);
-        setTrustedExternalLinkKeys([]);
+        resetExternalLinks();
         cleanSignatureRefreshEnabledRef.current =
           restoredSession.cleanSignatureRefreshEnabled ?? true;
         setCurrentCleanWorkSignature(restoredSession.cleanWorkSignature);
@@ -2317,8 +2016,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     shouldImportAnnotationsRef.current = true;
     importedAnnotationPagesRef.current.clear();
     loadingPagesRef.current.clear();
-    pageAccessClockRef.current = 0;
-    pageAccessOrderRef.current.clear();
+    resetPageCache();
     let pendingPdf: PDFDocumentProxy | null = null;
     structureReloadInProgressRef.current = true;
     try {
@@ -2500,8 +2198,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     );
     shouldImportAnnotationsRef.current = snapshot.shouldImportAnnotations;
     loadingPagesRef.current.clear();
-    pageAccessClockRef.current = 0;
-    pageAccessOrderRef.current.clear();
+    resetPageCache();
     let pendingPdf: PDFDocumentProxy | null = null;
     structureReloadInProgressRef.current = true;
     setWorkspaceBusy(true);
@@ -3408,6 +3105,9 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     finishCurrentAnnotationEditWithValidation();
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
+    // The image tool is command-only (never becomes active), so deactivate the
+    // current tool up front - otherwise the dock keeps it highlighted until the
+    // async file picker settles.
     setActiveToolKey('select');
     try {
       const file = await pickImageFile();
@@ -4784,14 +4484,6 @@ function preparationErrorNotice(error: unknown, fallback: string) {
     : fallback;
 }
 
-function externalLinkTrustKey(url: string) {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'mailto:' ? 'mailto:' : parsed.origin;
-  } catch {
-    return null;
-  }
-}
 
 function externalLinkTrustLabel(trustKey: string) {
   return trustKey === 'mailto:' ? 'email links' : trustKey;
@@ -4808,18 +4500,6 @@ function externalLinkDisplayUrl(url: string) {
   }
 }
 
-function openExternalLinkInNewTab(url: string) {
-  const openedWindow = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!openedWindow) {
-    return;
-  }
-
-  try {
-    openedWindow.opener = null;
-  } catch {
-    // noopener is requested in the feature string; this is a defensive fallback.
-  }
-}
 
 function writableAnnotations(
   annotations: PdfAnnotation[],
@@ -4901,10 +4581,6 @@ function scheduleAfterVisiblePaint(callback: () => void) {
   });
 }
 
-function pageElementForIndex(container: HTMLElement, pageIndex: number) {
-  return container.querySelector<HTMLElement>(`[data-page-index="${pageIndex}"]`);
-}
-
 function pageIndexFromElement(element: Element | null) {
   const pageSlot = element?.closest<HTMLElement>('[data-page-index]');
   if (!pageSlot) {
@@ -4948,17 +4624,6 @@ function annotationIntersectsPage(
   );
 }
 
-function pageTopInContainer(container: HTMLElement, pageElement: HTMLElement) {
-  const containerRect = container.getBoundingClientRect();
-  const pageRect = pageElement.getBoundingClientRect();
-  return container.scrollTop + pageRect.top - containerRect.top;
-}
-
-function scrollContainerPaddingTop(container: HTMLElement) {
-  const paddingTop = Number.parseFloat(getComputedStyle(container).paddingTop);
-  return Number.isFinite(paddingTop) ? paddingTop : 0;
-}
-
 function measureScrollbarGutter(container: HTMLElement) {
   const hasHorizontalScrollbar = container.scrollWidth > container.clientWidth;
 
@@ -4973,6 +4638,3 @@ function measureScrollbarGutter(container: HTMLElement) {
   };
 }
 
-function clampZoom(value: number) {
-  return clamp(value, MIN_ZOOM, MAX_ZOOM);
-}

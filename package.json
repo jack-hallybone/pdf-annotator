@@ -12,7 +12,10 @@
     "prepreview": "node scripts/prepare-renderer-assets.mjs",
     "preview": "vite preview",
     "prepare-assets": "node scripts/prepare-renderer-assets.mjs",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "npm run test:unit && npm run test:dom",
+    "test:unit": "node --import tsx --test tests/*.test.ts",
+    "test:dom": "TSX_TSCONFIG_PATH=./tests/tsconfig.json node --import tsx --import ./tests/dom-setup.ts --test tests/*.dom.test.tsx",
+    "test:e2e": "playwright test",
     "security:audit": "npm audit && npm audit signatures",
     "lint": "eslint ."
   },
@@ -24,6 +27,9 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^25.9.3",
     "@types/react": "19.2.16",
     "@types/react-dom": "19.2.3",
@@ -31,7 +37,9 @@
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.26",
+    "global-jsdom": "^29.0.0",
     "globals": "^17.7.0",
+    "jsdom": "^29.1.1",
     "tsx": "^4.22.4",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.63.0",

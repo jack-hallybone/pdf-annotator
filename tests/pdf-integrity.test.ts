@@ -291,6 +291,66 @@ test('sticky notes preserve unicode contents', async () => {
   assert.equal(await annotationContentsByName(output, note.id), note.text);
 });
 
+test('sticky note contents with parentheses/backslashes round-trip intact', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  // These are ordinary, common inputs whose unbalanced parens/backslashes used
+  // to break the PDF string literal (e.g. ":)" was written as "(:))"),
+  // truncating the text and corrupting the surrounding object.
+  const cases = [
+    ':)',
+    ':(',
+    'see item (3) below',
+    'closing only)',
+    '(opening only',
+    'back\\slash and (mix)',
+    'nested ((a) b) ok'
+  ];
+
+  for (const [index, text] of cases.entries()) {
+    const note: PdfAnnotation = {
+      color: [1, 0.996, 0.306],
+      id: `paren-note-${index}`,
+      kind: 'stickyNote',
+      pageIndex: 0,
+      rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+      text
+    };
+
+    const output = await writePdfAnnotations(bytes, [note], {
+      replaceAnnotationSourceIds: [note.id],
+      replacePageIndexes: [0]
+    });
+
+    assert.equal(
+      await annotationContentsByName(output, note.id),
+      text,
+      `sticky note text should round-trip exactly: ${JSON.stringify(text)}`
+    );
+  }
+});
+
+test('free text contents with parentheses round-trip intact', async () => {
+  const bytes = await readFixture('test-annotated.pdf');
+  const text = 'Action items: fix (a) and (b) :)';
+  const annotation: PdfAnnotation = {
+    color: [0, 0, 0],
+    fontSize: 12,
+    id: 'paren-free-text',
+    kind: 'freeText',
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 72, x2: 272, y1: 600, y2: 680 },
+    text
+  };
+
+  const output = await writePdfAnnotations(bytes, [annotation], {
+    replaceAnnotationSourceIds: [annotation.id],
+    replacePageIndexes: [0]
+  });
+
+  assert.equal(await annotationContentsByName(output, annotation.id), text);
+});
+
 test('highlight copy text does not block PDF output', async () => {
   const bytes = await readFixture('test-annotated.pdf');
   const highlight: PdfAnnotation = {

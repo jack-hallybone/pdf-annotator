@@ -44,12 +44,34 @@ export default tseslint.config(
   },
   // Node-run tooling and tests.
   {
-    files: ['tests/**/*.ts', 'scripts/**/*.mjs', '*.{js,mjs,ts}'],
+    files: [
+      'tests/**/*.ts',
+      'tests-e2e/**/*.ts',
+      'scripts/**/*.mjs',
+      '*.{js,mjs,ts}'
+    ],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
       globals: { ...globals.node }
+    },
+    rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }
+      ]
+    }
+  },
+  // DOM component/hook tests: run under Node's test runner but render React
+  // into jsdom, so they need both Node and browser globals plus JSX.
+  {
+    files: ['tests/**/*.tsx'],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: { ...globals.node, ...globals.browser }
     },
     rules: {
       '@typescript-eslint/no-unused-vars': [

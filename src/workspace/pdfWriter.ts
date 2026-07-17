@@ -522,8 +522,17 @@ function encodedAppearanceText(font: PDFFont, text: string) {
 }
 
 function pdfTextString(text: string) {
+  // pdf-lib's PDFString.of() does NOT escape '(', ')' or '\', so an unbalanced
+  // parenthesis (a note as ordinary as ":)") or a backslash would terminate the
+  // literal early - truncating the text and corrupting the surrounding PDF
+  // object. PDFHexString encodes any text unambiguously, so fall back to it for
+  // anything that isn't trivially safe as a literal string. The decodeText()
+  // round-trip additionally catches characters a literal can't represent.
   const literal = PDFString.of(text);
-  return literal.decodeText() === text ? literal : PDFHexString.fromText(text);
+  if (/[()\\]/.test(text) || literal.decodeText() !== text) {
+    return PDFHexString.fromText(text);
+  }
+  return literal;
 }
 
 export function assertAnnotationsTextIsSupported(annotations: PdfAnnotation[]) {

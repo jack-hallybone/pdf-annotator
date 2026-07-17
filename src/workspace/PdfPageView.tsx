@@ -951,6 +951,9 @@ function PdfPageViewComponent({
         annotations: htmlAnnotations,
         linkService: linkService as any,
         downloadManager: downloadManager as any,
+        // No embedded PDF script execution and no interactive form widgets:
+        // this app only displays existing annotations, never runs their scripts.
+        enableScripting: false,
         renderForms: false
       });
     }

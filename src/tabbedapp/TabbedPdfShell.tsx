@@ -470,7 +470,10 @@ export const TabbedPdfShell = forwardRef<
       if (!command) {
         return;
       }
-      // Suppress the browser's native print/save even when no document is open
+
+      // Prevent before the no-document bail: the app owns Ctrl+P/Ctrl+S, and
+      // printing the empty home tab can hang the browser, so an open-less
+      // shortcut must be a clean no-op rather than fall through to native.
       event.preventDefault();
       event.stopImmediatePropagation();
 

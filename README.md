@@ -4,7 +4,7 @@ A lightweight client-side PDF viewer and annotation tool built with React, PDF.j
 
 [Try out the web version](https://jack-hallybone.github.io/pdf-annotator/) :rocket:
 
-:sparkles: Made with Codex and Claude Code.
+The whole project has been written by Codex and Claude :sparkles:
 
 ## What It Does
 
