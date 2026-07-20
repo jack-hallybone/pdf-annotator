@@ -68,8 +68,10 @@ export function FloatingToolDock({
 
   return (
     <div
+      aria-label="Annotation tools"
       className={`${FLOATING_FRAME_CLASS} tool-dock`}
       ref={dockRef}
+      role="toolbar"
     >
       {toolDefinitions.map(({ icon: Icon, key, label, preset, tool }) => {
         const buttonPreset = toolPresets[key] ?? preset;
@@ -254,8 +256,10 @@ export function FloatingZoomControls({
 
   return (
     <div
+      aria-label="Zoom"
       className={`${FLOATING_FRAME_CLASS} zoom-controls`}
       ref={zoomPanelRef}
+      role="toolbar"
     >
       <button
         className={ICON_BUTTON_CLASS}
@@ -385,7 +389,11 @@ export function FloatingDocumentControls({
   showAnnotations
 }: FloatingDocumentControlsProps) {
   return (
-    <div className={`${FLOATING_FRAME_CLASS} document-controls`}>
+    <div
+      aria-label="Document actions"
+      className={`${FLOATING_FRAME_CLASS} document-controls`}
+      role="toolbar"
+    >
       <IconButton
         disabled={busy}
         label={
@@ -447,7 +455,9 @@ export function FloatingHistoryControls({
 }: FloatingHistoryControlsProps) {
   return (
     <div
+      aria-label="Undo and redo"
       className={`${FLOATING_FRAME_CLASS} history-controls`}
+      role="toolbar"
       style={{ left: sidebarOpen ? sidebarWidth + 24 : 12 }}
     >
       <button

@@ -5,15 +5,21 @@ import { safePdfFileName } from '../fileNames';
 const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
 
-let printBlobUrl: string | null = null;
-let printFrame: HTMLIFrameElement | null = null;
-
 export function browserPrintTarget(): PdfPrintTarget {
   return printPdfInFrame;
 }
 
+// Each call owns its own blob URL/iframe rather than sharing module-level
+// state: this app is a multi-tab/multi-document shell, so two Print
+// invocations can legitimately be in flight at once (printing from two tabs
+// back to back, or clicking Print again before the first print dialog has
+// closed). Shared state here previously meant the second call's setup would
+// revoke the first call's still-in-use blob URL and rip its iframe out of
+// the DOM, breaking/blanking whichever print job was still open.
 function printPdfInFrame(bytes: Uint8Array, outputName: string) {
-  const url = createPrintBlobUrl(bytes);
+  const url = URL.createObjectURL(
+    new Blob([uint8ArrayToArrayBuffer(bytes)], { type: 'application/pdf' })
+  );
   const frame = document.createElement('iframe');
   frame.title = 'Printable PDF';
   frame.setAttribute('aria-hidden', 'true');
@@ -27,7 +33,31 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
     right: '0',
     width: '1px'
   });
-  printFrame = frame;
+
+  let blobUrl: string | null = url;
+  let printFrame: HTMLIFrameElement | null = frame;
+
+  function revokeBlobUrl() {
+    if (blobUrl) {
+      URL.revokeObjectURL(blobUrl);
+      blobUrl = null;
+    }
+  }
+
+  function removePrintFrame() {
+    if (printFrame) {
+      printFrame.remove();
+      printFrame = null;
+    }
+  }
+
+  function cleanupPrintResources() {
+    window.clearTimeout(revokeTimer);
+    removePrintFrame();
+    revokeBlobUrl();
+  }
+
+  const revokeTimer = window.setTimeout(revokeBlobUrl, PRINT_BLOB_REVOKE_MS);
 
   return new Promise<void>((resolve) => {
     let printRequested = false;
@@ -94,22 +124,6 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
   });
 }
 
-function createPrintBlobUrl(bytes: Uint8Array) {
-  const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
-    type: 'application/pdf'
-  });
-  const url = URL.createObjectURL(blob);
-  cleanupPrintResources();
-  printBlobUrl = url;
-  window.setTimeout(() => {
-    if (printBlobUrl === url) {
-      revokePrintBlobUrl();
-    }
-  }, PRINT_BLOB_REVOKE_MS);
-
-  return url;
-}
-
 function openPrintablePdfInTab(url: string) {
   const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
   if (!printWindow) {
@@ -164,23 +178,4 @@ function downloadPdfBytes(bytes: Uint8Array, outputName: string) {
   link.click();
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function revokePrintBlobUrl() {
-  if (printBlobUrl) {
-    URL.revokeObjectURL(printBlobUrl);
-    printBlobUrl = null;
-  }
-}
-
-function removePrintFrame() {
-  if (printFrame) {
-    printFrame.remove();
-    printFrame = null;
-  }
-}
-
-function cleanupPrintResources() {
-  removePrintFrame();
-  revokePrintBlobUrl();
 }

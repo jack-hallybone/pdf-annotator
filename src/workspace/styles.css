@@ -821,31 +821,47 @@
 
 .text-selection-highlight-button {
   align-items: center;
-  background: var(--pdfa-ui);
-  border: 1px solid rgb(var(--pdfa-ink-rgb) / 0.14);
+  animation: pdfa-selection-button-in 140ms ease-out;
+  background: var(--pdfa-accent);
+  border: 1px solid var(--pdfa-accent);
   border-radius: 999px;
-  box-shadow: var(--pdfa-menu-shadow);
+  box-shadow:
+    0 4px 14px rgb(var(--pdfa-accent-rgb) / 0.38),
+    0 1px 2px rgb(var(--pdfa-ink-rgb) / 0.12);
   box-sizing: border-box;
-  color: var(--pdfa-ink);
+  color: #fff;
   cursor: pointer;
   display: grid;
-  height: 1.875rem;
+  height: 2.125rem;
   justify-content: center;
   padding: 0;
   pointer-events: auto;
   position: absolute;
-  width: 1.875rem;
+  width: 2.125rem;
   z-index: 12;
 }
 
 .text-selection-highlight-button:hover,
 .text-selection-highlight-button:focus-visible {
-  background: var(--pdfa-bg);
+  filter: brightness(1.08);
   outline: none;
 }
 
 .text-selection-highlight-button:focus-visible {
-  box-shadow: var(--pdfa-focus-ring);
+  box-shadow:
+    var(--pdfa-focus-ring),
+    0 4px 14px rgb(var(--pdfa-accent-rgb) / 0.38);
+}
+
+@keyframes pdfa-selection-button-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .number-setting {
@@ -1014,7 +1030,15 @@
   width: 100%;
 }
 
-.pdf-page .textLayer { pointer-events: auto; }
+/* Suppresses the iOS/iPadOS Safari text-selection callout (Copy/Look Up/
+   Share) so it doesn't cover the app's own highlight button. There is no
+   page-level equivalent for Microsoft Edge's built-in "mini menu" - that one
+   is a browser-chrome feature the user themselves has to turn off, via
+   edge://settings/appearance -> "Show mini menu when selecting text". */
+.pdf-page .textLayer {
+  -webkit-touch-callout: none;
+  pointer-events: auto;
+}
 .pdf-page .pdfViewer { z-index: 0; }
 .pdf-page .pdfa-annotation-appearance-layer {
   pointer-events: none;

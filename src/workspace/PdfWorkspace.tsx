@@ -31,8 +31,10 @@ import {
   normalizeAnnotationLayout,
   remapAnnotationsAfterDelete,
   remapAnnotationsAfterInsert,
+  remapAnnotationsAfterSwap,
   remapPageSetAfterDelete,
-  remapPageSetAfterInsert
+  remapPageSetAfterInsert,
+  remapPageSetAfterSwap
 } from './annotationState';
 import { annotationBounds, moveAnnotation } from './annotationGeometry';
 import { DocumentSidebar } from './components/DocumentSidebar';
@@ -60,6 +62,7 @@ import {
   extractPagesBytes,
   invertStructuralOperation,
   mergePdfAfterPage,
+  movePageBy,
   removePage,
   rotatePageClockwise,
   type PdfStructuralOperation
@@ -1277,85 +1280,114 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   }
 
   async function undoHistory() {
-    if (busyRef.current) {
+    // Must hold the busy lock from this synchronous entry point, not just
+    // from inside restoreDocumentHistory below - otherwise the window
+    // between this check and the first await (invertStructuralOperation,
+    // itself async) is unlocked, and e.g. a Save triggered in that window
+    // can write pre-undo bytes to disk while believing it's up to date once
+    // this undo's generation bump makes its own "still current?" check fail
+    // (see restoreDocumentHistory's generation guard below).
+    if (!beginBusyOperation()) {
       return;
     }
 
-    finishAnnotationEdit();
-    const entry = undoStackRef.current.at(-1);
-    if (!entry) {
-      return;
-    }
-
-    if (entry.kind === 'document') {
-      if (!pdfBytes) {
+    // Set once restoreDocumentHistory is invoked: from that point on it owns
+    // the busy flag's lifecycle (it sets it again itself, redundantly but
+    // harmlessly, and clears it in its own generation-guarded `finally`) -
+    // this function must not also clear it afterwards, or it could stomp on
+    // a newer operation that has since taken over the busy state.
+    let handedOffBusyState = false;
+    try {
+      finishAnnotationEdit();
+      const entry = undoStackRef.current.at(-1);
+      if (!entry) {
         return;
       }
 
-      const redoOperation = await invertStructuralOperation(
-        entry.snapshot.operation,
-        pdfBytes
-      );
-      const redoEntry = documentHistoryEntry(redoOperation);
-      if (!redoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
-        showWorkspaceNotice('Could not undo this change.');
+      if (entry.kind === 'document') {
+        if (!pdfBytes) {
+          return;
+        }
+
+        const redoOperation = await invertStructuralOperation(
+          entry.snapshot.operation,
+          pdfBytes
+        );
+        const redoEntry = documentHistoryEntry(redoOperation);
+        handedOffBusyState = true;
+        if (!redoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
+          showWorkspaceNotice('Could not undo this change.');
+          return;
+        }
+
+        popUndoEntry(entry);
+        updateRedoStack((stack) => [...stack, redoEntry]);
+        lastUndoCommitTimeRef.current = 0;
         return;
       }
 
       popUndoEntry(entry);
-      updateRedoStack((stack) => [...stack, redoEntry]);
+      updateRedoStack((stack) => [
+        ...stack,
+        annotationHistoryEntry(annotationsRef.current)
+      ]);
+      applyAnnotationHistory(entry.annotations);
       lastUndoCommitTimeRef.current = 0;
-      return;
+    } finally {
+      if (!handedOffBusyState) {
+        finishBusyOperation();
+      }
     }
-
-    popUndoEntry(entry);
-    updateRedoStack((stack) => [
-      ...stack,
-      annotationHistoryEntry(annotationsRef.current)
-    ]);
-    applyAnnotationHistory(entry.annotations);
-    lastUndoCommitTimeRef.current = 0;
   }
 
   async function redoHistory() {
-    if (busyRef.current) {
+    // See undoHistory's identical guard for why this must lock synchronously.
+    if (!beginBusyOperation()) {
       return;
     }
 
-    finishAnnotationEdit();
-    const entry = redoStackRef.current.at(-1);
-    if (!entry) {
-      return;
-    }
-
-    if (entry.kind === 'document') {
-      if (!pdfBytes) {
+    let handedOffBusyState = false;
+    try {
+      finishAnnotationEdit();
+      const entry = redoStackRef.current.at(-1);
+      if (!entry) {
         return;
       }
 
-      const undoOperation = await invertStructuralOperation(
-        entry.snapshot.operation,
-        pdfBytes
-      );
-      const undoEntry = documentHistoryEntry(undoOperation);
-      if (!undoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
-        showWorkspaceNotice('Could not redo this change.');
+      if (entry.kind === 'document') {
+        if (!pdfBytes) {
+          return;
+        }
+
+        const undoOperation = await invertStructuralOperation(
+          entry.snapshot.operation,
+          pdfBytes
+        );
+        const undoEntry = documentHistoryEntry(undoOperation);
+        handedOffBusyState = true;
+        if (!undoEntry || !(await restoreDocumentHistory(entry.snapshot))) {
+          showWorkspaceNotice('Could not redo this change.');
+          return;
+        }
+
+        popRedoEntry(entry);
+        updateUndoStack((stack) => [...stack, undoEntry]);
+        lastUndoCommitTimeRef.current = 0;
         return;
       }
 
       popRedoEntry(entry);
-      updateUndoStack((stack) => [...stack, undoEntry]);
+      updateUndoStack((stack) => [
+        ...stack,
+        annotationHistoryEntry(annotationsRef.current)
+      ]);
+      applyAnnotationHistory(entry.annotations);
       lastUndoCommitTimeRef.current = 0;
-      return;
+    } finally {
+      if (!handedOffBusyState) {
+        finishBusyOperation();
+      }
     }
-
-    popRedoEntry(entry);
-    updateUndoStack((stack) => [
-      ...stack,
-      annotationHistoryEntry(annotationsRef.current)
-    ]);
-    applyAnnotationHistory(entry.annotations);
-    lastUndoCommitTimeRef.current = 0;
   }
 
   function updateUndoStack(
@@ -2782,6 +2814,71 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
   }
 
+  async function handleMovePage(
+    pageIndex = activePageIndex,
+    direction: 1 | -1 = 1
+  ) {
+    const targetIndex = pageIndex + direction;
+    if (
+      readOnly ||
+      !pdfBytes ||
+      pageIndex < 0 ||
+      pageIndex >= pages.length ||
+      targetIndex < 0 ||
+      targetIndex >= pages.length ||
+      !beginBusyOperation()
+    ) {
+      return;
+    }
+
+    finishAnnotationEdit();
+    const generation = loadGenerationRef.current;
+    const undoEntry = documentHistoryEntry({
+      type: 'movePage',
+      pageIndex,
+      direction
+    });
+    try {
+      const nextBytes = await movePageBy(pdfBytes, pageIndex, direction);
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
+      managedAnnotationPagesRef.current = remapPageSetAfterSwap(
+        managedAnnotationPagesRef.current,
+        pageIndex,
+        targetIndex
+      );
+      cleanAnnotationsRef.current = remapAnnotationsAfterSwap(
+        cleanAnnotationsRef.current,
+        pageIndex,
+        targetIndex
+      );
+      replaceAnnotationsWithoutHistory(
+        remapAnnotationsAfterSwap(annotationsRef.current, pageIndex, targetIndex)
+      );
+      const replacedGeneration = await replacePdfAfterStructureEdit(nextBytes, {
+        activePage: targetIndex
+      });
+      if (replacedGeneration === false) {
+        throw new Error('Could not reload the PDF after moving the page.');
+      }
+      if (replacedGeneration === loadGenerationRef.current) {
+        pushDocumentUndoEntry(undoEntry);
+        setPageMenuIndex(null);
+      }
+    } catch (error) {
+      showWorkspaceNotice(
+        error instanceof Error ? error.message : 'Could not move this page.'
+      );
+      if (undoEntry?.kind === 'document' && generation === loadGenerationRef.current) {
+        rollbackAncillaryStateOnly(undoEntry.snapshot);
+      }
+    } finally {
+      finishBusyOperation();
+    }
+  }
+
   function markCurrentWorkClean(cleanPdfBytes: Uint8Array) {
     const nextPdfFingerprint = byteFingerprint(cleanPdfBytes);
     pdfFingerprintRef.current = nextPdfFingerprint;
@@ -3946,6 +4043,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     saveTargetRef.current = null;
+    // This tab now holds an in-memory copy, no longer tied to the original
+    // file on disk - clear its fileKey so the original's already-open-tab
+    // dedup check stops treating this tab as still being that file (otherwise
+    // reopening the original would just refocus this tab instead of loading
+    // it). A fresh fileKey is assigned if/when this copy is itself saved.
+    fileKeyRef.current = null;
     setEditingEnabled(true);
     setFileName((current) => copyName(current));
     setActiveToolKey('select');
@@ -4101,6 +4204,8 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           onClose={() => setSidebarOpen(false)}
           onDeletePage={handleDeletePage}
           onMergePdf={() => void handleMergePdf()}
+          onMovePageDown={(pageIndex) => handleMovePage(pageIndex, 1)}
+          onMovePageUp={(pageIndex) => handleMovePage(pageIndex, -1)}
           onRotatePage={handleRotatePage}
           onSelectPage={handleSelectPage}
           onThumbnailPageLoad={handleThumbnailPageLoad}

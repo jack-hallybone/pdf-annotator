@@ -22,7 +22,17 @@ let launchQueueRegistered = false;
 let launchDeliveryQueue = Promise.resolve();
 const pendingFileLaunches: LocalPdfFileHandle[][] = [];
 
-export function registerBrowserServiceWorker() {
+// The service worker serves the cached app shell instantly (see
+// buildServiceWorkerSource) rather than racing the network on every
+// navigation. Picking up a new deploy is instead driven from here: with
+// updateViaCache: 'none', every registerServiceWorker() call (i.e. every
+// fresh page load/session) already makes the browser re-fetch sw.js and
+// compare it byte-for-byte, so a new deploy installs in the background
+// without any polling on our part - once it's done, it hands back the app a
+// chance to prompt the user before switching over.
+let currentRegistration: ServiceWorkerRegistration | null = null;
+
+export function registerBrowserServiceWorker(onUpdateAvailable?: () => void) {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) {
     return;
   }
@@ -36,6 +46,10 @@ export function registerBrowserServiceWorker() {
         scope: import.meta.env.BASE_URL,
         updateViaCache: 'none'
       })
+      .then((registration) => {
+        currentRegistration = registration;
+        watchForServiceWorkerUpdates(registration, onUpdateAvailable);
+      })
       .catch(() => undefined);
   };
 
@@ -46,6 +60,59 @@ export function registerBrowserServiceWorker() {
 
   window.addEventListener('load', register, { once: true });
   return () => window.removeEventListener('load', register);
+}
+
+function watchForServiceWorkerUpdates(
+  registration: ServiceWorkerRegistration,
+  onUpdateAvailable?: () => void
+) {
+  if (!onUpdateAvailable) {
+    return;
+  }
+
+  // A worker can already be sitting in "waiting" if it installed earlier in
+  // this page's lifetime (or, in principle, before this listener attached).
+  if (registration.waiting && navigator.serviceWorker.controller) {
+    onUpdateAvailable();
+  }
+
+  registration.addEventListener('updatefound', () => {
+    const installingWorker = registration.installing;
+    if (!installingWorker) {
+      return;
+    }
+
+    installingWorker.addEventListener('statechange', () => {
+      // `controller` is only set once this page is already being served by
+      // some service worker - i.e. this "installed" is an update, not the
+      // very first install (which has nothing to compare against yet).
+      if (
+        installingWorker.state === 'installed' &&
+        navigator.serviceWorker.controller
+      ) {
+        onUpdateAvailable();
+      }
+    });
+  });
+}
+
+// Called when the user accepts the "update available" prompt. Tells the
+// worker parked in the waiting state to activate now instead of waiting for
+// every other tab of the old version to close, then reloads this page once
+// it has taken control.
+export function applyAvailableServiceWorkerUpdate() {
+  const waitingWorker = currentRegistration?.waiting;
+  if (!waitingWorker) {
+    window.location.reload();
+    return;
+  }
+
+  navigator.serviceWorker.addEventListener(
+    'controllerchange',
+    () => window.location.reload(),
+    { once: true }
+  );
+  waitingWorker.postMessage('SKIP_WAITING');
 }
 
 export function setPwaFileLaunchHandler(handler: PwaFileLaunchHandler) {

@@ -69,6 +69,40 @@ export async function rotatePageClockwise(bytes: Uint8Array, pageIndex: number) 
   return saveEditedPdf(pdfDoc);
 }
 
+// Swaps pageIndex with its neighbor at pageIndex + direction (direction is
+// +1 for "move down/after", -1 for "move up/before"). pdf-lib has no direct
+// reorder primitive, so this copies the page (copyPages supports copying
+// within the same document) to its new slot and removes the original -
+// insert-before-remove, so the removal index needs to account for the
+// shift the insertion just caused.
+export async function movePageBy(
+  bytes: Uint8Array,
+  pageIndex: number,
+  direction: 1 | -1
+) {
+  const pdfDoc = await loadEditablePdf(bytes);
+  const pageCount = pdfDoc.getPageCount();
+  const targetIndex = pageIndex + direction;
+  if (
+    pageIndex < 0 ||
+    pageIndex >= pageCount ||
+    targetIndex < 0 ||
+    targetIndex >= pageCount
+  ) {
+    throw new Error('This page cannot be moved further in that direction.');
+  }
+
+  const [copiedPage] = await pdfDoc.copyPages(pdfDoc, [pageIndex]);
+  if (direction > 0) {
+    pdfDoc.insertPage(pageIndex + 2, copiedPage);
+    pdfDoc.removePage(pageIndex);
+  } else {
+    pdfDoc.insertPage(pageIndex - 1, copiedPage);
+    pdfDoc.removePage(pageIndex + 1);
+  }
+  return saveEditedPdf(pdfDoc);
+}
+
 export async function mergePdfAfterPage(
   bytes: Uint8Array,
   mergeBytes: Uint8Array,
@@ -163,7 +197,8 @@ export type PdfStructuralOperation =
       pageCount: number;
       pagesBytes: Uint8Array;
     }
-  | { type: 'removePages'; startIndex: number; count: number };
+  | { type: 'removePages'; startIndex: number; count: number }
+  | { type: 'movePage'; pageIndex: number; direction: 1 | -1 };
 
 export function applyStructuralOperation(
   bytes: Uint8Array,
@@ -176,6 +211,8 @@ export function applyStructuralOperation(
       return insertPagesFromBytes(bytes, operation.atIndex, operation.pagesBytes);
     case 'removePages':
       return removePagesRange(bytes, operation.startIndex, operation.count);
+    case 'movePage':
+      return movePageBy(bytes, operation.pageIndex, operation.direction);
   }
 }
 
@@ -214,6 +251,14 @@ export async function invertStructuralOperation(
         pagesBytes: extracted.bytes
       };
     }
+    case 'movePage':
+      // A swap with a neighbor undoes itself: swap the page back from its
+      // new slot (pageIndex + direction) in the opposite direction.
+      return {
+        type: 'movePage',
+        pageIndex: operation.pageIndex + operation.direction,
+        direction: -operation.direction as 1 | -1
+      };
   }
 }
 

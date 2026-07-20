@@ -122,35 +122,3 @@ export function pdfArrayRectToViewportRect(
   );
 }
 
-export function pointsToSvg(points: PdfPoint[], viewport: PageViewport) {
-  return points
-    .map((point) => viewport.convertToViewportPoint(point.x, point.y).join(','))
-    .join(' ');
-}
-
-export function quadPointsToPolygons(quadPoints?: number[], rect?: number[]) {
-  if (quadPoints?.length) {
-    return Array.from({ length: Math.floor(quadPoints.length / 8) }, (_, i) => {
-      const offset = i * 8;
-      return [
-        { x: quadPoints[offset], y: quadPoints[offset + 1] },
-        { x: quadPoints[offset + 2], y: quadPoints[offset + 3] },
-        { x: quadPoints[offset + 6], y: quadPoints[offset + 7] },
-        { x: quadPoints[offset + 4], y: quadPoints[offset + 5] }
-      ];
-    });
-  }
-
-  if (!rect) {
-    return [];
-  }
-
-  return [
-    [
-      { x: rect[0], y: rect[3] },
-      { x: rect[2], y: rect[3] },
-      { x: rect[2], y: rect[1] },
-      { x: rect[0], y: rect[1] }
-    ] satisfies PdfPoint[]
-  ];
-}

@@ -6,6 +6,7 @@ import {
   extractPagesBytes,
   insertPagesFromBytes,
   invertStructuralOperation,
+  movePageBy,
   removePagesRange,
   rotatePageByDelta,
   type PdfStructuralOperation
@@ -143,6 +144,54 @@ test('rotate-then-undo round trip inverts the rotation delta', async () => {
     (await loadTestPdf(undone)).getPage(1).getRotation().angle,
     0
   );
+});
+
+test('movePageBy swaps a page with its neighbor in either direction', async () => {
+  const bytes = await buildFingerprintedPdf(4); // 600,601,602,603
+  const movedDown = await movePageBy(bytes, 1, 1); // swap 601 and 602
+  assert.deepEqual(await pageWidths(movedDown), [600, 602, 601, 603]);
+
+  const movedUp = await movePageBy(bytes, 2, -1); // swap 601 and 602
+  assert.deepEqual(await pageWidths(movedUp), [600, 602, 601, 603]);
+
+  // Boundary swaps (first/last page) work the same way.
+  assert.deepEqual(
+    await pageWidths(await movePageBy(bytes, 0, 1)),
+    [601, 600, 602, 603]
+  );
+  assert.deepEqual(
+    await pageWidths(await movePageBy(bytes, 3, -1)),
+    [600, 601, 603, 602]
+  );
+});
+
+test('movePageBy rejects moving past either edge of the document', async () => {
+  const bytes = await buildFingerprintedPdf(3);
+  await assert.rejects(() => movePageBy(bytes, 0, -1));
+  await assert.rejects(() => movePageBy(bytes, 2, 1));
+});
+
+test('move-then-undo round trip (movePage inverted) restores original order', async () => {
+  const original = await buildFingerprintedPdf(4); // 600,601,602,603
+  const moveOp: PdfStructuralOperation = {
+    type: 'movePage',
+    pageIndex: 1,
+    direction: 1
+  };
+
+  const afterMove = await applyStructuralOperation(original, moveOp);
+  assert.deepEqual(await pageWidths(afterMove), [600, 602, 601, 603]);
+
+  const undoOp = await invertStructuralOperation(moveOp, afterMove);
+  assert.deepEqual(undoOp, { type: 'movePage', pageIndex: 2, direction: -1 });
+
+  const undone = await applyStructuralOperation(afterMove, undoOp);
+  assert.deepEqual(await pageWidths(undone), [600, 601, 602, 603]);
+
+  const redoOp = await invertStructuralOperation(undoOp, undone);
+  assert.deepEqual(redoOp, moveOp);
+  const redone = await applyStructuralOperation(undone, redoOp);
+  assert.deepEqual(await pageWidths(redone), [600, 602, 601, 603]);
 });
 
 test('merge-then-undo round trip (insertPages of merged pages, inverted) restores original pages', async () => {

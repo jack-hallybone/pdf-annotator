@@ -182,7 +182,6 @@ export type TabbedPdfShellProps = {
   confirmCloseDocuments?: (
     request: TabbedPdfCloseDocumentsRequest
   ) => boolean | Promise<boolean>;
-  enableCloseTabShortcut?: boolean;
   fileAdapter: PdfHostAdapter;
   initialDocuments?: PdfHostDocument[];
   newTabMenuActions?: TabbedPdfMenuAction[];
@@ -200,7 +199,6 @@ export const TabbedPdfShell = forwardRef<
 >(function TabbedPdfShell({
   className,
   confirmCloseDocuments,
-  enableCloseTabShortcut = false,
   fileAdapter,
   initialDocuments = [],
   newTabMenuActions = [],
@@ -423,32 +421,6 @@ export const TabbedPdfShell = forwardRef<
   useEffect(() => {
     onDocumentsChange?.(documentSummaries());
   }, [activeDocumentId, documents, onDocumentsChange]);
-
-  useEffect(() => {
-    if (!enableCloseTabShortcut) {
-      return;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (
-        !(event.ctrlKey || event.metaKey) ||
-        event.key.toLowerCase() !== 'w'
-      ) {
-        return;
-      }
-
-      const activeDocumentId = activeDocumentIdRef.current;
-      if (!activeDocumentId) {
-        return;
-      }
-
-      event.preventDefault();
-      void closeDocument(activeDocumentId);
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [enableCloseTabShortcut]);
 
   // Registered once for the shell's lifetime, so it exists before a newly
   // opened tab's own PdfWorkspace has mounted (and registered its own
@@ -723,7 +695,18 @@ export const TabbedPdfShell = forwardRef<
 
     captureMountedSessions();
     releaseDocumentsLeavingView([firstOpenedId]);
-    setDocuments((current) => [...current, ...openedDocuments]);
+    setDocuments((current) => {
+      const next = [...current, ...openedDocuments];
+      // documentsRef is normally kept in sync by an effect (see
+      // useLatestRef), which only runs after this render commits - too late
+      // for openHostDocuments's already-open-tab dedup check if it's called
+      // again synchronously before then (e.g. two file-open events handled
+      // in the same task). Updating it here, from inside the updater so it
+      // stays consistent with whatever `current` React actually applied,
+      // closes that window.
+      documentsRef.current = next;
+      return next;
+    });
     setActiveDocumentId(firstOpenedId);
   }
 
@@ -914,6 +897,7 @@ export const TabbedPdfShell = forwardRef<
           ]?.id ?? null
         : activeId;
 
+    documentsRef.current = remainingDocuments;
     setDocuments(remainingDocuments);
     setActiveDocumentId(nextActiveId);
     releaseWorkspaceResources(documentId);
@@ -992,6 +976,7 @@ export const TabbedPdfShell = forwardRef<
           ? focusFallbackId
           : remainingDocuments[0]?.id ?? null;
 
+    documentsRef.current = remainingDocuments;
     setDocuments(remainingDocuments);
     setActiveDocumentId(nextActiveId);
 

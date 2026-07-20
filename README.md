@@ -6,6 +6,8 @@ A lightweight client-side PDF viewer and annotation tool built with React, PDF.j
 
 The whole project has been written by Codex and Claude :sparkles:
 
+![PDF Annotator - free, client-side PDF viewer and annotation tool](./src/browserapp/assets/og-image.png)
+
 ## What It Does
 
 PDF Annotator opens local PDFs, displays them crisply, and saves interoperable annotations back into the PDF. Editable annotations include text highlights, freehand ink, freehand highlights, text annotations, sticky notes and image stamps. Other annotation types from external tools are preserved and shown read-only where PDF.js can render them.
@@ -108,7 +110,7 @@ Useful optional props:
 - `workspaceOptions`: props passed to each `PdfWorkspace`.
 - `initialDocuments`, `onDocumentsChange`
 - `confirmCloseDocuments`
-- `enableCloseTabShortcut`, `newTabMenuActions`, `theme`
+- `newTabMenuActions`, `theme`
 
 `fileAdapter` can provide:
 

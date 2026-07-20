@@ -1,8 +1,12 @@
 // Builds the service worker source string. Kept as a pure function (no file
 // I/O) so it can be unit-tested without a build - the generator script does the
-// disk work and calls this. Navigations are network-first *with a timeout*:
-// a weak connection that stalls without erroring must not hang the app launch,
-// so we fall back to the cached shell once the timeout elapses.
+// disk work and calls this. Navigations are cache-first: the cached shell is
+// served immediately (instant, works offline), and picking up a new deploy is
+// handled separately by the browser's own SW update check plus the in-page
+// "update available" prompt (see registerBrowserServiceWorker in pwa.ts),
+// not by racing the network on every navigation. The network path here is
+// only a fallback for the rare case nothing is cached yet (e.g. a corrupted
+// cache), so it still gets a timeout to avoid hanging on a stalled connection.
 export const NAVIGATION_NETWORK_TIMEOUT_MS = 3000;
 
 export function buildServiceWorkerSource(
@@ -43,6 +47,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// The page posts this once the user accepts the "update available" prompt,
+// so the new worker (parked in the waiting state after installing) takes
+// over immediately instead of waiting for every tab of the old version to
+// close. See applyAvailableServiceWorkerUpdate() in pwa.ts.
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') {
@@ -50,7 +64,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (request.mode === 'navigate') {
-    event.respondWith(navigateWithCacheFallback(request));
+    event.respondWith(navigateCacheFirst(request));
     return;
   }
 
@@ -66,22 +80,23 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-async function navigateWithCacheFallback(request) {
+async function navigateCacheFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(OFFLINE_URL);
+  if (cached) {
+    return cached;
+  }
+
+  // Nothing cached yet (first install still in flight, or a wiped cache) -
+  // fall back to the network, but don't let a stalled connection hang the
+  // launch indefinitely.
   try {
-    // Network-first, but don't let a stalled connection hang the launch: if the
-    // network doesn't answer within the timeout (or errors), serve the cached
-    // app shell instead of waiting indefinitely.
     return await fetchWithTimeout(request, NAVIGATION_NETWORK_TIMEOUT_MS);
   } catch {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(OFFLINE_URL);
-    return (
-      cached ??
-      new Response('PDF Annotator is unavailable offline.', {
-        status: 503,
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' }
-      })
-    );
+    return new Response('PDF Annotator is unavailable offline.', {
+      status: 503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+    });
   }
 }
 

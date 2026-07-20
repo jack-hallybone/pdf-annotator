@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { RefreshCw, X } from 'lucide-react';
 import { TabbedPdfShell } from '../tabbedapp';
 import type {
   TabbedPdfDocumentSummary,
@@ -10,6 +11,7 @@ import {
   browserFileHandlesToHostDocuments
 } from './browserFileAdapter';
 import {
+  applyAvailableServiceWorkerUpdate,
   registerBrowserServiceWorker,
   setPwaFileLaunchHandler
 } from './pwa';
@@ -45,8 +47,20 @@ function BrowserShellInner() {
   const [installPrompt, setInstallPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [installedAsApp, setInstalledAsApp] = useState(isPwaDisplayMode);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
-  useEffect(() => registerBrowserServiceWorker(), []);
+  useEffect(
+    () => registerBrowserServiceWorker(() => setUpdateAvailable(true)),
+    []
+  );
+
+  const refreshForUpdate = useCallback(() => {
+    applyAvailableServiceWorkerUpdate();
+  }, []);
+
+  const dismissUpdateNotice = useCallback(() => {
+    setUpdateAvailable(false);
+  }, []);
 
   useEffect(() => {
     const standaloneMedia = window.matchMedia('(display-mode: standalone)');
@@ -123,21 +137,63 @@ function BrowserShellInner() {
   }, [installPrompt]);
 
   return (
-    <TabbedPdfShell
-      fileAdapter={browserFileAdapter}
-      onDocumentsChange={setDocuments}
-      ref={shellRef}
-      renderHome={(props) => (
-        <BrowserHome
-          {...props}
-          canHandlePdfLaunches={canHandlePwaFileLaunches()}
-          installedAsApp={installedAsApp}
-          onInstall={
-            installPrompt && !installedAsApp ? installApp : undefined
-          }
+    <>
+      {updateAvailable ? (
+        <UpdateAvailableBanner
+          onClose={dismissUpdateNotice}
+          onRefresh={refreshForUpdate}
         />
-      )}
-    />
+      ) : null}
+      <TabbedPdfShell
+        fileAdapter={browserFileAdapter}
+        onDocumentsChange={setDocuments}
+        ref={shellRef}
+        renderHome={(props) => (
+          <BrowserHome
+            {...props}
+            canHandlePdfLaunches={canHandlePwaFileLaunches()}
+            installedAsApp={installedAsApp}
+            onInstall={
+              installPrompt && !installedAsApp ? installApp : undefined
+            }
+          />
+        )}
+      />
+    </>
+  );
+}
+
+function UpdateAvailableBanner({
+  onClose,
+  onRefresh
+}: {
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="browserapp-update-banner ui-frame screen-only" role="status">
+      <span className="browserapp-update-banner-text">
+        A new version of PDF Annotator is available.
+      </span>
+      <div className="browserapp-update-banner-actions">
+        <button
+          className="ui-button browserapp-update-banner-refresh"
+          onClick={onRefresh}
+          type="button"
+        >
+          <RefreshCw size={14} />
+          <span>Refresh</span>
+        </button>
+        <button
+          aria-label="Dismiss update notification"
+          className="icon-button ui-button browserapp-update-banner-close"
+          onClick={onClose}
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
   );
 }
 

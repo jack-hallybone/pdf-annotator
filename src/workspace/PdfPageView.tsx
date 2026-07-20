@@ -148,6 +148,16 @@ type ImageStampResizeHandle = {
 };
 type DraftInkPath = {
   kind: 'draw' | 'freehandHighlight';
+  // Which pointer surface started this gesture - the SVG interaction layer
+  // (draw/freehandHighlight tools) or the page div (the highlight tool's
+  // free-draw fallback, off text). Pointer capture keeps every move/up/
+  // cancel event for this pointer routed to (and bubbling through) both
+  // surfaces' handlers regardless of which one owns the gesture, and
+  // regardless of whether the active `tool` changes mid-gesture - so
+  // finalize/cleanup must key off this fixed origin, not the live tool,
+  // or a mid-gesture tool switch leaves the draft stuck forever (neither
+  // handler's now-mismatched tool check fires on pointerup).
+  origin: 'pageDiv' | 'svg';
   path: PdfPoint[];
 };
 type EraserGesture = {
@@ -908,6 +918,15 @@ function PdfPageViewComponent({
   ]);
 
   useEffect(() => {
+    // pdf.js populates `div` asynchronously inside layer.render() below, so
+    // without this guard a stale invocation (superseded by a newer one
+    // while its render() was still in flight - e.g. rapid zoom changes)
+    // would still write its nodes into the div once it finally resolves,
+    // landing on top of/mixed with whatever the newer render already put
+    // there. Matches the cancellation pattern the sibling appearance-layer
+    // effect above already uses.
+    let cancelled = false;
+
     async function renderAnnotationLayer() {
       const div = annotationLayerRef.current;
       if (!div) {
@@ -956,13 +975,20 @@ function PdfPageViewComponent({
         enableScripting: false,
         renderForms: false
       });
+
+      if (cancelled) {
+        div.replaceChildren();
+      }
     }
 
     renderAnnotationLayer().catch(() => {
-      onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
+      if (!cancelled) {
+        onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
+      }
     });
 
     return () => {
+      cancelled = true;
       annotationLayerRef.current?.replaceChildren();
     };
   }, [
@@ -1224,6 +1250,7 @@ function PdfPageViewComponent({
     event.currentTarget.setPointerCapture(event.pointerId);
     beginDraftInkPath(
       tool === 'draw' ? 'draw' : 'freehandHighlight',
+      'svg',
       eventToPdfPoint(event, viewport)
     );
   }
@@ -1336,7 +1363,7 @@ function PdfPageViewComponent({
       window.getSelection()?.removeAllRanges();
       const point = eventToPdfPointFromElement(event, viewport);
       event.currentTarget.setPointerCapture(event.pointerId);
-      beginDraftInkPath('freehandHighlight', point);
+      beginDraftInkPath('freehandHighlight', 'pageDiv', point);
     }
   }
 
@@ -1357,7 +1384,10 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (tool === 'highlight' && draftTextHighlight) {
+    // Gated on the draft state itself, not the live `tool` - once a pointer
+    // is captured, this handler keeps receiving its move/up events even if
+    // the tool changes mid-gesture (see DraftInkPath's `origin` comment).
+    if (draftTextHighlight) {
       event.preventDefault();
       const segment = nearestTextSegmentFromPointerEventWithGeometry(
         event,
@@ -1374,7 +1404,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (tool !== 'highlight' || !draftInkPathRef.current) {
+    if (draftInkPathRef.current?.origin !== 'pageDiv') {
       return;
     }
 
@@ -1482,7 +1512,9 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (tool === 'highlight' && draftTextHighlight) {
+    // Gated on the draft state itself, not the live `tool` - see the
+    // matching comment in handlePagePointerMove above.
+    if (draftTextHighlight) {
       releasePointer(event, event.pointerId);
       const geometry = getActiveTextGeometry();
       const endSegment = nearestTextSegmentFromPointerEventWithGeometry(
@@ -1531,7 +1563,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (tool !== 'highlight' || !draftInkPathRef.current) {
+    if (draftInkPathRef.current?.origin !== 'pageDiv') {
       return;
     }
 
@@ -1641,10 +1673,9 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (
-      !draftInkPathRef.current ||
-      (tool !== 'draw' && tool !== 'freehandHighlight')
-    ) {
+    // Gated on the draft's own origin, not the live `tool` - see the
+    // matching comment in handlePagePointerMove/DraftInkPath.
+    if (draftInkPathRef.current?.origin !== 'svg') {
       return;
     }
 
@@ -1790,42 +1821,45 @@ function PdfPageViewComponent({
       return;
     }
 
-    if (
-      draftInkPathRef.current &&
-      (tool === 'draw' || tool === 'freehandHighlight')
-    ) {
+    // Gated on the draft's own origin/kind, not the live `tool` - see the
+    // matching comment in handlePagePointerMove/DraftInkPath. The gesture
+    // may have started under a different tool than whatever `tool` is now,
+    // so every style/shape decision below uses the kind captured at
+    // pointerdown rather than the live value.
+    if (draftInkPathRef.current?.origin === 'svg') {
+      const draftKind = draftInkPathRef.current.kind;
       const path = appendDraftInkPath(eventToPdfPoints(event, viewport));
       const normalizedPath =
-        tool === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
+        draftKind === 'draw' && pathLength(path) <= inkDotMaxLength(viewport)
           ? dotPath(path[0], toolSettings.drawWidth)
           : normalizeDraftInkPath(path, viewport);
       let annotation: PdfAnnotation | null = null;
       if (
-        (tool === 'draw'
+        (draftKind === 'draw'
           ? normalizedPath.length > 0
           : path.length > 2) &&
-        (tool !== 'freehandHighlight' ||
+        (draftKind !== 'freehandHighlight' ||
           pathLength(path) > freehandHighlightMinLength(viewport))
       ) {
         annotation = {
           id: crypto.randomUUID(),
-          kind: tool,
+          kind: draftKind,
           pageIndex,
           paths: [normalizedPath],
           color:
-            tool === 'draw'
+            draftKind === 'draw'
               ? toolSettings.drawColor
               : toolSettings.highlightColor,
           opacity:
-            tool === 'draw'
+            draftKind === 'draw'
               ? toolSettings.drawOpacity
               : toolSettings.highlightOpacity,
           width:
-            tool === 'draw'
+            draftKind === 'draw'
               ? toolSettings.drawWidth
               : toolSettings.highlightWidth,
           contents:
-            tool === 'draw' ? 'Freehand drawing' : 'Freehand highlight'
+            draftKind === 'draw' ? 'Freehand drawing' : 'Freehand highlight'
         };
         // Paint the finalized, smoothed stroke before clearing the raw draft
         // layer so pen-up does not leave a visible gap on dense pages.
@@ -2486,10 +2520,11 @@ function PdfPageViewComponent({
 
   function beginDraftInkPath(
     kind: 'draw' | 'freehandHighlight',
+    origin: 'pageDiv' | 'svg',
     point: PdfPoint
   ) {
     clearDraftInkCanvases();
-    draftInkPathRef.current = { kind, path: [point] };
+    draftInkPathRef.current = { kind, origin, path: [point] };
     scheduleDraftInkRender();
   }
 
@@ -3834,7 +3869,9 @@ function getTextSelectionHighlightAction(
   const viewportBounds = pdfRectToViewportRect(firstRect, viewport);
   const xScale = pageBounds.width / Math.max(1, viewport.width);
   const yScale = pageBounds.height / Math.max(1, viewport.height);
-  const buttonSize = 30;
+  // Keep in sync with .text-selection-highlight-button's height/width in
+  // styles.css - used to clamp the button inside the page bounds.
+  const buttonSize = 34;
   const pagePadding = 4;
 
   return {

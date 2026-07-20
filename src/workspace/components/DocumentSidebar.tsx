@@ -1,7 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
-import { ChevronLeft, FilePlus2, MoreVertical, RotateCw, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronUp,
+  FilePlus2,
+  MoreVertical,
+  RotateCw,
+  Trash2
+} from 'lucide-react';
 import { rgbToHex } from '../annotationColors';
 import { FREE_TEXT_LINE_HEIGHT, freeTextVisualLines } from '../freeTextLayout';
 import {
@@ -44,6 +52,8 @@ type DocumentSidebarProps = {
   onClose: () => void;
   onDeletePage: (pageIndex?: number) => void;
   onMergePdf: () => void;
+  onMovePageDown: (pageIndex?: number) => void;
+  onMovePageUp: (pageIndex?: number) => void;
   onRotatePage: (pageIndex?: number) => void;
   onSelectPage: (pageIndex: number) => void;
   onThumbnailPageLoad: (page: PDFPageProxy, pageIndex: number) => void;
@@ -68,6 +78,8 @@ export function DocumentSidebar({
   onClose,
   onDeletePage,
   onMergePdf,
+  onMovePageDown,
+  onMovePageUp,
   onRotatePage,
   onSelectPage,
   onThumbnailPageLoad,
@@ -259,6 +271,8 @@ export function DocumentSidebar({
               onMenuToggle={() =>
                 setPageMenuIndex(pageMenuIndex === index ? null : index)
               }
+              onMoveDown={() => onMovePageDown(index)}
+              onMoveUp={() => onMovePageUp(index)}
               onRotate={() => onRotatePage(index)}
               onSelect={() => onSelectPage(index)}
               page={page}
@@ -334,6 +348,8 @@ type PageThumbnailProps = {
   onAddLinedBefore: () => void;
   onDelete: () => void;
   onMenuToggle: () => void;
+  onMoveDown: () => void;
+  onMoveUp: () => void;
   onRotate: () => void;
   onSelect: () => void;
   onThumbnailPageLoad: (page: PDFPageProxy, pageIndex: number) => void;
@@ -358,6 +374,8 @@ function PageThumbnail({
   onAddLinedBefore,
   onDelete,
   onMenuToggle,
+  onMoveDown,
+  onMoveUp,
   onRotate,
   onSelect,
   onThumbnailPageLoad,
@@ -484,6 +502,25 @@ function PageThumbnail({
           >
             <RotateCw className="page-menu-item-icon" size={14} />
             <span>Rotate</span>
+          </button>
+          <div className="page-menu-separator" role="separator" />
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={busy || readOnly || pageIndex === 0}
+            onClick={onMoveUp}
+            type="button"
+          >
+            <ChevronUp className="page-menu-item-icon" size={14} />
+            <span>Move up (before)</span>
+          </button>
+          <button
+            className={PAGE_MENU_ITEM_CLASS}
+            disabled={busy || readOnly || pageIndex === pageCount - 1}
+            onClick={onMoveDown}
+            type="button"
+          >
+            <ChevronDown className="page-menu-item-icon" size={14} />
+            <span>Move down (after)</span>
           </button>
           <div className="page-menu-separator" role="separator" />
           <button

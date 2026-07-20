@@ -1,4 +1,3 @@
-const appVersion = __APP_VERSION__.trim() || '0.0.0';
 const buildSha = __BUILD_SHA__.trim();
 const buildTime = __BUILD_TIME__.trim();
 
@@ -12,34 +11,21 @@ function formatBuildTime(value: string) {
   return `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
 
+// There's no hand-maintained version number here on purpose - it would need
+// a human to remember to bump it on every release, and a stale one is worse
+// than none. buildTime + buildSha (set by the deploy workflow) already
+// identify a real deploy uniquely and automatically, so that pair *is* the
+// version, prefixed with "v" the same way a hand-written one would be. A
+// build with neither is a local/dev build.
 export function getBuildInfoLabel() {
-  const parts = [`v${appVersion}`];
-
-  if (buildTime) {
-    parts.push(formatBuildTime(buildTime));
-  }
-
-  if (buildSha) {
-    parts.push(buildSha.slice(0, 7));
-  }
-
   if (!buildTime && !buildSha) {
-    parts.push('dev');
+    return 'dev';
   }
 
-  return parts.join(' | ');
-}
+  const parts = [
+    buildTime ? formatBuildTime(buildTime) : undefined,
+    buildSha ? buildSha.slice(0, 7) : undefined
+  ].filter((part): part is string => Boolean(part));
 
-export function getBuildInfoTitle() {
-  if (!buildTime && !buildSha) {
-    return 'Local development build';
-  }
-
-  return [
-    `Version ${appVersion}`,
-    buildTime ? `Built ${formatBuildTime(buildTime)}` : undefined,
-    buildSha ? `Commit ${buildSha}` : undefined
-  ]
-    .filter((part): part is string => Boolean(part))
-    .join('\n');
+  return `v ${parts.join(' | ')}`;
 }

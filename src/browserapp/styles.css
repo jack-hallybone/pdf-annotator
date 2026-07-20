@@ -217,8 +217,65 @@
 
 .browserapp-build-info {
   color: rgb(var(--app-foreground-rgb) / 0.42);
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 0.6875rem;
   line-height: 1.2;
+}
+
+.browserapp-update-banner {
+  align-items: center;
+  bottom: 1rem;
+  box-sizing: border-box;
+  display: flex;
+  gap: 0.875rem;
+  justify-content: space-between;
+  left: 50%;
+  max-width: calc(100vw - 2rem);
+  padding: 0.625rem 0.625rem 0.625rem 0.875rem;
+  position: fixed;
+  transform: translateX(-50%);
+  width: max-content;
+  z-index: 60;
+}
+
+.browserapp-update-banner-text {
+  color: var(--app-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.browserapp-update-banner-actions {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.375rem;
+}
+
+.browserapp-update-banner-refresh {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.75rem;
+}
+
+.browserapp-update-banner-refresh:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+@media (max-width: 480px) {
+  .browserapp-update-banner {
+    flex-direction: column;
+    align-items: stretch;
+    bottom: 0.5rem;
+  }
+
+  .browserapp-update-banner-actions {
+    justify-content: flex-end;
+  }
 }
 
 @media (min-width: 640px) {

@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import type { PreviewServerHook, ViteDevServer } from 'vite';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -10,8 +9,6 @@ declare const process: {
 const base = normalizeBasePath(process.env.BASE_PATH);
 const devServerHost = process.env.VITE_HOST ?? '127.0.0.1';
 const localAllowedHosts = ['localhost', '127.0.0.1', '::1'];
-const appVersion =
-  process.env.VITE_APP_VERSION ?? readPackageVersion() ?? '0.0.0';
 const buildSha = process.env.VITE_BUILD_SHA ?? '';
 const buildTime = process.env.VITE_BUILD_TIME ?? '';
 
@@ -97,24 +94,9 @@ function normalizeBasePath(value: string | undefined) {
     : `${withLeadingSlash}/`;
 }
 
-function readPackageVersion() {
-  try {
-    const packageJson = JSON.parse(
-      readFileSync(new URL('./package.json', import.meta.url), 'utf8')
-    ) as { version?: unknown };
-
-    return typeof packageJson.version === 'string'
-      ? packageJson.version
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export default defineConfig({
   base,
   define: {
-    __APP_VERSION__: JSON.stringify(appVersion),
     __BUILD_SHA__: JSON.stringify(buildSha),
     __BUILD_TIME__: JSON.stringify(buildTime)
   },

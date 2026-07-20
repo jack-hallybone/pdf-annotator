@@ -32,7 +32,17 @@ for (const filePath of files) {
   assetUrls.push(`./${relativePath}`);
 }
 
-const cacheVersion = versionHash.digest('hex').slice(0, 16);
+// On GitHub Pages every deploy is tied 1:1 to a commit, so anchoring the
+// cache version to the commit SHA (rather than only a content hash)
+// guarantees a cache-busting update on every deploy - even one that happens
+// not to change any precached bytes - and it matches the commit already
+// shown in the in-app build info (see buildInfo.ts). VITE_BUILD_SHA is set
+// by the deploy workflow (.github/workflows/deploy.yml); local builds don't
+// have a commit SHA wired in, so they fall back to the content hash.
+const commitSha = (process.env.VITE_BUILD_SHA ?? '').trim();
+const cacheVersion = commitSha
+  ? commitSha.slice(0, 16)
+  : versionHash.digest('hex').slice(0, 16);
 const serviceWorker = buildServiceWorkerSource(
   cacheVersion,
   Array.from(new Set(assetUrls))
@@ -81,6 +91,7 @@ function isAllowedPrecacheFile(relativePath) {
       'LUCIDE-LICENSE.txt',
       'maskable-icon-192x192.png',
       'maskable-icon-512x512.png',
+      'og-image.png',
       'site.webmanifest',
       'title.svg',
       'web-app-manifest-192x192.png',

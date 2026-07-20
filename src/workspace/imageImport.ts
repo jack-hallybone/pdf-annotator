@@ -36,14 +36,6 @@ export async function prepareImageStampFromFile(file: File) {
   return prepareImageStampBlob(file);
 }
 
-export async function prepareImageStampFromBlob(blob: Blob) {
-  if (!SUPPORTED_IMAGE_TYPES.has(blob.type)) {
-    throw new Error('Only PNG, JPEG and WebP images are supported.');
-  }
-
-  return prepareImageStampBlob(blob);
-}
-
 export async function prepareImageStampFromClipboardItems(
   items: DataTransferItemList
 ) {

@@ -17,6 +17,7 @@ type FetchEvent = {
   request: SwRequest;
   respondWith: (response: Promise<Response>) => void;
 };
+type MessageEvent = { data: unknown };
 
 // Loads the generated service-worker source into a sandbox with mocked SW
 // globals and returns a way to fire fetch events at it. This exercises the real
@@ -26,9 +27,13 @@ function instantiateServiceWorker(options: {
   fetchImpl: FetchImpl;
   cache: Map<string, Response>;
   fetchCalls?: { count: number };
+  skipWaiting?: () => void;
 }) {
   const { fetchImpl, cache } = options;
-  const listeners: Record<string, (event: FetchEvent) => void> = {};
+  const listeners: Record<
+    string,
+    ((event: FetchEvent) => void) | ((event: MessageEvent) => void)
+  > = {};
 
   const cachesMock = {
     open: async () => ({
@@ -44,10 +49,14 @@ function instantiateServiceWorker(options: {
   const sandbox: Record<string, unknown> = {
     self: {
       registration: { scope: SCOPE },
-      addEventListener: (type: string, handler: (event: FetchEvent) => void) => {
+      addEventListener: (
+        type: string,
+        handler: ((event: FetchEvent) => void) | ((event: MessageEvent) => void)
+      ) => {
         listeners[type] = handler;
       },
-      clients: { claim: () => undefined }
+      clients: { claim: () => undefined },
+      skipWaiting: options.skipWaiting ?? (() => undefined)
     },
     caches: cachesMock,
     fetch: (request: SwRequest, init?: FetchInit) => {
@@ -74,7 +83,7 @@ function instantiateServiceWorker(options: {
 
   const dispatch = (request: SwRequest) => {
     let captured: Promise<Response> | undefined;
-    listeners.fetch({
+    (listeners.fetch as (event: FetchEvent) => void)({
       request,
       respondWith: (response) => {
         captured = response;
@@ -87,7 +96,9 @@ function instantiateServiceWorker(options: {
     navigate: (url = `${SCOPE}some/route`) =>
       dispatch({ method: 'GET', mode: 'navigate', url }),
     requestAsset: (url: string) =>
-      dispatch({ method: 'GET', mode: 'cors', url })
+      dispatch({ method: 'GET', mode: 'cors', url }),
+    sendMessage: (data: unknown) =>
+      (listeners.message as (event: MessageEvent) => void)?.({ data })
   };
 }
 
@@ -103,28 +114,42 @@ const hangingFetch: FetchImpl = (_request, init) =>
     signal?.addEventListener('abort', () => reject(new Error('aborted')));
   });
 
-test('navigation falls back to the cached shell when the network stalls', async () => {
+test('navigation is served from the cached shell instantly, without hitting the network', async () => {
   const shell = new Response('<!doctype html>shell', { status: 200 });
+  const fetchCalls = { count: 0 };
   const sw = instantiateServiceWorker({
-    fetchImpl: hangingFetch,
-    cache: new Map([[OFFLINE_URL, shell]])
+    // A newer deploy on the network must not win a race against the cache -
+    // cache-first means this fetchImpl should never even be called.
+    fetchImpl: async () => new Response('fresh from network', { status: 200 }),
+    cache: new Map([[OFFLINE_URL, shell]]),
+    fetchCalls
   });
 
   const response = await sw.navigate();
   assert.equal(response?.status, 200);
   assert.equal(await response?.text(), '<!doctype html>shell');
+  assert.equal(fetchCalls.count, 0);
 });
 
-test('navigation uses the network response when it answers in time', async () => {
+test('navigation falls back to the network when nothing is cached yet', async () => {
   const network = new Response('fresh from network', { status: 200 });
-  const shell = new Response('stale shell', { status: 200 });
   const sw = instantiateServiceWorker({
     fetchImpl: async () => network,
-    cache: new Map([[OFFLINE_URL, shell]])
+    cache: new Map()
   });
 
   const response = await sw.navigate();
   assert.equal(await response?.text(), 'fresh from network');
+});
+
+test('navigation falls back to a stalled-network timeout when nothing is cached', async () => {
+  const sw = instantiateServiceWorker({
+    fetchImpl: hangingFetch,
+    cache: new Map()
+  });
+
+  const response = await sw.navigate();
+  assert.equal(response?.status, 503);
 });
 
 test('navigation returns 503 when offline and no shell is cached', async () => {
@@ -135,6 +160,20 @@ test('navigation returns 503 when offline and no shell is cached', async () => {
 
   const response = await sw.navigate();
   assert.equal(response?.status, 503);
+});
+
+test('a SKIP_WAITING message activates the waiting worker immediately', () => {
+  let skipWaitingCalled = false;
+  const sw = instantiateServiceWorker({
+    fetchImpl: async () => new Response('unused'),
+    cache: new Map(),
+    skipWaiting: () => {
+      skipWaitingCalled = true;
+    }
+  });
+
+  sw.sendMessage('SKIP_WAITING');
+  assert.equal(skipWaitingCalled, true);
 });
 
 test('a precached asset is served from cache without hitting the network', async () => {

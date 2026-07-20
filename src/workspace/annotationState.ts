@@ -165,6 +165,40 @@ export function remapAnnotationsAfterInsert(
   );
 }
 
+export function remapPageSetAfterSwap(
+  pageIndexes: Set<number>,
+  indexA: number,
+  indexB: number
+) {
+  const next = new Set<number>();
+  for (const pageIndex of pageIndexes) {
+    if (pageIndex === indexA) {
+      next.add(indexB);
+    } else if (pageIndex === indexB) {
+      next.add(indexA);
+    } else {
+      next.add(pageIndex);
+    }
+  }
+  return next;
+}
+
+export function remapAnnotationsAfterSwap(
+  annotations: PdfAnnotation[],
+  indexA: number,
+  indexB: number
+) {
+  return annotations.map((annotation) => {
+    if (annotation.pageIndex === indexA) {
+      return { ...annotation, pageIndex: indexB };
+    }
+    if (annotation.pageIndex === indexB) {
+      return { ...annotation, pageIndex: indexA };
+    }
+    return annotation;
+  });
+}
+
 export function createWorkSignature(
   pdfFingerprint: string,
   annotations: PdfAnnotation[]
