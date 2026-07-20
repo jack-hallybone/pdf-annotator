@@ -37,6 +37,15 @@ export function registerBrowserServiceWorker(onUpdateAvailable?: () => void) {
     return;
   }
 
+  // Captured once, up front, rather than re-checked later inside the
+  // 'installed' handler below: the new worker's activate handler calls
+  // self.clients.claim(), which can make this very page "controlled"
+  // moments after a brand-new (first-ever) install finishes - racing ahead
+  // of this page's own statechange callback and making a first install look
+  // like a genuine update. Reading it here, before registration even starts,
+  // isn't subject to that race.
+  const hadExistingController = Boolean(navigator.serviceWorker.controller);
+
   const register = () => {
     // Offline/installable support is a bonus, not a feature the user directly
     // invoked - if registration fails the app still works as a normal page,
@@ -48,7 +57,11 @@ export function registerBrowserServiceWorker(onUpdateAvailable?: () => void) {
       })
       .then((registration) => {
         currentRegistration = registration;
-        watchForServiceWorkerUpdates(registration, onUpdateAvailable);
+        watchForServiceWorkerUpdates(
+          registration,
+          hadExistingController,
+          onUpdateAvailable
+        );
       })
       .catch(() => undefined);
   };
@@ -64,6 +77,7 @@ export function registerBrowserServiceWorker(onUpdateAvailable?: () => void) {
 
 function watchForServiceWorkerUpdates(
   registration: ServiceWorkerRegistration,
+  hadExistingController: boolean,
   onUpdateAvailable?: () => void
 ) {
   if (!onUpdateAvailable) {
@@ -72,7 +86,7 @@ function watchForServiceWorkerUpdates(
 
   // A worker can already be sitting in "waiting" if it installed earlier in
   // this page's lifetime (or, in principle, before this listener attached).
-  if (registration.waiting && navigator.serviceWorker.controller) {
+  if (registration.waiting && hadExistingController) {
     onUpdateAvailable();
   }
 
@@ -83,13 +97,10 @@ function watchForServiceWorkerUpdates(
     }
 
     installingWorker.addEventListener('statechange', () => {
-      // `controller` is only set once this page is already being served by
-      // some service worker - i.e. this "installed" is an update, not the
-      // very first install (which has nothing to compare against yet).
-      if (
-        installingWorker.state === 'installed' &&
-        navigator.serviceWorker.controller
-      ) {
+      // hadExistingController is what tells a genuine update (some worker
+      // already controlled this page before this registration attempt)
+      // apart from the very first install (nothing to compare against yet).
+      if (installingWorker.state === 'installed' && hadExistingController) {
         onUpdateAvailable();
       }
     });

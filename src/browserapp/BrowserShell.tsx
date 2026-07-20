@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { TabbedPdfShell } from '../tabbedapp';
 import type {
   TabbedPdfDocumentSummary,
@@ -181,8 +181,7 @@ function UpdateAvailableBanner({
           onClick={onRefresh}
           type="button"
         >
-          <RefreshCw size={14} />
-          <span>Refresh</span>
+          Refresh
         </button>
         <button
           aria-label="Dismiss update notification"
