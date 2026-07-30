@@ -71,20 +71,42 @@ is wrong even if it "works".
    (`scripts/generate-service-worker.mjs`). It must keep refusing `.pdf`,
    `.env`, `.map`, and fixtures. If you add a build asset type, extend
    `isAllowedPrecacheFile` deliberately — never widen it to a catch-all.
+6. **Anything we write must stop claiming PDF/A.** Editing never preserves
+   conformance (no embedded-font/colour-space/transparency validation), so
+   `saveEditedPdf` (`src/workspace/pdfPageOperations.ts`) strips the claim on
+   every output — and every write path goes through it, including
+   `writePdfAnnotations`. The claim is not only in the catalog: XMP is legal on
+   *any* object and PDF 2.0 allows page-level `OutputIntents`, so the strip
+   walks the whole context. The invariant to hold is
+   `pdfLooksPdfA(ourOutput) === false` — otherwise our own saved copy reopens
+   as read-only "PDF/A compliant". `tests/pdfa-conformance.test.ts` guards it;
+   keep the marker list in sync with `pdfProtection.ts`.
+7. **Anything we write must stop looking signed.** Same function, same
+   reasoning: a resave breaks a signature's crypto, but its appearance stream
+   is ordinary page content to a renderer that doesn't verify (this app
+   included), so an edited copy would still *display* a "signed" stamp backed
+   by nothing. `stripSignatureFields` therefore walks the AcroForm field
+   **tree** (`/Fields` is nested — signature fields sit under parent fields,
+   widgets under signature fields) and clears the catalog's `/Perms`
+   `/DocMDP`/`/UR3`, which AcroForm pruning never reaches. Don't reduce it to a
+   flat top-level scan. `tests/signature-strip.test.ts` guards it. Assert
+   structurally there, not via `pdfLooksSignedOrCertified`: that scans raw
+   bytes, and pdf-lib compresses these dicts into object streams on output, so
+   a leftover is invisible to a byte scan while still rendering.
 
 ### Security
-6. **PDF.js stays hardened** (`src/workspace/pdfRender.ts`,
+8. **PDF.js stays hardened** (`src/workspace/pdfRender.ts`,
    `PDFJS_DOCUMENT_OPTIONS`): `isEvalSupported: false`, `enableXfa: false`,
    `isImageDecoderSupported: false`. Do **not** wire a `PDFScriptingManager` —
    that would let embedded PDF JavaScript run.
-7. **External links go through sanitization** (`src/workspace/pdfLinks.ts`):
+9. **External links go through sanitization** (`src/workspace/pdfLinks.ts`):
    protocol allowlist (`http`/`https`/`mailto`), strip credentials,
    `rel="noopener noreferrer nofollow"`, `referrerPolicy="no-referrer"`, and a
    user-confirmed open. Never let a raw PDF URL reach `window.open` directly.
-8. **CSP is strict** (`vite.config.ts`): `default-src 'self'`, `object-src
+10. **CSP is strict** (`vite.config.ts`): `default-src 'self'`, `object-src
    'none'`, no `unsafe-eval` for scripts (only `wasm-unsafe-eval`). Keep it that
    way. See the GitHub Pages caveat below.
-9. **No `innerHTML`/`eval`/`new Function`/`document.write`.** The codebase has
+11. **No `innerHTML`/`eval`/`new Function`/`document.write`.** The codebase has
    none; keep it that way. Build DOM with the framework or `createElement`.
 
 ## Comment style
@@ -124,14 +146,18 @@ wholesale — much of the security/data-safety intent lives in them.
   risks invariants (see `docs/REFACTOR-PLAN.md`). Only extract a concern if it
   has a genuinely narrow seam; add a `useXxx()` hook + `*.dom.test.tsx` when you
   do. The goal is small blast radius, not small files.
-- **Service worker navigation is network-first *with a timeout*.** The SW source
-  lives in `scripts/serviceWorkerSource.mjs` (pure, unit-tested via
+- **Service worker navigation is cache-first.** The SW source lives in
+  `scripts/serviceWorkerSource.mjs` (pure, unit-tested via
   `tests/service-worker-source.test.ts`); the generator writes it to
-  `out/renderer/sw.js` at build time. Navigations race the network against
-  `NAVIGATION_NETWORK_TIMEOUT_MS` and fall back to the cached shell — a plain
+  `out/renderer/sw.js` at build time. A navigation serves the cached shell
+  immediately (instant, works offline); picking up a new deploy is handled by
+  the browser's own SW update check plus the in-page "update available" prompt
+  (`registerBrowserServiceWorker` in `pwa.ts`), *not* by racing the network on
+  every navigation. The network path is only the fallback for "nothing cached
+  yet", and it still needs `NAVIGATION_NETWORK_TIMEOUT_MS` — a plain
   `fetch().catch()` is NOT enough, because a weak connection *stalls* rather
-  than rejecting, hanging the installed PWA's launch. Keep the timeout. Precached
-  (hashed) assets stay cache-first.
+  than rejecting, hanging the installed PWA's launch. Keep the timeout.
+  Precached (hashed) assets are also cache-first.
 - **Load generations.** Async PDF loads guard against races with
   `loadGenerationRef` / `mountedRef`. When adding async work in the load path,
   check the generation is still current before committing state.

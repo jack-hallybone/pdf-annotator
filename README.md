@@ -1,12 +1,10 @@
-<img src="./src/browserapp/assets/title.svg" alt="PDF Annotator" width="400">
+![PDF Annotator - free, client-side PDF viewer and annotation tool](./src/browserapp/assets/og-image.png)
 
 A lightweight client-side PDF viewer and annotation tool built with React, PDF.js, pdf-lib and [Lucide icons](https://lucide.dev/).
 
 [Try out the web version](https://jack-hallybone.github.io/pdf-annotator/) :rocket:
 
 The whole project has been written by Codex and Claude :sparkles:
-
-![PDF Annotator - free, client-side PDF viewer and annotation tool](./src/browserapp/assets/og-image.png)
 
 ## What It Does
 

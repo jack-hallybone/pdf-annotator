@@ -216,7 +216,6 @@
 }
 
 .browserapp-build-info {
-  color: rgb(var(--app-foreground-rgb) / 0.58);
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 0.75rem;
@@ -253,21 +252,26 @@
 }
 
 .browserapp-update-banner-refresh {
+  appearance: none;
   background: var(--app-foreground);
-  border-color: var(--app-foreground);
+  border: 1px solid var(--app-foreground);
+  border-radius: 4px;
   color: var(--app-surface);
+  cursor: pointer;
+  font: inherit;
   font-size: 0.8125rem;
   font-weight: 600;
   padding: 0.4375rem 0.75rem;
+  transition: background-color 120ms ease;
 }
 
-.browserapp-update-banner-actions .ui-button.browserapp-update-banner-refresh:hover,
-.browserapp-update-banner-actions .ui-button.browserapp-update-banner-refresh:focus-visible {
+.browserapp-update-banner-refresh:hover,
+.browserapp-update-banner-refresh:focus-visible {
   background: rgb(var(--app-foreground-rgb) / 0.88);
   outline: none;
 }
 
-.browserapp-update-banner-actions .ui-button.browserapp-update-banner-refresh:focus-visible {
+.browserapp-update-banner-refresh:focus-visible {
   box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.32);
 }
 

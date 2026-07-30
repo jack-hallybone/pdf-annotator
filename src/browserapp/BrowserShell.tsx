@@ -177,7 +177,7 @@ function UpdateAvailableBanner({
       </span>
       <div className="browserapp-update-banner-actions">
         <button
-          className="ui-button browserapp-update-banner-refresh"
+          className="browserapp-update-banner-refresh"
           onClick={onRefresh}
           type="button"
         >
