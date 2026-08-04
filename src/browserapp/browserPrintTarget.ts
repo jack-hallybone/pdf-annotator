@@ -82,18 +82,12 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
         return;
       }
 
-      // Deliberately a download rather than "open the PDF in a new tab so the
-      // user can print it there": that tab would have to be opened without
-      // `noopener` to be usable, which hands a window reference to a document
-      // whose bytes came from an untrusted PDF. (It also silently did nothing
-      // before - `window.open` returns null whenever `noopener` is set, so
-      // the tab attempt could never succeed and every print already landed
-      // here.) A downloaded copy prints from any local PDF reader.
-      //
-      // Full cleanup rather than just dropping the frame: nothing is going to
-      // print from this blob URL now, and the download below builds its own,
-      // so there's no reason to hold the document's bytes alive until the
-      // 10-minute revoke timer fires.
+      // A download, not "open the PDF in a tab to print there": that tab
+      // would need opening without `noopener` to be usable, handing a window
+      // reference to untrusted PDF bytes. (It was also dead code -
+      // `window.open` returns null whenever `noopener` is set.)
+      // Full cleanup because nothing will print from this blob URL now and
+      // the download builds its own.
       cleanupPrintResources();
       downloadPdfBytes(bytes, outputName);
       finish();

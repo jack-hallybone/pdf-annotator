@@ -5,10 +5,20 @@ rather than only synthetic documents built by pdf-lib. Everything here is
 committed deliberately — `.gitignore` excludes `*.pdf` and re-admits only
 `tests/fixtures/test-*.pdf`.
 
-`tests/fixture-privacy.test.ts` fails the build if any fixture contains a
-local user path or a private-key block. Run the checks in
-`compatibility-checklist.md` before adding or replacing one, and scrub personal
-metadata (`/Author`, `/Creator`, XMP `dc:creator`) first.
+`tests/fixture-privacy.test.ts` fails the build if a fixture contains a local
+user path, a private-key block, or an email address outside a reserved test
+domain (it decodes long hex strings first, so an identity inside a certificate
+can't hide from the scan).
+
+Before adding or replacing a fixture:
+
+- Scrub personal metadata (`/Author`, `/Creator`, XMP `dc:creator`) and any
+  visible personal information.
+- Open it in PDF Annotator, Chrome/Edge, Acrobat, and another independent
+  reader where possible.
+- Check unsupported annotations stay visible but read-only, and that editable
+  ones save and reopen in at least one other reader.
+- Check `Save`, `Save As`, `Download copy`, and hidden-annotation `Print`.
 
 ## What each file is for
 

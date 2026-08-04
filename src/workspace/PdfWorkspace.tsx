@@ -2916,14 +2916,10 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
           }
           return true;
         } catch (error) {
-          // Why the in-place save failed is the single most important thing
-          // to tell the user here: "the PDF changed outside this window",
-          // "permission was not granted" and the post-write byte-verification
-          // failures all surface as this error, and each one needs a
-          // different decision from them. Falling straight through to a Save
-          // As dialog discarded that reason entirely - the user saw a file
-          // picker with no explanation, and cancelling it left them believing
-          // an ordinary save had simply been cancelled. Show it before the
+          // Why the save failed is the most important thing to tell the
+          // user: "the PDF changed outside this window", a denied permission
+          // and the post-write verification failures all land here, and each
+          // needs a different decision from them. Shown before the Save As
           // dialog opens, so the dialog makes sense when it appears.
           showWorkspaceNotice(inPlaceSaveFailureNotice(error));
 

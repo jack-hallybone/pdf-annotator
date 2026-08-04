@@ -1,21 +1,15 @@
-// Builds tests/fixtures/test-signed.pdf: a genuinely signed PDF used by
-// tests/signature-strip.test.ts to prove that detection and stripping work
-// against a real signature rather than only against synthetic dicts built in
-// the test file.
+// Builds tests/fixtures/test-signed.pdf - a genuinely signed PDF, so
+// tests/signature-strip.test.ts can prove detection and stripping work
+// against a real signature and not only synthetic dicts. Committed, so this
+// rarely needs running; it exists so the binary is reproducible and auditable
+// rather than an opaque blob of unknown provenance.
 //
-// Run with: node scripts/generate-signed-fixture.mjs
+//   node scripts/generate-signed-fixture.mjs
 //
-// The fixture is committed, so this normally never needs running - it exists
-// so the binary is reproducible and auditable instead of being an opaque blob
-// of unknown provenance. It replaced a third-party sample PDF that carried
-// someone else's name and email in its certificate chain.
-//
-// The signing identity is deliberately synthetic: a throwaway self-signed
-// certificate generated fresh on every run, under a name that cannot be
-// mistaken for a real signer, with an address in the reserved .invalid TLD
-// (RFC 2606). The key is discarded when this script exits - it is never
-// written next to the fixture, and nothing about this signature is meant to
-// verify as trusted. The point is structural realism, not trust.
+// The signer is a throwaway self-signed certificate minted per run, under a
+// name that can't be mistaken for a real one and an address in the reserved
+// .invalid TLD (RFC 2606). The key never leaves a temp dir. Nothing here is
+// meant to verify as trusted - the point is structural realism.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

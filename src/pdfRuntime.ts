@@ -49,11 +49,10 @@ function preloadModule(href: string) {
 function preloadFetch(href: string, type: string) {
   appendPreloadLink(`fetch:${href}`, (link) => {
     link.as = 'fetch';
-    // Deliberately no crossOrigin: these are same-origin assets, and setting
-    // it put the preload in CORS mode while the fetch() below (and PDF.js's
-    // own worker fetch) request them in same-origin mode. The two modes are
-    // different preload-cache keys, so the preload was never matched and
-    // every cold load downloaded ~435 KiB of WASM twice.
+    // No crossOrigin: these are same-origin, and setting it put the preload
+    // in CORS mode while the fetch below uses same-origin mode. Different
+    // preload-cache keys, so the preload never matched and every cold load
+    // fetched ~435 KiB of WASM twice.
     link.href = href;
     link.rel = 'preload';
     link.type = type;

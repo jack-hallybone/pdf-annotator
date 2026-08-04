@@ -46,12 +46,10 @@ export function useExternalLinks({
 
   const openExternalLink = useCallback(
     async (url: string) => {
-      // Re-check the protocol allowlist here, at the point that actually
-      // hands a URL to window.open (or to a host opener). The PDF link layer
-      // already sanitizes, and today it is the only producer - but that makes
-      // the whole "no javascript:/data: URL from a PDF ever gets opened"
-      // guarantee depend on a caller two modules away staying correct. This
-      // is the cheap end of that bet.
+      // Re-checked at the point that actually calls window.open. The PDF
+      // link layer already sanitizes and is today the only producer, but
+      // relying on that puts the whole "no javascript:/data: URL is ever
+      // opened" guarantee in a caller two modules away.
       const safeUrl = safePdfExternalUrl(url);
       if (!safeUrl) {
         showNotice('This link uses an unsupported address and was not opened.');

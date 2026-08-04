@@ -66,17 +66,13 @@ export function saveEditedPdf(pdfDoc: PDFDocument) {
 function stripPdfAConformanceClaims(pdfDoc: PDFDocument) {
   try {
     const { context } = pdfDoc;
-    // XMP is legal on *any* object (the catalog, pages, embedded font
-    // programs, form XObjects), and a claim left on one of those keeps
-    // pdfLooksPdfA returning true for our own output. Catalog-only stripping
-    // is why an edited copy could still reopen as read-only "PDF/A
-    // compliant" - so this walks every metadata stream, catalog included.
-    //
-    // Deliberately targeted rather than "delete the catalog's /Metadata
-    // unconditionally": that also threw away dc:title, dc:creator, rights
-    // and dates on every save of an ordinary, non-PDF/A document. Only a
-    // conformance claim is invalidated by re-serialising; the rest of the
-    // document's XMP is the user's data and is preserved.
+    // XMP is legal on *any* object (catalog, pages, embedded fonts, form
+    // XObjects), and a claim left on one keeps pdfLooksPdfA true for our own
+    // output - so this walks every metadata stream, catalog included.
+    // Targeted rather than deleting the catalog's /Metadata outright: that
+    // also threw away dc:title/dc:creator/rights/dates on every save of an
+    // ordinary document. Only a conformance claim is invalidated by
+    // re-serialising; the rest is the user's data.
     stripPdfAMetadataStreams(context);
 
     // Same reasoning for the GTS_PDFA output intent: PDF 2.0 allows

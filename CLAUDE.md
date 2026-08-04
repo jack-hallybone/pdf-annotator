@@ -156,12 +156,25 @@ wholesale — much of the security/data-safety intent lives in them.
   and prefer adding to the existing helper for a concern over inlining. The
   self-contained concerns have already been extracted into tested hooks:
   `useWorkspaceNotices`, `useWorkspaceZoom` (+ `scrollGeometry`),
-  `useExternalLinks`, `usePageCache`. The remaining bulk (load orchestration,
-  annotation-commit core, undo/redo history, save) is **intentionally left
-  inline** - it's irreducibly coupled, and splitting it relocates complexity or
-  risks invariants (see `docs/REFACTOR-PLAN.md`). Only extract a concern if it
-  has a genuinely narrow seam; add a `useXxx()` hook + `*.dom.test.tsx` when you
-  do. The goal is small blast radius, not small files.
+  `useExternalLinks`, `usePageCache`, plus the pure `annotationDisplayPolicy`.
+  The remaining bulk is **intentionally left inline** — each was assessed
+  against the real code and rejected:
+  - *Image handling* — `addPreparedImageAnnotationFromData` is the shared
+    "commit annotation + select it" flow (also used by text/clipboard paste);
+    a hook would need ~10 threaded dependencies and would split
+    `handleClipboardPaste`.
+  - *Undo/redo history* — `undoHistory`/`redoHistory` call
+    `restoreDocumentHistory`, which reloads bytes and so drags in the whole
+    load pipeline. Only the stack primitives are clean, and they are already
+    out in `historyStack.ts`.
+  - *Save* — depends on ~15 things (save/saveAs/download targets, clean
+    signature refs, `currentPdfOutputBytes`, `pdfBytesRef`, busy ops,
+    notices). Extracting it means a wide, leaky interface *and* puts the
+    data-safety-critical write path at risk for little upside.
+
+  Only extract a concern with a genuinely narrow seam; add a `useXxx()` hook or
+  pure module plus tests when you do. The goal is small blast radius, not small
+  files.
 - **Service worker navigation is cache-first.** The SW source lives in
   `scripts/serviceWorkerSource.mjs` (pure, unit-tested via
   `tests/service-worker-source.test.ts`); the generator writes it to

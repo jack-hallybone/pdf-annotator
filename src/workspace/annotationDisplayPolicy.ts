@@ -6,43 +6,26 @@ import {
 import type { ExistingPdfAnnotation } from './annotationImport';
 import type { PdfAnnotation } from './types';
 
-// Which layer an annotation already in the PDF is allowed into. Extracted from
-// PdfPageView because it is pure policy with a narrow seam - and because the
-// distinction it encodes is a security boundary, not a styling choice, so it
-// deserves to be readable and directly testable rather than buried in a 4.9k
-// line component.
-//
-// Two layers, very different trust properties:
-//
-//   * the pdf.js annotation layer builds real HTML elements. Anything admitted
-//     here becomes a live DOM node built from an untrusted document.
-//   * the appearance overlay paints the document's own appearance streams onto
-//     a canvas and masks them to the annotation's rect. Inert pixels.
-//
-// Only links are allowed to be HTML. Everything else that should be seen is
-// painted.
+// Which layer an annotation already in the PDF is allowed into. The split is a
+// security boundary, not a styling choice: the pdf.js annotation layer builds
+// real DOM nodes out of an untrusted document, while the appearance overlay
+// only paints the document's own appearance streams onto a canvas. Only links
+// may be HTML; everything else that should be seen is painted.
 
 export function shouldRenderExistingAnnotationInPdfJsLayer(
   annotation: ExistingPdfAnnotation
 ) {
-  // Deliberately not widgets: a form field here would be a focusable,
-  // scriptable control. See the appearance overlay below for how they are
-  // shown instead.
+  // Widgets are deliberately absent: a form field here would be a focusable,
+  // scriptable control. They are painted by the overlay below instead.
   return annotation.annotationType === AnnotationType.LINK;
 }
 
-// Widgets (form fields, and the on-page stamp of a signature field) are
-// included on purpose. Excluding them made signed and form-bearing documents
-// render visibly differently in this app than in Adobe or Chrome - content
-// silently missing from a document the user is deciding whether to trust.
-//
-// Appearance only, never interactivity: widgets stay out of the HTML layer
-// above, and that layer still renders with renderForms: false and
-// enableScripting: false, so a field is drawn exactly as the document defines
-// it and cannot be focused, typed into, or run a script. Widgets the document
-// hides need no special case here - pdf.js does not paint a hidden annotation
-// into the overlay render, so the caller's changed-pixel diff finds nothing to
-// keep.
+// Widgets (form fields, and a signature field's on-page stamp) belong here:
+// excluding them made signed documents render with content missing that every
+// other viewer shows. Appearance only - they stay out of the HTML layer above,
+// so they can't be focused, filled in, or run a script. Hidden widgets need no
+// special case: pdf.js doesn't paint them, so the caller's changed-pixel diff
+// finds nothing to keep.
 export function shouldRenderExistingAnnotationInAppearanceOverlay(
   annotation: ExistingPdfAnnotation,
   pageAnnotations: PdfAnnotation[],
