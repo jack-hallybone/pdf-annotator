@@ -51,6 +51,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Without this the app is a blank white page when scripting is off.
+         Styled with a style attribute rather than a <style> block because the
+         production CSP allows inline styles but not inline scripts, and this
+         has to render before any stylesheet is guaranteed to have loaded. -->
+    <noscript>
+      <div
+        style="margin: 3rem auto; max-width: 34rem; padding: 0 1.5rem; font-family: system-ui, sans-serif; line-height: 1.5"
+      >
+        <h1 style="font-size: 1.25rem">PDF Annotator needs JavaScript</h1>
+        <p>
+          This is a fully client-side app: your PDF is opened, rendered and
+          edited by code running in this browser tab, and nothing is uploaded
+          anywhere. That also means it cannot run with JavaScript disabled.
+        </p>
+        <p>Enable JavaScript for this site and reload the page.</p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

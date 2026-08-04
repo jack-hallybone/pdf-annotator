@@ -262,6 +262,7 @@ function annotationSignature(annotation: PdfAnnotation) {
             : signatureNumber(annotation.layoutWidth),
         opacity: signatureNumber(annotation.opacity),
         rect: rectSignature(annotation.rect),
+        rotation: annotation.rotation ?? 0,
         text: annotation.text
       };
     case 'stickyNote':
@@ -278,6 +279,7 @@ function annotationSignature(annotation: PdfAnnotation) {
         heightPx: annotation.heightPx,
         mimeType: annotation.mimeType,
         rect: rectSignature(annotation.rect),
+        rotation: annotation.rotation ?? 0,
         widthPx: annotation.widthPx
       };
   }

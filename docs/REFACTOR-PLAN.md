@@ -1,5 +1,10 @@
 # Refactor plan — shrinking `PdfWorkspace.tsx`
 
+> Status: historical planning document. The completed items and the
+> reassessment below describe the current architectural direction; unfinished
+> catalogue entries are ideas, not committed work. See `README.md` and
+> `CLAUDE.md` for current consumer and maintainer guidance.
+
 ## Progress
 
 - **Done** — jsdom + Testing Library harness (`tests/*.dom.test.tsx`).

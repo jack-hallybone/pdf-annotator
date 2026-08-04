@@ -262,6 +262,7 @@ export function FloatingZoomControls({
       role="toolbar"
     >
       <button
+        aria-label="Zoom out"
         className={ICON_BUTTON_CLASS}
         disabled={disabled || scale <= MIN_ZOOM}
         onClick={onZoomOut}
@@ -271,6 +272,8 @@ export function FloatingZoomControls({
         <Minus size={16} />
       </button>
       <button
+        aria-expanded={zoomPanelOpen}
+        aria-label="Zoom settings"
         className="zoom-button ui-button"
         disabled={disabled}
         onClick={() => setZoomPanelOpen((open) => !open)}
@@ -280,6 +283,7 @@ export function FloatingZoomControls({
         {Math.round(scale * 100)}%
       </button>
       <button
+        aria-label="Zoom in"
         className={ICON_BUTTON_CLASS}
         disabled={disabled || scale >= MAX_ZOOM}
         onClick={onZoomIn}
@@ -461,6 +465,7 @@ export function FloatingHistoryControls({
       style={{ left: sidebarOpen ? sidebarWidth + 24 : 12 }}
     >
       <button
+        aria-label="Undo"
         className={ICON_BUTTON_CLASS}
         disabled={disabled || !canUndo}
         onClick={onUndo}
@@ -470,6 +475,7 @@ export function FloatingHistoryControls({
         <Undo2 size={16} />
       </button>
       <button
+        aria-label="Redo"
         className={ICON_BUTTON_CLASS}
         disabled={disabled || !canRedo}
         onClick={onRedo}
@@ -500,6 +506,7 @@ function IconButton({
 }) {
   return (
     <button
+      aria-label={label}
       className={ICON_BUTTON_CLASS}
       disabled={disabled}
       onClick={onClick}

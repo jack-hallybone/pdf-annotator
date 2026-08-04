@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  annotationFingerprint,
   annotationSourceIdsForReplacement,
   byteFingerprint,
   groupAnnotationsByPageStable
@@ -87,6 +88,40 @@ test('byte fingerprints include changes outside sampled ranges', () => {
   right[100_003] = 66;
 
   assert.notEqual(byteFingerprint(left), byteFingerprint(right));
+});
+
+test('annotation fingerprints include free-text and image-stamp rotation', () => {
+  const freeText: PdfAnnotation = {
+    color: [0, 0, 0],
+    fontSize: 12,
+    id: 'free-text',
+    kind: 'freeText',
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 10, x2: 110, y1: 10, y2: 40 },
+    rotation: 0,
+    text: 'Rotated text'
+  };
+  const imageStamp: PdfAnnotation = {
+    heightPx: 10,
+    id: 'image-stamp',
+    imageData: 'AAAA',
+    kind: 'imageStamp',
+    mimeType: 'image/png',
+    pageIndex: 0,
+    rect: { x1: 10, x2: 30, y1: 10, y2: 30 },
+    rotation: 0,
+    widthPx: 10
+  };
+
+  assert.notEqual(
+    annotationFingerprint(freeText),
+    annotationFingerprint({ ...freeText, rotation: 90 })
+  );
+  assert.notEqual(
+    annotationFingerprint(imageStamp),
+    annotationFingerprint({ ...imageStamp, rotation: 90 })
+  );
 });
 
 test('groupAnnotationsByPageStable reuses unaffected pages by reference', () => {

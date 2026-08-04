@@ -56,7 +56,9 @@ function hasPdfHeader(bytes: Uint8Array) {
 }
 
 function formatBytes(bytes: number) {
-  const units = ['B', 'KB', 'MB', 'GB'];
+  // Binary units, because the divisor below is 1024 - labelling these "MB"
+  // reported a 128 MiB limit as "128.0 MB", which is a different number.
+  const units = ['B', 'KiB', 'MiB', 'GiB'];
   let value = bytes;
   let unitIndex = 0;
   while (value >= 1024 && unitIndex < units.length - 1) {

@@ -21,9 +21,11 @@ import {
   savePdfToLocalFile
 } from './localFileAccess';
 import type { LocalPdfFileHandle } from './localFileAccess';
+import { browserFileHandleKey } from './browserFileIdentity';
 
 type BrowserPdfFile = {
   file: File;
+  fileKey?: string;
   handle?: LocalPdfFileHandle | null;
 };
 
@@ -40,7 +42,9 @@ export const browserFileAdapter: PdfHostAdapter = {
     }
 
     const pickedFiles = await pickLocalPdfFiles();
-    return { documents: browserFilesToHostDocuments(pickedFiles) };
+    return {
+      documents: await browserHandleFilesToHostDocuments(pickedFiles)
+    };
   },
   pickMergePdfFile: browserPickMergePdfFile,
   pickImageFile: browserPickImageFile,
@@ -49,7 +53,7 @@ export const browserFileAdapter: PdfHostAdapter = {
     try {
       const localFiles = await localPdfFilesFromDrop(dataTransfer);
       if (localFiles.length > 0) {
-        return browserFilesToHostDocuments(localFiles);
+        return browserHandleFilesToHostDocuments(localFiles);
       }
     } catch {
       // Falls back to the plain File-object path below, which still opens
@@ -66,7 +70,9 @@ export const browserFileAdapter: PdfHostAdapter = {
 export async function browserFileHandlesToHostDocuments(
   handles: LocalPdfFileHandle[]
 ) {
-  return browserFilesToHostDocuments(await localPdfFilesFromHandles(handles));
+  return browserHandleFilesToHostDocuments(
+    await localPdfFilesFromHandles(handles)
+  );
 }
 
 async function browserPickImageFile() {
@@ -90,30 +96,36 @@ async function browserPickMergePdfFile() {
     : null;
 }
 
+async function browserHandleFilesToHostDocuments(files: BrowserPdfFile[]) {
+  const keyedFiles = await Promise.all(
+    files.map(async (file) => ({
+      ...file,
+      fileKey: file.handle
+        ? await browserFileHandleKey(file.handle)
+        : undefined
+    }))
+  );
+  return browserFilesToHostDocuments(keyedFiles);
+}
+
 function browserFilesToHostDocuments(
   files: BrowserPdfFile[]
 ): PdfHostDocument[] {
   return files
     .filter(({ file }) => isPdfFile(file))
-    .map(({ file, handle }, index) => ({
-      fileKey: browserFileKey(file),
+    .map(({ file, fileKey, handle }, index) => ({
+      fileKey,
       source: {
         kind: 'loader',
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
-        saveTarget: handle ? createBrowserPdfSaveTarget(handle, file) : null
+        saveTarget: handle
+          ? createBrowserPdfSaveTarget(handle, file, fileKey)
+          : null
       },
       title: file.name
     }));
-}
-
-// Identifies "the same file" for the already-open-tab check without reading
-// file contents (pdfDocumentsFromFileInput is synchronous, so a content hash
-// isn't an option here) - name/size/lastModified is the same heuristic
-// pdfFileVersion below uses for save-conflict detection.
-function browserFileKey(file: File) {
-  return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
 function filesToBrowserFiles(files: FileList | File[]) {
@@ -178,10 +190,11 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
     const bytes = await createBytes();
     await savePdfToLocalFile(handle, bytes);
     const savedFile = await handle.getFile();
-    const saveTarget = createBrowserPdfSaveTarget(handle, savedFile);
+    const fileKey = await browserFileHandleKey(handle);
+    const saveTarget = createBrowserPdfSaveTarget(handle, savedFile, fileKey);
     return {
       bytes,
-      fileKey: browserFileKey(savedFile),
+      fileKey,
       fileName: handle.name,
       saveTarget
     };
@@ -190,7 +203,8 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
 
 export function createBrowserPdfSaveTarget(
   fileHandle: LocalPdfFileHandle,
-  initialFile: File
+  initialFile: File,
+  initialFileKey?: string
 ): PdfSaveTarget {
   let expectedVersion = pdfFileVersion(initialFile);
   let expectedFingerprint: Promise<string> | null = null;
@@ -201,6 +215,9 @@ export function createBrowserPdfSaveTarget(
   const lockName = `pdf-annotator:file-write:${fileHandle.name
     .normalize('NFC')
     .toLocaleLowerCase()}`;
+  const fileKeyRequest = initialFileKey
+    ? Promise.resolve(initialFileKey)
+    : browserFileHandleKey(fileHandle);
 
   return (bytes) =>
     withBrowserFileLock(lockName, async () => {
@@ -217,11 +234,9 @@ export function createBrowserPdfSaveTarget(
       const savedFile = await fileHandle.getFile();
       expectedVersion = pdfFileVersion(savedFile);
       expectedFingerprint = fingerprintPdfBytes(bytes);
-      // The save just changed this file's mtime/size, so the tabbed shell's
-      // already-open-tab dedup key must be refreshed too - otherwise
-      // reopening this same file from disk after saving would no longer
-      // match this tab and would duplicate it.
-      return { fileKey: browserFileKey(savedFile) };
+      // Return the stable entry-identity key so the shell keeps the same tab
+      // identity after Save changes the file's size and modified time.
+      return { fileKey: await fileKeyRequest };
     });
 }
 

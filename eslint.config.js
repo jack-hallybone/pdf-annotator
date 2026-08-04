@@ -22,7 +22,12 @@ export default tseslint.config(
       'react-refresh': reactRefresh
     },
     rules: {
-      ...reactHooks.configs['recommended-latest'].rules,
+      // Keep the two established hook-correctness checks explicit. The
+      // plugin's `recommended-latest` preset also enables experimental React
+      // Compiler diagnostics whose scope changes between plugin releases and
+      // which are not part of this project's non-Compiler build.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true }

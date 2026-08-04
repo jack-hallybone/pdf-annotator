@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { PdfExternalLinkOpener } from './host';
+import { safePdfExternalUrl } from './pdfLinks';
 
 export type PendingExternalLink = {
   trustKey: string;
@@ -45,16 +46,28 @@ export function useExternalLinks({
 
   const openExternalLink = useCallback(
     async (url: string) => {
+      // Re-check the protocol allowlist here, at the point that actually
+      // hands a URL to window.open (or to a host opener). The PDF link layer
+      // already sanitizes, and today it is the only producer - but that makes
+      // the whole "no javascript:/data: URL from a PDF ever gets opened"
+      // guarantee depend on a caller two modules away staying correct. This
+      // is the cheap end of that bet.
+      const safeUrl = safePdfExternalUrl(url);
+      if (!safeUrl) {
+        showNotice('This link uses an unsupported address and was not opened.');
+        return;
+      }
+
       try {
         if (onOpenExternalLink) {
-          await onOpenExternalLink(url, {
+          await onOpenExternalLink(safeUrl, {
             fileName,
             sourceId: sourceIdRef.current
           });
           return;
         }
 
-        openExternalLinkInNewTab(url);
+        openExternalLinkInNewTab(safeUrl);
       } catch {
         showNotice('Could not open this link.');
       }
@@ -139,9 +152,17 @@ export function useExternalLinks({
   };
 }
 
+// Returns null for anything outside the allowlist, so an unsupported address
+// never even reaches the confirmation dialog - "do you want to open this?" is
+// the wrong question for a link we would refuse to open anyway.
 function externalLinkTrustKey(url: string) {
+  const safeUrl = safePdfExternalUrl(url);
+  if (!safeUrl) {
+    return null;
+  }
+
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(safeUrl);
     return parsed.protocol === 'mailto:' ? 'mailto:' : parsed.origin;
   } catch {
     return null;

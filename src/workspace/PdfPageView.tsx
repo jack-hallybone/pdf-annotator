@@ -36,10 +36,12 @@ import {
 } from './SettingsPanel';
 import { rgbToCss } from './annotationColors';
 import {
-  existingAnnotationId,
-  getDisplayAnnotations,
-  isEditableExistingAnnotation
-} from './annotationImport';
+  isManagedExistingAnnotation,
+  isReadOnlyTextMarkupAnnotation,
+  shouldRenderExistingAnnotationInAppearanceOverlay,
+  shouldRenderExistingAnnotationInPdfJsLayer
+} from './annotationDisplayPolicy';
+import { getDisplayAnnotations } from './annotationImport';
 import type { ExistingPdfAnnotation } from './annotationImport';
 import {
   annotationBounds,
@@ -123,6 +125,12 @@ import {
   TEXT_HIGHLIGHT_STYLE
 } from './components/AnnotationPrimitives';
 import { FREE_TEXT_LINE_HEIGHT } from './freeTextLayout';
+
+type PdfJsAnnotationLayerOptions = Parameters<AnnotationLayer['render']>[0];
+type PdfJsAnnotationLinkService = PdfJsAnnotationLayerOptions['linkService'];
+type PdfJsAnnotationDownloadManager = NonNullable<
+  PdfJsAnnotationLayerOptions['downloadManager']
+>;
 
 type ViewportRect = { x: number; y: number; width: number; height: number };
 type TextHitRect = TextLayerRect & { viewportRect: ViewportRect };
@@ -348,9 +356,13 @@ function PdfPageViewComponent({
   const navigateDestinationRef = useRef(onNavigateDestination);
   const externalLinkRequestRef = useRef(onExternalLinkRequest);
   const navigatePageRef = useRef(onNavigatePage);
+  const onNoticeRef = useRef(onNotice);
+  const flushPendingEraseChangesRef = useRef(flushPendingEraseChanges);
   navigateDestinationRef.current = onNavigateDestination;
   externalLinkRequestRef.current = onExternalLinkRequest;
   navigatePageRef.current = onNavigatePage;
+  onNoticeRef.current = onNotice;
+  flushPendingEraseChangesRef.current = flushPendingEraseChanges;
   // Mirrors used so the stable (useCallback, empty-deps) annotation
   // pointer-handlers below always read current values via .current instead
   // of closing over them - closing over annotations/selectedAnnotationIds
@@ -498,7 +510,7 @@ function PdfPageViewComponent({
         window.cancelAnimationFrame(eraserFrame);
         eraserPreviewFrameRef.current = null;
       }
-      flushPendingEraseChanges();
+      flushPendingEraseChangesRef.current();
       clearDraftInkCanvases();
       clearDisplayCanvas(eraserCanvasRef.current);
     },
@@ -523,6 +535,8 @@ function PdfPageViewComponent({
     let spinnerTimer: number | null = null;
     let canvasRevealed = false;
     let started = false;
+    const pageElement = pageRef.current;
+    const baseLayer = baseLayerRef.current;
 
     async function renderPdfPageView() {
       if (started || cancelled) {
@@ -661,7 +675,9 @@ function PdfPageViewComponent({
             await renderRasterFallbackWithRecovery();
           } catch (fallbackError) {
             if (!isRenderCancellation(fallbackError)) {
-              onNotice?.(`Could not display page ${pageIndex + 1}.`);
+              onNoticeRef.current?.(
+                `Could not display page ${pageIndex + 1}.`
+              );
             }
           }
         }
@@ -678,7 +694,7 @@ function PdfPageViewComponent({
       }
 
       textLayerRef.current =
-        ((pageView as any).textLayer?.div as HTMLDivElement | undefined) ??
+        pageView?.textLayer?.div ??
         container.querySelector<HTMLDivElement>('.textLayer');
       activeTextGeometryRef.current = null;
       if (!canvasRevealed) {
@@ -702,21 +718,21 @@ function PdfPageViewComponent({
       if (spinnerTimer !== null) {
         window.clearTimeout(spinnerTimer);
       }
-      pageRef.current?.classList.remove('show-delayed-spinner');
+      pageElement?.classList.remove('show-delayed-spinner');
       cancelScheduledRender();
       if (renderRequestRef.current?.key === renderKey) {
         renderRequestRef.current = null;
       }
       pageView?.destroy();
       fallbackRenderTask?.cancel();
-      if (baseLayerRef.current) {
-        disposeCanvases(baseLayerRef.current);
-        baseLayerRef.current.replaceChildren();
+      if (baseLayer) {
+        disposeCanvases(baseLayer);
+        baseLayer.replaceChildren();
       }
       textLayerRef.current = null;
       activeTextGeometryRef.current = null;
     };
-  }, [page, pageIndex, renderKey, scale]);
+  }, [page, pageIndex, renderKey, renderPriority, scale, viewport]);
 
   useEffect(() => {
     if (renderPriority !== 'visible') {
@@ -753,7 +769,9 @@ function PdfPageViewComponent({
         })
         .catch(() => {
           if (!cancelled) {
-            onNotice?.(`Could not load annotations on page ${pageIndex + 1}.`);
+            onNoticeRef.current?.(
+              `Could not load annotations on page ${pageIndex + 1}.`
+            );
           }
         });
     });
@@ -762,7 +780,7 @@ function PdfPageViewComponent({
       cancelled = true;
       cancelScheduledRead();
     };
-  }, [baseLayerReady, page, renderPriority]);
+  }, [baseLayerReady, page, pageIndex, renderPriority]);
 
   // Only the *set* of imported image-stamp ids matters for deciding whether
   // to hide a native-rendered stamp below - deriving this narrow key (rather
@@ -775,6 +793,8 @@ function PdfPageViewComponent({
     .join('|');
 
   useEffect(() => {
+    const appearanceLayer = appearanceLayerRef.current;
+
     async function renderAnnotationAppearanceOverlay() {
       const overlayCanvas = appearanceLayerRef.current;
       const baseCanvas =
@@ -893,7 +913,9 @@ function PdfPageViewComponent({
     const cancelScheduledRender = schedulePriorityTask(renderPriority, () => {
       void renderAnnotationAppearanceOverlay().catch((error) => {
         if (!cancelled && !isRenderCancellation(error)) {
-          onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
+          onNoticeRef.current?.(
+            `Could not display some annotations on page ${pageIndex + 1}.`
+          );
         }
       });
     });
@@ -902,8 +924,8 @@ function PdfPageViewComponent({
       cancelled = true;
       cancelScheduledRender();
       appearanceRenderTask?.cancel();
-      if (appearanceLayerRef.current) {
-        clearCanvas(appearanceLayerRef.current);
+      if (appearanceLayer) {
+        clearCanvas(appearanceLayer);
       }
     };
   }, [
@@ -913,11 +935,14 @@ function PdfPageViewComponent({
     page,
     pageIndex,
     renderPriority,
+    scale,
     showAnnotations,
     viewport
   ]);
 
   useEffect(() => {
+    const annotationLayer = annotationLayerRef.current;
+
     // pdf.js populates `div` asynchronously inside layer.render() below, so
     // without this guard a stale invocation (superseded by a newer one
     // while its render() was still in flight - e.g. rapid zoom changes)
@@ -928,7 +953,7 @@ function PdfPageViewComponent({
     let cancelled = false;
 
     async function renderAnnotationLayer() {
-      const div = annotationLayerRef.current;
+      const div = annotationLayer;
       if (!div) {
         return;
       }
@@ -940,11 +965,7 @@ function PdfPageViewComponent({
 
       const annotationViewport = viewport.clone({ dontFlip: true });
       const htmlAnnotations = existingAnnotations.filter(
-        (annotation, index) =>
-          shouldRenderExistingAnnotationInPdfJsLayer(
-            annotation,
-            index
-          )
+        shouldRenderExistingAnnotationInPdfJsLayer
       );
       if (htmlAnnotations.length === 0) {
         return;
@@ -954,7 +975,7 @@ function PdfPageViewComponent({
         div,
         page,
         viewport: annotationViewport,
-        linkService: linkService as any,
+        linkService,
         annotationStorage: null,
         annotationCanvasMap: new Map(),
         accessibilityManager: null,
@@ -968,8 +989,9 @@ function PdfPageViewComponent({
         page,
         viewport: annotationViewport,
         annotations: htmlAnnotations,
-        linkService: linkService as any,
-        downloadManager: downloadManager as any,
+        linkService: linkService as unknown as PdfJsAnnotationLinkService,
+        downloadManager:
+          downloadManager as unknown as PdfJsAnnotationDownloadManager,
         // No embedded PDF script execution and no interactive form widgets:
         // this app only displays existing annotations, never runs their scripts.
         enableScripting: false,
@@ -983,19 +1005,22 @@ function PdfPageViewComponent({
 
     renderAnnotationLayer().catch(() => {
       if (!cancelled) {
-        onNotice?.(`Could not display some annotations on page ${pageIndex + 1}.`);
+        onNoticeRef.current?.(
+          `Could not display some annotations on page ${pageIndex + 1}.`
+        );
       }
     });
 
     return () => {
       cancelled = true;
-      annotationLayerRef.current?.replaceChildren();
+      annotationLayer?.replaceChildren();
     };
   }, [
     existingAnnotations,
     baseLayerReady,
     linkService,
     page,
+    pageIndex,
     showAnnotations,
     viewport
   ]);
@@ -2846,6 +2871,7 @@ function PdfPageViewComponent({
           ) : null}
           {!readOnly && textSelectionHighlightAction ? (
             <button
+              aria-label="Highlight selection"
               className="text-selection-highlight-button"
               onClick={createHighlightFromTextSelection}
               onPointerDown={(event) => event.stopPropagation()}
@@ -3712,6 +3738,7 @@ function SelectionToolbar({
             ) : null}
             {showsRotate ? (
               <button
+                aria-label="Rotate selection 90 degrees"
                 className="selection-rotate-button"
                 onClick={() =>
                   onUpdate((current) =>
@@ -3727,6 +3754,7 @@ function SelectionToolbar({
               </button>
             ) : null}
             <button
+              aria-label="Delete selection"
               className="selection-delete-button"
               onClick={onDelete}
               title="Delete"
@@ -4222,65 +4250,6 @@ function releasePointer(event: React.PointerEvent, pointerId: number) {
   } catch {
     // Capture may already have ended if the pointer left the original element.
   }
-}
-
-function shouldRenderExistingAnnotationInPdfJsLayer(
-  annotation: ExistingPdfAnnotation,
-  _annotationIndex: number
-) {
-  return annotation.annotationType === AnnotationType.LINK;
-}
-
-function shouldRenderExistingAnnotationInAppearanceOverlay(
-  annotation: ExistingPdfAnnotation,
-  pageAnnotations: PdfAnnotation[],
-  pageIndex: number
-) {
-  if (
-    annotation.annotationType === AnnotationType.LINK ||
-    annotation.annotationType === AnnotationType.POPUP ||
-    annotation.annotationType === AnnotationType.WIDGET ||
-    isReadOnlyTextMarkupAnnotation(annotation)
-  ) {
-    return false;
-  }
-
-  return !isManagedExistingAnnotation(annotation, pageAnnotations, pageIndex);
-}
-
-function isReadOnlyTextMarkupAnnotation(annotation: ExistingPdfAnnotation) {
-  if (isEditableExistingAnnotation(annotation)) {
-    return false;
-  }
-
-  return (
-    annotation.annotationType === AnnotationType.UNDERLINE ||
-    annotation.annotationType === AnnotationType.SQUIGGLY ||
-    annotation.annotationType === AnnotationType.STRIKEOUT
-  );
-}
-
-// pdf.js's Stamp metadata can't tell us on its own whether a stamp will
-// import as an editable image (that requires the async pdf-lib byte
-// extraction in annotationImport.ts) - so instead of duplicating that
-// structural check here, this looks at whether the import already
-// succeeded, i.e. whether a matching imported `imageStamp` annotation is
-// currently present. That keeps the "hide the native PDF rendering" and
-// "did the import work" decisions from ever disagreeing, which would
-// otherwise either double-render the stamp or make it vanish.
-function isManagedExistingAnnotation(
-  annotation: ExistingPdfAnnotation,
-  pageAnnotations: PdfAnnotation[],
-  pageIndex: number
-) {
-  if (annotation.annotationType === AnnotationType.STAMP) {
-    const importedId = `imported-${pageIndex}-${existingAnnotationId(annotation)}`;
-    return pageAnnotations.some(
-      (candidate) => candidate.kind === 'imageStamp' && candidate.id === importedId
-    );
-  }
-
-  return isEditableExistingAnnotation(annotation);
 }
 
 function keepOnlyChangedPixelsInAnnotationRects(

@@ -6,6 +6,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useEffectEvent,
   useImperativeHandle,
   useId,
   useLayoutEffect,
@@ -534,9 +535,22 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
   cleanWorkSignatureRef.current = cleanWorkSignature;
   undoStackRef.current = undoStack;
   redoStackRef.current = redoStack;
+  const handleClipboardPasteEvent = useEffectEvent(handleClipboardPaste);
+  const handleGlobalKeyDownEvent = useEffectEvent(handleGlobalKeyDown);
+  const handleWheelEvent = useEffectEvent(handleWheel);
+  const clearRenderCacheEvent = useEffectEvent(clearRenderCache);
+  const restoreWorkspaceSessionEvent = useEffectEvent(
+    restoreWorkspaceSession
+  );
+  const loadWorkspaceSourceEvent = useEffectEvent(loadWorkspaceSource);
+  const ensurePageLoadedEvent = useEffectEvent(ensurePageLoaded);
+  const finishAnnotationEditEvent = useEffectEvent(finishAnnotationEdit);
+  const importAnnotationsForLoadedPageRef =
+    useRef(importAnnotationsForLoadedPage);
+  importAnnotationsForLoadedPageRef.current = importAnnotationsForLoadedPage;
   const handleThumbnailPageLoad = useCallback(
     (page: PDFPageProxy, pageIndex: number) => {
-      void importAnnotationsForLoadedPage(
+      void importAnnotationsForLoadedPageRef.current(
         page,
         pageIndex,
         loadGenerationRef.current,
@@ -706,33 +720,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       releaseRenderResources,
       save: handleSave,
       saveAs: saveAsDocument
-    }),
-    [
-      activePageIndex,
-      activeToolKey,
-      annotations,
-      cleanWorkSignature,
-      editingEnabled,
-      fileName,
-      fileKeyRef.current,
-      handleDownload,
-      handlePrint,
-      handleSave,
-      saveAsDocument,
-      hasUnsavedChanges,
-      pdfBytes,
-      pdfFingerprint,
-      readOnlyReason,
-      redoStack,
-      scale,
-      showAnnotations,
-      sidebarOpen,
-      sidebarWidth,
-      tool,
-      toolPresets,
-      toolSettings,
-      undoStack
-    ]
+    })
   );
 
   useEffect(
@@ -769,7 +757,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
 
       event.preventDefault();
-      void handleClipboardPaste(clipboardData);
+      void handleClipboardPasteEvent(clipboardData);
     }
 
     window.addEventListener('paste', handlePaste);
@@ -791,7 +779,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
         pdfDocRef.current = null;
         sourceLoadRef.current = null;
         loadGenerationRef.current += 1;
-        clearRenderCache({ clearState: false });
+        clearRenderCacheEvent({ clearState: false });
         void cancelLoadingTask();
         void destroyPdfDocument(currentPdfDoc);
       }, RENDER_RESOURCE_RELEASE_DELAY_MS);
@@ -825,12 +813,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
 
     sourceLoadRef.current = nextLoadKey;
     if (initialSession) {
-      void restoreWorkspaceSession(initialSession);
+      void restoreWorkspaceSessionEvent(initialSession);
       return;
     }
 
     workspaceSourceIdRef.current = source.sourceId;
-    void loadWorkspaceSource(source, nextLoadKey);
+    void loadWorkspaceSourceEvent(source, nextLoadKey);
   }, [initialSession, source, sourceRetryKey]);
 
   useEffect(() => {
@@ -915,105 +903,12 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const isEditingText =
-        target?.tagName === 'TEXTAREA' ||
-        target?.tagName === 'INPUT' ||
-        target?.isContentEditable;
-
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        const keepSelection = finishCurrentAnnotationEditWithValidation();
-        setActiveToolKey('select');
-        if (!keepSelection) {
-          setSelectedAnnotationIds([]);
-        }
-        setFocusedAnnotationId(null);
-        (document.activeElement as HTMLElement | null)?.blur();
-        return;
-      }
-
-      if ((event.ctrlKey || event.metaKey) && isZoomShortcut(event)) {
-        event.preventDefault();
-        updateZoom(isZoomInShortcut(event) ? ZOOM_STEP : -ZOOM_STEP);
-        return;
-      }
-
-      if ((event.ctrlKey || event.metaKey) && event.key === '0') {
-        event.preventDefault();
-        resetZoom();
-        return;
-      }
-
-      if (
-        saveAvailable &&
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === 's'
-      ) {
-        event.preventDefault();
-        void handleSave();
-        return;
-      }
-
-      if (
-        printAvailable &&
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === 'p'
-      ) {
-        event.preventDefault();
-        void handlePrint();
-        return;
-      }
-
-      if (isEditingText) {
-        return;
-      }
-
-      if (
-        !readOnly &&
-        event.key === 'Delete' &&
-        selectedAnnotationIds.length > 0
-      ) {
-        event.preventDefault();
-        deleteSelectedAnnotations();
-        return;
-      }
-
-      if (
-        !readOnly &&
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === 'z'
-      ) {
-        event.preventDefault();
-        void undoHistory();
-        return;
-      }
-
-      if (
-        !readOnly &&
-        (event.ctrlKey || event.metaKey) &&
-        event.key.toLowerCase() === 'y'
-      ) {
-        event.preventDefault();
-        void redoHistory();
-      }
+      handleGlobalKeyDownEvent(event);
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    annotations,
-    enableGlobalShortcuts,
-    focusedAnnotationId,
-    hasUnsavedChanges,
-    pages.length,
-    printAvailable,
-    readOnly,
-    redoStack,
-    saveAvailable,
-    selectedAnnotationIds,
-    undoStack
-  ]);
+  }, [enableGlobalShortcuts]);
 
   useEffect(() => {
     if (!enableWheelZoom) {
@@ -1021,12 +916,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     }
 
     function handleWheel(event: WheelEvent) {
-      if (!event.ctrlKey && !event.metaKey) {
-        return;
-      }
-
-      event.preventDefault();
-      updateZoom(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+      handleWheelEvent(event);
     }
 
     window.addEventListener('wheel', handleWheel, { passive: false });
@@ -1143,7 +1033,7 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
     const start = Math.max(0, activePageIndex - LAZY_PAGE_BUFFER);
     const end = Math.min(pages.length - 1, activePageIndex + LAZY_PAGE_BUFFER);
     for (let pageIndex = start; pageIndex <= end; pageIndex += 1) {
-      void ensurePageLoaded(pageIndex);
+      void ensurePageLoadedEvent(pageIndex);
     }
   }, [activePageIndex, initialVisualReady, pages.length, pdfDoc]);
 
@@ -1160,17 +1050,111 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
       }
 
       window.setTimeout(() => {
-        finishAnnotationEdit();
+        finishAnnotationEditEvent();
       }, 0);
     }
 
     window.addEventListener('pointerup', endPointerLiveEdit, true);
-    window.addEventListener('blur', finishAnnotationEdit);
+    window.addEventListener('blur', finishAnnotationEditEvent);
     return () => {
       window.removeEventListener('pointerup', endPointerLiveEdit, true);
-      window.removeEventListener('blur', finishAnnotationEdit);
+      window.removeEventListener('blur', finishAnnotationEditEvent);
     };
   }, []);
+
+  function handleGlobalKeyDown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    const isEditingText =
+      target?.tagName === 'TEXTAREA' ||
+      target?.tagName === 'INPUT' ||
+      target?.isContentEditable;
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const keepSelection = finishCurrentAnnotationEditWithValidation();
+      setActiveToolKey('select');
+      if (!keepSelection) {
+        setSelectedAnnotationIds([]);
+      }
+      setFocusedAnnotationId(null);
+      (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && isZoomShortcut(event)) {
+      event.preventDefault();
+      updateZoom(isZoomInShortcut(event) ? ZOOM_STEP : -ZOOM_STEP);
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key === '0') {
+      event.preventDefault();
+      resetZoom();
+      return;
+    }
+
+    if (
+      saveAvailable &&
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 's'
+    ) {
+      event.preventDefault();
+      void handleSave();
+      return;
+    }
+
+    if (
+      printAvailable &&
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'p'
+    ) {
+      event.preventDefault();
+      void handlePrint();
+      return;
+    }
+
+    if (isEditingText) {
+      return;
+    }
+
+    if (
+      !readOnly &&
+      event.key === 'Delete' &&
+      selectedAnnotationIds.length > 0
+    ) {
+      event.preventDefault();
+      deleteSelectedAnnotations();
+      return;
+    }
+
+    if (
+      !readOnly &&
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'z'
+    ) {
+      event.preventDefault();
+      void undoHistory();
+      return;
+    }
+
+    if (
+      !readOnly &&
+      (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 'y'
+    ) {
+      event.preventDefault();
+      void redoHistory();
+    }
+  }
+
+  function handleWheel(event: WheelEvent) {
+    if (!event.ctrlKey && !event.metaKey) {
+      return;
+    }
+
+    event.preventDefault();
+    updateZoom(event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP);
+  }
 
   function commitAnnotations(
     updater: (current: PdfAnnotation[]) => PdfAnnotation[],
@@ -2931,19 +2915,39 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
             markCurrentWorkClean(savedBytes);
           }
           return true;
-        } catch {
+        } catch (error) {
+          // Why the in-place save failed is the single most important thing
+          // to tell the user here: "the PDF changed outside this window",
+          // "permission was not granted" and the post-write byte-verification
+          // failures all surface as this error, and each one needs a
+          // different decision from them. Falling straight through to a Save
+          // As dialog discarded that reason entirely - the user saw a file
+          // picker with no explanation, and cancelling it left them believing
+          // an ordinary save had simply been cancelled. Show it before the
+          // dialog opens, so the dialog makes sense when it appears.
+          showWorkspaceNotice(inPlaceSaveFailureNotice(error));
+
           const saveAsResult = await savePdfAs(
             () => Promise.resolve(savedBytes),
             fileName
           );
           if (saveAsResult === 'saved') {
+            // The original file was NOT updated - say so explicitly rather
+            // than letting a successful Save As read as a normal save.
+            showWorkspaceNotice(
+              'Saved to a new file. The original file was left unchanged.'
+            );
             return true;
           }
           if (saveAsResult === 'unavailable') {
             await downloadPdfBytes(savedBytes, annotatedName(fileName));
-            showWorkspaceNotice('Could not save. Downloaded a copy instead.');
+            showWorkspaceNotice(
+              'Downloaded a copy instead. The original file was left unchanged.'
+            );
           } else {
-            showWorkspaceNotice('Save cancelled. Your changes are still here.');
+            showWorkspaceNotice(
+              'Save cancelled. The original file was left unchanged and your changes are still here.'
+            );
           }
           return false;
         }
@@ -4393,7 +4397,16 @@ export const PdfWorkspace = forwardRef<PdfWorkspaceHandle, PdfWorkspaceProps>(
               onSubmit={handlePasswordUnlock}
             />
           ) : (
-            <div className="loading-message">
+            <div
+              className={
+                loadError
+                  ? 'loading-message loading-message-error'
+                  : 'loading-message'
+              }
+              // A failure is an alert; ordinary progress is not, and
+              // announcing it as one interrupts a screen reader on every open.
+              role={loadError ? 'alert' : 'status'}
+            >
               <span>{loadError ?? 'Loading...'}</span>
               {loadError ? (
                 <button
@@ -4472,18 +4485,21 @@ function ExternalLinkDialog({
   onOpen: () => void;
   openButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
+  const titleId = useId();
+
   return (
     <div
       className="external-link-backdrop screen-only"
       onPointerDown={onCancel}
     >
       <section
+        aria-labelledby={titleId}
         aria-modal="true"
         className="external-link-dialog ui-panel"
         onPointerDown={(event) => event.stopPropagation()}
         role="dialog"
       >
-        <h2>External link</h2>
+        <h2 id={titleId}>External link</h2>
         <p>This file wants to open the following link:</p>
         <p className="external-link-url">{externalLinkDisplayUrl(link.url)}</p>
         <div className="external-link-actions">
@@ -4587,6 +4603,18 @@ function preparationErrorNotice(error: unknown, fallback: string) {
   return error instanceof UnsupportedAnnotationTextError
     ? error.message
     : fallback;
+}
+
+// The errors thrown by the save path (localFileAccess.savePdfToLocalFile and
+// the host's save target) are already written as user-facing sentences, so
+// they're shown as-is. Anything else - a DOMException from the file system,
+// a thrown non-Error - falls back to a generic line rather than leaking a
+// stack-shaped string into the UI.
+function inPlaceSaveFailureNotice(error: unknown) {
+  const message = error instanceof Error ? error.message.trim() : '';
+  return message.length > 0 && message.length <= 200
+    ? message
+    : 'Could not save to the original file.';
 }
 
 
@@ -4742,4 +4770,3 @@ function measureScrollbarGutter(container: HTMLElement) {
     inline: Math.max(0, container.offsetWidth - container.clientWidth)
   };
 }
-

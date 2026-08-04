@@ -23,9 +23,16 @@ import { loadTestPdf, readFixture } from './pdfTestUtils';
 // streams on output, so leftovers are invisible to a byte scan even while
 // they still render.
 
+// The one test that runs against a genuinely signed document rather than
+// signature structures assembled here: real /ByteRange offsets, a real
+// detached PKCS#7 blob in /Contents, and a signature dictionary sitting
+// uncompressed in the file the way a real signer has to leave it. Built by
+// scripts/generate-signed-fixture.mjs - see tests/fixtures/README.md.
 test('a real signed fixture stops being detected as signed after an edit', async () => {
   const bytes = await readFixture('test-signed.pdf');
   assert.equal(pdfLooksSignedOrCertified(bytes), true, 'fixture precondition');
+  assert.equal(await signatureFieldCount(bytes), 1, 'fixture precondition');
+  assert.equal(await signatureWidgetsOnPage(bytes), 1, 'fixture precondition');
   assert.equal(
     await detectReadOnlyReason(bytes, null, false),
     'signed/certified'
@@ -35,6 +42,12 @@ test('a real signed fixture stops being detected as signed after an edit', async
 
   assert.equal(pdfLooksSignedOrCertified(output), false);
   assert.equal(await detectReadOnlyReason(output, null, false), null);
+  // Structurally too, not just by byte scan: the field, its on-page widget
+  // and the AcroForm that held it all have to be gone, or the edited copy
+  // still renders a signature stamp backed by nothing.
+  assert.equal(await signatureFieldCount(output), 0);
+  assert.equal(await signatureWidgetsOnPage(output), 0);
+  assert.equal(await acroFormPresent(output), false);
 });
 
 test('a top-level signature field and its widget are removed', async () => {

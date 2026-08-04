@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   fingerprintPdfBytes,
+  localPdfFilesFromHandles,
   savePdfToLocalFile,
   type LocalPdfFileHandle
 } from '../src/browserapp/localFileAccess';
@@ -104,6 +105,18 @@ test('local save-as style write works without SHA-256 preflight', async () => {
       value: originalCrypto
     });
   }
+});
+
+test('a PDF MIME type is accepted even when the handle has no .pdf suffix', async () => {
+  const handle = newMemoryPdfHandle();
+  handle.name = 'document';
+  handle.getFile = async () =>
+    new File(['%PDF-1.7\n'], 'document', { type: 'application/pdf' });
+
+  const files = await localPdfFilesFromHandles([handle]);
+
+  assert.equal(files.length, 1);
+  assert.equal(files[0].file.name, 'document');
 });
 
 type MemoryPdfHandle = LocalPdfFileHandle & {

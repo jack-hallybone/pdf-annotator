@@ -13,6 +13,7 @@ export type LocalPdfFileHandle = {
   requestPermission?: (
     descriptor?: LocalFilePermissionDescriptor
   ) => Promise<PermissionState>;
+  isSameEntry?: (other: LocalPdfFileHandle) => Promise<boolean>;
 };
 
 type LocalFilePermissionDescriptor = {
@@ -326,8 +327,7 @@ function isPdfFileHandle(handle: unknown): handle is LocalPdfFileHandle {
     candidate?.kind === 'file' &&
     typeof candidate.name === 'string' &&
     typeof candidate.getFile === 'function' &&
-    typeof candidate.createWritable === 'function' &&
-    candidate.name.toLowerCase().endsWith('.pdf')
+    typeof candidate.createWritable === 'function'
   );
 }
 

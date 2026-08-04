@@ -12,7 +12,7 @@
   --pdfa-accent-rgb: var(--app-accent-rgb);
   --pdfa-frame-shadow: 0 8px 22px rgb(var(--pdfa-ink-rgb) / 0.05);
   --pdfa-menu-shadow: 0 12px 30px rgb(var(--pdfa-ink-rgb) / 0.14);
-  --pdfa-focus-ring: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.32);
+  --pdfa-focus-ring: 0 0 0 2px rgb(var(--pdfa-accent-rgb) / 0.85);
   --pdfa-selection-bg: rgb(var(--pdfa-accent-rgb) / 0.24);
   --pdfa-menu-font-size: 0.8125rem;
 }
@@ -207,11 +207,19 @@
   font-weight: 500;
 }
 
+/* This block is shared by two states: the transient "Loading..." placeholder
+   and a load failure. Only the failure is an error, so the danger colour
+   belongs on the modifier - colouring the container unconditionally painted
+   ordinary progress text in the same red as a broken document. */
 .loading-message {
   align-items: center;
-  color: var(--pdfa-ink);
+  color: rgb(var(--app-foreground-rgb) / 0.7);
   display: flex;
   gap: 0.75rem;
+}
+
+.loading-message-error {
+  color: var(--app-danger);
 }
 
 .password-unlock-form {
@@ -992,6 +1000,10 @@
 .selection-copy-button:hover,
 .selection-delete-button:hover,
 .selection-rotate-button:hover { background: var(--pdfa-bg); }
+
+.page-menu-item-danger {
+  color: var(--app-danger);
+}
 
 .note-popover {
   background: rgb(var(--pdfa-ink-rgb) / 0.04);

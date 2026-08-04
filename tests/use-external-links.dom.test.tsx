@@ -96,6 +96,55 @@ test('an unparseable url is ignored (no dialog, no open)', () => {
   assert.equal(opens.length, 0);
 });
 
+// The PDF link layer sanitizes before it ever calls in here, so these are
+// defence in depth: the allowlist is re-applied at the point that actually
+// opens a URL, rather than trusting a caller two modules away.
+test('a url outside the protocol allowlist never reaches the dialog', () => {
+  const opens: OpenCall[] = [];
+  const { result } = renderHook(() => useLinksHarness(opens, []));
+
+  for (const url of [
+    'javascript:alert(1)',
+    'data:text/html,<script>alert(1)</script>',
+    'file:///etc/passwd'
+  ]) {
+    act(() => result.current.requestExternalLink(url));
+    assert.equal(result.current.pendingExternalLink, null, url);
+    assert.equal(opens.length, 0, url);
+  }
+});
+
+test('a disallowed url is refused with a notice even if confirmed', () => {
+  const opens: OpenCall[] = [];
+  const notices: string[] = [];
+  const { result } = renderHook(() => useLinksHarness(opens, notices));
+
+  // Reach the opener directly, as a trusted-origin repeat would: the
+  // confirmation step is not the only thing standing between a PDF's URL and
+  // window.open.
+  act(() => result.current.requestExternalLink('https://example.com/a'));
+  act(() => result.current.confirmExternalLink({ always: true }));
+  assert.equal(opens.length, 1);
+
+  act(() => result.current.requestExternalLink('javascript:alert(1)'));
+  assert.equal(opens.length, 1, 'no second open');
+  assert.equal(result.current.pendingExternalLink, null);
+});
+
+test('credentials are stripped before a link is opened', () => {
+  const opens: OpenCall[] = [];
+  const { result } = renderHook(() => useLinksHarness(opens, []));
+
+  act(() =>
+    result.current.requestExternalLink('https://user:secret@example.com/a')
+  );
+  act(() => result.current.confirmExternalLink());
+
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0].url, 'https://example.com/a');
+  assert.ok(!opens[0].url.includes('secret'));
+});
+
 test('a failing opener surfaces a notice', async () => {
   const notices: string[] = [];
   const sourceIdRef = { current: 'doc-1' };

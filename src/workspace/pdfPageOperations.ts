@@ -65,16 +65,18 @@ export function saveEditedPdf(pdfDoc: PDFDocument) {
 // this is present.
 function stripPdfAConformanceClaims(pdfDoc: PDFDocument) {
   try {
-    const { catalog, context } = pdfDoc;
-    // The catalog's XMP is the canonical home of the PDF/A identification, so
-    // it goes unconditionally - we re-serialise the whole document and stand
-    // behind none of its document-level claims afterwards.
-    deleteCatalogRef(catalog, context, PDFName.of('Metadata'));
-
-    // ...but XMP is legal on *any* object (pages, embedded font programs,
-    // form XObjects), and a claim left on one of those keeps pdfLooksPdfA
-    // returning true for our own output. Catalog-only stripping is why an
-    // edited copy could still reopen as read-only "PDF/A compliant".
+    const { context } = pdfDoc;
+    // XMP is legal on *any* object (the catalog, pages, embedded font
+    // programs, form XObjects), and a claim left on one of those keeps
+    // pdfLooksPdfA returning true for our own output. Catalog-only stripping
+    // is why an edited copy could still reopen as read-only "PDF/A
+    // compliant" - so this walks every metadata stream, catalog included.
+    //
+    // Deliberately targeted rather than "delete the catalog's /Metadata
+    // unconditionally": that also threw away dc:title, dc:creator, rights
+    // and dates on every save of an ordinary, non-PDF/A document. Only a
+    // conformance claim is invalidated by re-serialising; the rest of the
+    // document's XMP is the user's data and is preserved.
     stripPdfAMetadataStreams(context);
 
     // Same reasoning for the GTS_PDFA output intent: PDF 2.0 allows
@@ -524,6 +526,14 @@ export async function removePagesRange(
   count: number
 ) {
   const pdfDoc = await loadEditablePdf(bytes);
+  // Same floor as removePage. This is the undo/redo path rather than the
+  // forward edit, so it should never be asked to empty a document - but a
+  // zero-page PDF is unopenable, and failing the operation is recoverable in
+  // a way that writing one out is not.
+  if (pdfDoc.getPageCount() - count < 1) {
+    throw new Error('A PDF must keep at least one page.');
+  }
+
   for (let i = 0; i < count; i += 1) {
     pdfDoc.removePage(startIndex);
   }

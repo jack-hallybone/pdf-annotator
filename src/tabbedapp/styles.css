@@ -13,7 +13,7 @@
   --tabbedapp-tab-separator: rgb(var(--tabbedapp-ink-rgb) / 0.14);
   --tabbedapp-frame-shadow: 0 8px 22px rgb(var(--app-shadow-rgb) / 0.05);
   --tabbedapp-menu-shadow: 0 12px 30px rgb(var(--app-shadow-rgb) / 0.18);
-  --tabbedapp-focus-ring: 0 0 0 2px rgb(var(--tabbedapp-accent-rgb) / 0.32);
+  --tabbedapp-focus-ring: 0 0 0 2px rgb(var(--tabbedapp-accent-rgb) / 0.85);
   --tabbedapp-menu-font-size: 0.8125rem;
 
   font-family:
@@ -548,6 +548,16 @@ button {
 .tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:hover,
 .tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:focus-visible {
   background: rgb(var(--tabbedapp-ink-rgb) / 0.88);
+}
+
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger {
+  border-color: var(--app-danger);
+  color: var(--app-danger);
+}
+
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger:hover,
+.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger:focus-visible {
+  background: rgb(var(--app-danger-rgb) / 0.1);
 }
 
 .tabbedapp-rename-dialog {

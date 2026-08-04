@@ -2,7 +2,7 @@ import { AnnotationMode } from 'pdfjs-dist';
 import type { PDFPageProxy } from 'pdfjs-dist';
 import { clamp } from './viewerConfig';
 
-const pdfjsAssetBase = `${import.meta.env.BASE_URL}pdfjs/`;
+const pdfjsAssetBase = `${import.meta.env?.BASE_URL ?? '/'}pdfjs/`;
 
 export const PDFJS_DOCUMENT_OPTIONS = {
   cMapPacked: true,
@@ -82,7 +82,7 @@ export function canvasLooksEmpty(canvas: HTMLCanvasElement) {
 
 export async function pageHasRenderableContent(page: PDFPageProxy) {
   try {
-    const operatorList = await (page as any).getOperatorList({
+    const operatorList = await page.getOperatorList({
       annotationMode: AnnotationMode.DISABLE
     });
     return (

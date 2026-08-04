@@ -129,6 +129,25 @@ test('XMP without a PDF/A claim survives an edit', async () => {
   );
 });
 
+// The catalog's own XMP used to be deleted unconditionally, which quietly
+// destroyed dc:title/dc:creator/rights on every save of an ordinary document
+// that never claimed PDF/A in the first place. Only the conformance claim is
+// invalidated by re-serialising, so only that is stripped.
+test('catalog XMP without a PDF/A claim survives an edit', async () => {
+  const bytes = await attachMetadataStream(
+    await readFixture('test-annotated.pdf'),
+    unrelatedXmpPacket,
+    'catalog'
+  );
+
+  const output = await rotatePageClockwise(bytes, 0);
+
+  assert.ok(
+    Buffer.from(output).toString('latin1').includes('Example font licence text'),
+    'unrelated catalog XMP should be preserved'
+  );
+});
+
 // Checked structurally rather than through pdfLooksPdfA: an output intent is
 // a plain dict, which pdf-lib packs into a compressed object stream, so a raw
 // byte scan can't see the marker either before or after.

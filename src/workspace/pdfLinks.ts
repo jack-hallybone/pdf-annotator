@@ -86,7 +86,10 @@ export function createPdfLinkService({
   };
 }
 
-function safePdfExternalUrl(url: string) {
+// Exported so the point that actually calls window.open (useExternalLinks)
+// can re-apply the same allowlist instead of trusting that every caller
+// upstream sanitized first. One list, checked at both ends.
+export function safePdfExternalUrl(url: string) {
   try {
     const parsed = new URL(url);
     if (!PDF_LINK_ALLOWED_PROTOCOLS.has(parsed.protocol)) {

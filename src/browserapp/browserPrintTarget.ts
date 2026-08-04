@@ -63,7 +63,7 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
     let printRequested = false;
     let settled = false;
     const fallbackTimer = window.setTimeout(
-      fallbackToTabOrDownload,
+      fallbackToDownload,
       PRINT_FRAME_FALLBACK_MS
     );
 
@@ -77,15 +77,25 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
       resolve();
     }
 
-    function fallbackToTabOrDownload() {
+    function fallbackToDownload() {
       if (settled) {
         return;
       }
 
-      removePrintFrame();
-      if (!openPrintablePdfInTab(url)) {
-        downloadPdfBytes(bytes, outputName);
-      }
+      // Deliberately a download rather than "open the PDF in a new tab so the
+      // user can print it there": that tab would have to be opened without
+      // `noopener` to be usable, which hands a window reference to a document
+      // whose bytes came from an untrusted PDF. (It also silently did nothing
+      // before - `window.open` returns null whenever `noopener` is set, so
+      // the tab attempt could never succeed and every print already landed
+      // here.) A downloaded copy prints from any local PDF reader.
+      //
+      // Full cleanup rather than just dropping the frame: nothing is going to
+      // print from this blob URL now, and the download below builds its own,
+      // so there's no reason to hold the document's bytes alive until the
+      // 10-minute revoke timer fires.
+      cleanupPrintResources();
+      downloadPdfBytes(bytes, outputName);
       finish();
     }
 
@@ -108,7 +118,7 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
         frameWindow.print();
         finish();
       } catch {
-        fallbackToTabOrDownload();
+        fallbackToDownload();
       }
     };
 
@@ -117,52 +127,11 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
       () => window.setTimeout(requestFramePrint, 250),
       { once: true }
     );
-    frame.addEventListener('error', fallbackToTabOrDownload, { once: true });
+    frame.addEventListener('error', fallbackToDownload, { once: true });
 
     frame.src = url;
     document.body.append(frame);
   });
-}
-
-function openPrintablePdfInTab(url: string) {
-  const printWindow = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!printWindow) {
-    return false;
-  }
-
-  try {
-    printWindow.opener = null;
-  } catch {
-    // The fallback tab can still be printed manually.
-  }
-
-  let printRequested = false;
-  const requestPrint = () => {
-    if (printRequested) {
-      return;
-    }
-
-    printRequested = true;
-    try {
-      printWindow.focus();
-      printWindow.print();
-    } catch {
-      // The PDF tab remains usable even if automatic print is blocked.
-    }
-  };
-
-  try {
-    printWindow.addEventListener(
-      'load',
-      () => window.setTimeout(requestPrint, 250),
-      { once: true }
-    );
-  } catch {
-    // The timeout fallback below still leaves the PDF tab available.
-  }
-
-  window.setTimeout(requestPrint, 1500);
-  return true;
 }
 
 function downloadPdfBytes(bytes: Uint8Array, outputName: string) {

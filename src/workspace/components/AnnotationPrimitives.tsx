@@ -5,6 +5,9 @@ import { pathToViewportD } from '../pdfGeometry';
 import type { PageViewport, PdfPoint } from '../types';
 import { clamp } from '../viewerConfig';
 
+/* eslint-disable react-refresh/only-export-components --
+ * These tiny style/pointer helpers are part of the rendering-primitives API
+ * and intentionally colocated with the components that consume them. */
 export const SELECTION_ACCENT = 'var(--pdfa-accent)';
 export const TEXT_HIGHLIGHT_STYLE = { mixBlendMode: 'multiply' as const };
 

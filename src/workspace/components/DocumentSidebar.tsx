@@ -242,6 +242,7 @@ export function DocumentSidebar({
     >
       <div className="document-sidebar-header">
         <button
+          aria-label="Hide pages sidebar"
           className={SIDEBAR_ICON_BUTTON_CLASS}
           onClick={onClose}
           title="Hide sidebar"
@@ -307,7 +308,32 @@ export function DocumentSidebar({
 
       <button
         aria-label="Resize pages sidebar"
+        aria-orientation="vertical"
+        aria-valuemax={SIDEBAR_MAX_WIDTH}
+        aria-valuemin={SIDEBAR_MIN_WIDTH}
+        aria-valuenow={width}
         className="sidebar-resize-handle ui-button"
+        onKeyDown={(event) => {
+          const step = event.shiftKey ? 24 : 8;
+          const nextWidth =
+            event.key === 'ArrowLeft'
+              ? width - step
+              : event.key === 'ArrowRight'
+                ? width + step
+                : event.key === 'Home'
+                  ? SIDEBAR_MIN_WIDTH
+                  : event.key === 'End'
+                    ? SIDEBAR_MAX_WIDTH
+                    : null;
+          if (nextWidth === null) {
+            return;
+          }
+
+          event.preventDefault();
+          onWidthChange(
+            clamp(nextWidth, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+          );
+        }}
         onPointerDown={(event) => {
           event.preventDefault();
           const startX = event.clientX;
@@ -331,6 +357,7 @@ export function DocumentSidebar({
           window.addEventListener('pointermove', handlePointerMove);
           window.addEventListener('pointerup', handlePointerUp);
         }}
+        role="separator"
         type="button"
       />
     </aside>
@@ -444,6 +471,8 @@ function PageThumbnail({
       ref={thumbnailRef}
     >
       <button
+        aria-current={active ? 'page' : undefined}
+        aria-label={`Page ${pageIndex + 1}`}
         className={`page-thumbnail-button ui-button ${
           active ? 'ui-button-active' : 'page-thumbnail-button-inactive'
         }`}
@@ -481,6 +510,8 @@ function PageThumbnail({
         </div>
       </button>
       <button
+        aria-expanded={menuOpen}
+        aria-label={`Actions for page ${pageIndex + 1}`}
         className="page-thumbnail-menu-toggle ui-button"
         disabled={busy || readOnly}
         onClick={(event) => {
@@ -561,7 +592,7 @@ function PageThumbnail({
           </button>
           <div className="page-menu-separator" role="separator" />
           <button
-            className={PAGE_MENU_ITEM_CLASS}
+            className={`${PAGE_MENU_ITEM_CLASS} page-menu-item-danger`}
             disabled={busy || readOnly || pageCount <= 1}
             onClick={onDelete}
             type="button"

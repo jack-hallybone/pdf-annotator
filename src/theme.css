@@ -9,7 +9,8 @@
   --app-foreground-rgb: 23 28 28;
   --app-accent: #cc41bf;
   --app-accent-rgb: 204 65 191;
-  --app-danger-rgb: 230 45 42;
+  --app-danger: #d62320;
+  --app-danger-rgb: 214 35 32;
   --app-shadow-rgb: 23 28 28;
 }
 
@@ -22,6 +23,8 @@
     --app-page: #ffffff;
     --app-foreground: #f3f3f3;
     --app-foreground-rgb: 243 243 243;
+    --app-danger: #ff8582;
+    --app-danger-rgb: 255 133 130;
     --app-shadow-rgb: 0 0 0;
   }
 }

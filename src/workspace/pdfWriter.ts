@@ -1174,6 +1174,9 @@ function addAnnotation(page: PDFPage, object: Record<string, unknown>) {
       context.obj({
         P: page.ref,
         ...object
+        // pdf-lib's recursive LiteralObject input type is private even
+        // though valid PDFObject values are supported by context.obj().
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any)
     )
   );

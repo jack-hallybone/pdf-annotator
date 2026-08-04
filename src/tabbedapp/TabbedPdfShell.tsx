@@ -4,6 +4,7 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useEffectEvent,
   useId,
   useImperativeHandle,
   useMemo,
@@ -14,6 +15,7 @@ import type {
   ChangeEvent as ReactChangeEvent,
   CSSProperties,
   DragEvent as ReactDragEvent,
+  KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   RefCallback
 } from 'react';
@@ -235,7 +237,13 @@ export const TabbedPdfShell = forwardRef<
   const [notices, setNotices] = useState<WorkspaceNotice[]>([]);
   const noticeIdRef = useRef(0);
   const noticeTimersRef = useRef(new Map<number, number>());
+  const renameDialogTitleId = useId();
   const activeDocumentIdRef = useLatestRef(activeDocumentId);
+  const openHostDocumentsEvent = useEffectEvent(openHostDocuments);
+  const notifyDocumentsChangeEvent = useEffectEvent(() => {
+    onDocumentsChange?.(documentSummaries());
+  });
+  const runWorkspaceCommandEvent = useEffectEvent(runWorkspaceCommand);
   const activeWorkspaceBusy =
     activeDocumentId !== null && busyDocumentIds.has(activeDocumentId);
   const shellLocked = shellCommandBusy || activeWorkspaceBusy;
@@ -398,7 +406,7 @@ export const TabbedPdfShell = forwardRef<
     }
 
     const pendingDocuments = pendingHostDocumentsRef.current.splice(0);
-    openHostDocuments(pendingDocuments);
+    openHostDocumentsEvent(pendingDocuments);
   }, [shellLocked]);
 
   useEffect(() => {
@@ -407,7 +415,7 @@ export const TabbedPdfShell = forwardRef<
     }
 
     initialDocumentsOpenedRef.current = true;
-    openHostDocuments(initialDocuments);
+    openHostDocumentsEvent(initialDocuments);
   }, [initialDocuments]);
 
   useEffect(
@@ -419,8 +427,8 @@ export const TabbedPdfShell = forwardRef<
   );
 
   useEffect(() => {
-    onDocumentsChange?.(documentSummaries());
-  }, [activeDocumentId, documents, onDocumentsChange]);
+    notifyDocumentsChangeEvent();
+  }, [activeDocumentId, documents]);
 
   // Registered once for the shell's lifetime, so it exists before a newly
   // opened tab's own PdfWorkspace has mounted (and registered its own
@@ -454,12 +462,12 @@ export const TabbedPdfShell = forwardRef<
         return;
       }
 
-      void runWorkspaceCommand(activeDocumentId, command);
+      void runWorkspaceCommandEvent(activeDocumentId, command);
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [activeDocumentIdRef]);
 
   useEffect(() => {
     document.title = documents.some((document) => document.hasUnsavedChanges)
@@ -484,6 +492,21 @@ export const TabbedPdfShell = forwardRef<
       setRenameDialog(null);
     }
   }, [documents, renameDialog]);
+
+  useEffect(() => {
+    if (!renameDialog) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setRenameDialog(null);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [renameDialog]);
 
   useEffect(() => {
     if (!tabContextMenu) {
@@ -1708,6 +1731,7 @@ export const TabbedPdfShell = forwardRef<
                 onMouseDown={suppressMiddleClickAutoscroll}
               >
                 <button
+                  aria-pressed={activeDocumentId === document.id}
                   className="tabbedapp-tab-main"
                   disabled={shellLocked}
                   onClick={() => selectDocument(document.id)}
@@ -1746,6 +1770,7 @@ export const TabbedPdfShell = forwardRef<
         <div className="tabbedapp-tabbar-actions">
           <button
             aria-expanded={newTabMenuOpen}
+            aria-haspopup="menu"
             aria-label="New tab"
             className="tabbedapp-new-tab tabbedapp-tab-button"
             disabled={shellLocked}
@@ -1758,6 +1783,7 @@ export const TabbedPdfShell = forwardRef<
           {newTabMenuOpen ? (
             <div
               className="tabbedapp-tab-context-menu tabbedapp-new-tab-menu"
+              onKeyDown={handleMenuKeyDown}
               role="menu"
               style={{ left: newTabMenuPosition.x, top: newTabMenuPosition.y }}
             >
@@ -1783,7 +1809,10 @@ export const TabbedPdfShell = forwardRef<
                 </button>
               ))}
               {newTabMenuActions.length > 0 ? (
-                <span className="tabbedapp-context-menu-separator" />
+                <span
+                  className="tabbedapp-context-menu-separator"
+                  role="separator"
+                />
               ) : null}
               {newTabMenuActions.map((action) => (
                 <button
@@ -1829,6 +1858,7 @@ export const TabbedPdfShell = forwardRef<
         <div
           className="tabbedapp-tab-context-menu"
           onContextMenu={(event) => event.preventDefault()}
+          onKeyDown={handleMenuKeyDown}
           role="menu"
           style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
         >
@@ -1861,7 +1891,10 @@ export const TabbedPdfShell = forwardRef<
             <CornellTemplateIcon size={15} />
             <span>Create A4 Cornell note for file</span>
           </button>
-          <span className="tabbedapp-context-menu-separator" />
+          <span
+            className="tabbedapp-context-menu-separator"
+            role="separator"
+          />
           {tabContextMenuCanSave ? (
             <button
               disabled={shellLocked || !tabContextMenuWorkspaceAvailable}
@@ -1917,7 +1950,10 @@ export const TabbedPdfShell = forwardRef<
               <span>Print</span>
             </button>
           ) : null}
-          <span className="tabbedapp-context-menu-separator" />
+          <span
+            className="tabbedapp-context-menu-separator"
+            role="separator"
+          />
           <button
             disabled={shellLocked}
             onClick={() => closeCurrentTab(tabContextMenuDocument.id)}
@@ -1986,13 +2022,16 @@ export const TabbedPdfShell = forwardRef<
           }}
         >
           <form
+            aria-labelledby={renameDialogTitleId}
+            aria-modal="true"
             className="tabbedapp-modal-surface tabbedapp-rename-dialog"
             onSubmit={(event) => {
               event.preventDefault();
               void submitRenameDialog();
             }}
+            role="dialog"
           >
-            <h2>Rename file</h2>
+            <h2 id={renameDialogTitleId}>Rename file</h2>
             <label>
               <span>Filename</span>
               <input
@@ -2021,7 +2060,11 @@ export const TabbedPdfShell = forwardRef<
 
       {showDropPanel ? (
         <div className="tabbedapp-modal-backdrop tabbedapp-drop-backdrop">
-          <div className="tabbedapp-modal-surface tabbedapp-drop-card">
+          <div
+            aria-live="polite"
+            className="tabbedapp-modal-surface tabbedapp-drop-card"
+            role="status"
+          >
             <FolderOpen size={22} />
             <span>Drop PDFs to open</span>
           </div>
@@ -2298,6 +2341,42 @@ function cornellTitleAnnotation(text: string): PdfAnnotation {
 
 function clampContextMenuPosition(x: number, y: number) {
   return clampMenuPosition(x, y, 256, 172);
+}
+
+function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLElement>) {
+  if (
+    event.key !== 'ArrowDown' &&
+    event.key !== 'ArrowUp' &&
+    event.key !== 'Home' &&
+    event.key !== 'End'
+  ) {
+    return;
+  }
+
+  const items = Array.from(
+    event.currentTarget.querySelectorAll<HTMLButtonElement>(
+      '[role="menuitem"]:not(:disabled)'
+    )
+  );
+  if (items.length === 0) {
+    return;
+  }
+
+  event.preventDefault();
+  const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
+  const nextIndex =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : event.key === 'ArrowDown'
+          ? currentIndex < 0
+            ? 0
+            : (currentIndex + 1) % items.length
+          : currentIndex < 0
+            ? items.length - 1
+            : (currentIndex - 1 + items.length) % items.length;
+  items[nextIndex].focus();
 }
 
 function clampMenuPosition(

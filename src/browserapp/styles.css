@@ -129,7 +129,7 @@
 .browserapp-home-template-button:focus-visible,
 .browserapp-install-button:focus-visible,
 .browserapp-home-credit:focus-visible {
-  box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.32);
+  box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.85);
   outline: none;
 }
 
@@ -272,7 +272,7 @@
 }
 
 .browserapp-update-banner-refresh:focus-visible {
-  box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.32);
+  box-shadow: 0 0 0 2px rgb(var(--app-accent-rgb) / 0.85);
 }
 
 @media (max-width: 480px) {

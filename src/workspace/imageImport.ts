@@ -58,7 +58,7 @@ async function prepareImageStampBlob(blob: Blob): Promise<PreparedImageStamp> {
     throw new Error('The image is empty.');
   }
   if (blob.size > MAX_SOURCE_IMAGE_BYTES) {
-    throw new Error('Images larger than 32 MB are not supported.');
+    throw new Error('Images larger than 32 MiB are not supported.');
   }
 
   const headerDimensions = readImageHeaderDimensions(

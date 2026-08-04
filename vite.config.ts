@@ -102,6 +102,9 @@ export default defineConfig({
   },
   publicDir: '.generated/renderer-assets',
   build: {
+    // The service-worker generator precaches every allowed output file, so a
+    // rebuild must never retain obsolete hashed bundles from a prior build.
+    emptyOutDir: true,
     outDir: 'out/renderer'
   },
   plugins: [react(), {

@@ -5,7 +5,7 @@ import 'pdfjs-dist/web/pdf_viewer.css';
 let configured = false;
 let warmFetchStarted = false;
 const preloadedLinks = new Set<string>();
-const pdfJsWasmAssetBase = `${import.meta.env.BASE_URL}pdfjs/wasm/`;
+const pdfJsWasmAssetBase = `${import.meta.env?.BASE_URL ?? '/'}pdfjs/wasm/`;
 const warmablePdfJsAssets = [
   `${pdfJsWasmAssetBase}openjpeg.wasm`,
   `${pdfJsWasmAssetBase}jbig2.wasm`,
@@ -49,7 +49,11 @@ function preloadModule(href: string) {
 function preloadFetch(href: string, type: string) {
   appendPreloadLink(`fetch:${href}`, (link) => {
     link.as = 'fetch';
-    link.crossOrigin = 'anonymous';
+    // Deliberately no crossOrigin: these are same-origin assets, and setting
+    // it put the preload in CORS mode while the fetch() below (and PDF.js's
+    // own worker fetch) request them in same-origin mode. The two modes are
+    // different preload-cache keys, so the preload was never matched and
+    // every cold load downloaded ~435 KiB of WASM twice.
     link.href = href;
     link.rel = 'preload';
     link.type = type;

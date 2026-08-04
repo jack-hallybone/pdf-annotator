@@ -26,6 +26,10 @@ import { MAX_SOURCE_IMAGE_PIXELS } from './imageImport';
 import { loadEditablePdf } from './pdfPageOperations';
 import type { PdfAnnotation, PdfPoint, PdfRect } from './types';
 
+// pdf.js deliberately types getAnnotations() as Promise<any[]> because each
+// annotation subtype has a different runtime shape. Keep that untrusted
+// boundary explicit; every field is validated before conversion below.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ExistingPdfAnnotation = Record<string, any>;
 
 const displayAnnotationCache = new WeakMap<

@@ -80,7 +80,12 @@ is wrong even if it "works".
    walks the whole context. The invariant to hold is
    `pdfLooksPdfA(ourOutput) === false` — otherwise our own saved copy reopens
    as read-only "PDF/A compliant". `tests/pdfa-conformance.test.ts` guards it;
-   keep the marker list in sync with `pdfProtection.ts`.
+   keep the marker list in sync with `pdfProtection.ts`. The strip is
+   **targeted, not a blanket "delete all XMP"** — including in the catalog.
+   Deleting the catalog's `/Metadata` unconditionally also destroyed
+   `dc:title`/`dc:creator`/rights/dates on every save of an ordinary document
+   that never claimed PDF/A. Only a conformance claim is invalidated by
+   re-serialising; the rest of the XMP is user data and is preserved.
 7. **Anything we write must stop looking signed.** Same function, same
    reasoning: a resave breaks a signature's crypto, but its appearance stream
    is ordinary page content to a renderer that doesn't verify (this app
@@ -99,14 +104,25 @@ is wrong even if it "works".
    `PDFJS_DOCUMENT_OPTIONS`): `isEvalSupported: false`, `enableXfa: false`,
    `isImageDecoderSupported: false`. Do **not** wire a `PDFScriptingManager` —
    that would let embedded PDF JavaScript run.
-9. **External links go through sanitization** (`src/workspace/pdfLinks.ts`):
+9. **Only links become HTML; everything else is painted**
+   (`src/workspace/annotationDisplayPolicy.ts`). The pdf.js annotation layer
+   builds real DOM nodes, so `shouldRenderExistingAnnotationInPdfJsLayer`
+   admits `LINK` and nothing else — a widget there would be a focusable,
+   scriptable form control built from an untrusted document, which is also why
+   that layer keeps `renderForms: false` and `enableScripting: false`. Form
+   fields and signature stamps *are* shown, via the appearance overlay, which
+   paints the document's own appearance streams onto a canvas and masks them
+   to each annotation's rect — inert pixels. Don't "simplify" the two
+   predicates into one: displaying an annotation and making it interactive are
+   different decisions. `tests/annotation-display-policy.test.ts` guards it.
+10. **External links go through sanitization** (`src/workspace/pdfLinks.ts`):
    protocol allowlist (`http`/`https`/`mailto`), strip credentials,
    `rel="noopener noreferrer nofollow"`, `referrerPolicy="no-referrer"`, and a
    user-confirmed open. Never let a raw PDF URL reach `window.open` directly.
-10. **CSP is strict** (`vite.config.ts`): `default-src 'self'`, `object-src
+11. **CSP is strict** (`vite.config.ts`): `default-src 'self'`, `object-src
    'none'`, no `unsafe-eval` for scripts (only `wasm-unsafe-eval`). Keep it that
    way. See the GitHub Pages caveat below.
-11. **No `innerHTML`/`eval`/`new Function`/`document.write`.** The codebase has
+12. **No `innerHTML`/`eval`/`new Function`/`document.write`.** The codebase has
    none; keep it that way. Build DOM with the framework or `createElement`.
 
 ## Comment style
@@ -179,6 +195,12 @@ Two suites, run in separate processes so they don't share globals:
   pointed at via `TSX_TSCONFIG_PATH`). Use `renderHook` for extracted hooks.
 
 `tests/fixture-privacy.test.ts` guards that fixtures don't leak — keep it green.
+It decodes long hex strings before scanning, because a signed PDF hides its
+signer's certificate (and therefore an identity) inside the `/Contents` blob
+where a plain ASCII scan can't see it. `tests/fixtures/test-signed.pdf` is
+**generated**, not sourced — rebuild it with `node
+scripts/generate-signed-fixture.mjs`; see `tests/fixtures/README.md`.
+
 When you extract a hook/component, add a matching `*.dom.test.tsx`.
 
 A third, separate suite is the **Playwright smoke net** (`tests-e2e/*.spec.ts`,
@@ -187,9 +209,11 @@ covers the coarse load → render → serialize round trip (open a PDF, render i
 download a copy, reparse/reopen it). It is deliberately general — not a
 per-bug regression net — and is the safety net that makes the invariant-heavy
 `PdfWorkspace` extractions (history, save) safe to attempt. It is NOT part of
-`npm test` (needs a browser) and NOT wired into CI yet (CI would need a
-`playwright install` step). It uses the environment's pre-installed Chromium
-via `executablePath`; override with `PLAYWRIGHT_CHROMIUM_PATH` elsewhere.
+`npm test` (it needs a browser), but it *is* wired into CI — the deploy
+workflow runs `npx playwright install --with-deps chromium` and then
+`npm run test:e2e` before it builds, so a red smoke test blocks the deploy.
+Locally it uses the environment's pre-installed Chromium via `executablePath`;
+override with `PLAYWRIGHT_CHROMIUM_PATH` elsewhere.
 
 ## When adding a feature button
 
