@@ -25,7 +25,15 @@ const TYPES = {
 // The returned server's `kill()` refuses every request at the socket, which is
 // what a dead network looks like to a service worker.
 export async function serveBuiltSite(expect = "index.html") {
-  execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "ignore" });
+  // Root-served, always: this server maps every request path 1:1 onto dist/,
+  // with no notion of a base path. CI now sets BASE_PATH/VITE_SITE_URL on the
+  // same step that runs this build, for the OUTER build that ships - inheriting
+  // them here bakes a subpath into every asset URL this server can't answer to,
+  // so every one 404s and the app never mounts.
+  const env = { ...process.env };
+  delete env.BASE_PATH;
+  delete env.VITE_SITE_URL;
+  execFileSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "ignore" });
   if (!existsSync(join(SITE, expect))) {
     throw new Error(`the build produced no dist/${expect}`);
   }

@@ -32,5 +32,11 @@ export default defineConfig({
     url: "http://127.0.0.1:5173",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
+    // CI sets these for the outer build that ships; baseURL above assumes
+    // root, so a leaked base path serves this dev server under a subpath
+    // instead, and nothing above ever finds it. Spread first: this option
+    // replaces process.env rather than merging into it, so a bare override
+    // would also drop PATH and everything else npm run dev needs to launch.
+    env: { ...process.env, BASE_PATH: "", VITE_SITE_URL: "" },
   },
 });
