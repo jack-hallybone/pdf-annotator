@@ -8,7 +8,7 @@
 services:
   preview:
     # Pinned BY DIGEST, never by tag: a tag is a name its owner can move.
-    image: node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+    image: node:25-bookworm-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370
     # RUNS AS ROOT, deliberately, and this is the reason there is no Dockerfile. Docker takes a
     # fresh named volume's ownership from the image's directory at that path; this image has no
     # /app, so the volume below arrives owned by root, and an unprivileged user could not write a
