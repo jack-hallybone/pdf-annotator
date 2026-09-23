@@ -50,8 +50,16 @@ test.beforeAll(async () => {
 
   // Always, never "only if dist is missing": an assertion about the
   // shipped file is worth nothing if an older source tree left that file behind.
+  // Root-served, always: `serve()` below maps every path 1:1 onto dist/, with
+  // no notion of a base path, so a leaked BASE_PATH/VITE_SITE_URL (CI sets
+  // both on the same step that runs this, for the outer build that ships)
+  // bakes a subpath into every asset URL this server can't answer to.
+  const env = { ...process.env };
+  delete env.BASE_PATH;
+  delete env.VITE_SITE_URL;
   execFileSync("npm", ["run", "build"], {
     cwd: projectRoot,
+    env,
     stdio: "inherit",
   });
 
