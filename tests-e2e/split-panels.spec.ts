@@ -369,15 +369,17 @@ async function splitFromTab(
   tabIndex: number,
   item: "Split Right" | "Split Down",
 ) {
-  await page.locator(TAB).nth(tabIndex).click({ button: "right" });
-  await page.getByRole("menuitem", { name: item }).click();
-
-  // A busy shell (still settling a newly mounted document pane) drops right-click
-  // silently, so a follow-up split or swap has to wait this out first.
+  // A busy shell (still settling a newly mounted document pane) drops
+  // right-click silently, so this guards the click itself, not just the
+  // previous call's return: a swap can set busy again shortly AFTER that
+  // call's own trailing check already saw it clear, leaving this the only
+  // check still standing between it and the click.
   await expect(page.locator(".tabbedapp-shell")).toHaveAttribute(
     "data-busy",
     "false",
   );
+  await page.locator(TAB).nth(tabIndex).click({ button: "right" });
+  await page.getByRole("menuitem", { name: item }).click();
 }
 
 async function openDocuments(page: Page, files: string[]) {

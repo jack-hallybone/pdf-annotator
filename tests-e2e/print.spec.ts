@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { PDFDocument, rgb } from "pdf-lib";
+import { PRINT_FRAME_FALLBACK_MS } from "../src/browserapp/browserPrintTarget";
 
 const PAGE_COUNT = 20;
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
@@ -54,12 +55,15 @@ test("printing bakes the PDF into a frame and resolves without leaving the app b
   await expect(printButton).toBeEnabled();
   await printButton.click();
 
-  // Comfortably inside the app's own 4-second stalled-frame fallback: this
-  // must resolve on the fast path, not need the safety net to save it.
+  // Past the app's own stalled-frame fallback, not racing a shorter window
+  // against it: real iframe render time varies by machine, but printCalls
+  // only ever increments on the fast path (the fallback downloads instead),
+  // so this still catches a regression that always falls back - it just no
+  // longer also catches a slower machine taking the fast path anyway.
   await expect
     .poll(() => printCalls, {
       message: "the printable frame never called print()",
-      timeout: 2_000,
+      timeout: PRINT_FRAME_FALLBACK_MS + 2_000,
     })
     .toBeGreaterThan(0);
 

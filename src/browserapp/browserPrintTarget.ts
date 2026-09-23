@@ -2,7 +2,10 @@ import type { PdfPrintTarget } from "../tabbedapp";
 import { uint8ArrayToArrayBuffer } from "../bytes";
 import { downloadPdfBytes } from "./localFileAccess";
 
-const PRINT_FRAME_FALLBACK_MS = 4000;
+// Exported so the e2e print test can wait past this rather than racing a
+// separate, hand-picked window against real (and machine-dependent) PDF
+// render time in the iframe.
+export const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
 
 export function browserPrintTarget(): PdfPrintTarget {
