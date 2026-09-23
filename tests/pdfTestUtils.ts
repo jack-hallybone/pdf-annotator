@@ -1,13 +1,13 @@
-import { readFile } from 'node:fs/promises';
+import { readFile } from "node:fs/promises";
 import {
   PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
-  PDFString
-} from 'pdf-lib';
+  PDFString,
+} from "pdf-lib";
 
-export const fixtureUrl = new URL('./fixtures/', import.meta.url);
+const fixtureUrl = new URL("./fixtures/", import.meta.url);
 
 export async function readFixture(name: string) {
   return new Uint8Array(await readFile(new URL(name, fixtureUrl)));
@@ -16,7 +16,7 @@ export async function readFixture(name: string) {
 export function loadTestPdf(bytes: Uint8Array) {
   return PDFDocument.load(bytes, {
     ignoreEncryption: true,
-    updateMetadata: false
+    updateMetadata: false,
   });
 }
 
@@ -40,7 +40,7 @@ export async function annotationSummary(bytes: Uint8Array) {
 
   return {
     bySubtype: sortRecord(bySubtype),
-    total
+    total,
   };
 }
 
@@ -64,7 +64,7 @@ export async function annotationSubtypeCountsByPage(bytes: Uint8Array) {
 
 export async function annotationContentsByName(
   bytes: Uint8Array,
-  name: string
+  name: string,
 ) {
   const pdfDoc = await loadTestPdf(bytes);
 
@@ -78,7 +78,7 @@ export async function annotationContentsByName(
       const annotation = annots.lookupMaybe(index, PDFDict);
       if (
         annotation
-          ?.lookupMaybe(PDFName.of('NM'), PDFString, PDFHexString)
+          ?.lookupMaybe(PDFName.of("NM"), PDFString, PDFHexString)
           ?.decodeText() !== name
       ) {
         continue;
@@ -86,8 +86,8 @@ export async function annotationContentsByName(
 
       return (
         annotation
-          .lookupMaybe(PDFName.of('Contents'), PDFString, PDFHexString)
-          ?.decodeText() ?? ''
+          .lookupMaybe(PDFName.of("Contents"), PDFString, PDFHexString)
+          ?.decodeText() ?? ""
       );
     }
   }
@@ -97,14 +97,13 @@ export async function annotationContentsByName(
 
 function annotationSubtype(annotation: PDFDict | undefined) {
   return (
-    annotation
-      ?.lookupMaybe(PDFName.of('Subtype'), PDFName)
-      ?.decodeText() ?? 'Unknown'
+    annotation?.lookupMaybe(PDFName.of("Subtype"), PDFName)?.decodeText() ??
+    "Unknown"
   );
 }
 
 function sortRecord(record: Record<string, number>) {
   return Object.fromEntries(
-    Object.entries(record).sort(([left], [right]) => left.localeCompare(right))
+    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
   );
 }

@@ -1,33 +1,32 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
-import { PDFArray, PDFDict, PDFName, PDFRawStream, PDFRef } from 'pdf-lib';
+import assert from "node:assert/strict";
+import test from "node:test";
+import { inflateSync } from "node:zlib";
+import { PDFArray, PDFDict, PDFName, PDFRawStream, PDFRef } from "pdf-lib";
 import {
   detectReadOnlyReason,
-  pdfLooksPdfA
-} from '../src/workspace/pdfProtection';
+  pdfLooksPdfA,
+} from "../src/pdfdocumenteditor/pdfProtection";
 import {
   addBlankPageAt,
   loadEditablePdf,
   mergePdfAfterPage,
-  rotatePageClockwise
-} from '../src/workspace/pdfPageOperations';
-import { writePdfAnnotations } from '../src/workspace/pdfWriter';
-import type { PdfAnnotation } from '../src/workspace/types';
-import { loadTestPdf, readFixture } from './pdfTestUtils';
+  rotatePageClockwise,
+} from "../src/pdfdocumenteditor/pdfPageOperations";
+import { writePdfAnnotations } from "../src/pdfdocumenteditor/pdfWriter";
+import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
+import { loadTestPdf, readFixture } from "./pdfTestUtils";
 
-// This app never tries to preserve PDF/A conformance while editing (it
-// doesn't validate embedded fonts, colour spaces or transparency), so
-// anything it writes must stop claiming it. These guard the whole class of
-// "the saved copy still says PDF/A", including the round trip that matters
-// most in practice: reopening our own output must not flag it read-only.
+// This app never tries to preserve PDF/A conformance while editing, so anything
+// it writes must stop claiming it - including the round trip that matters most
+// in practice: reopening our own output must not flag it read-only.
 
 const note: PdfAnnotation = {
   color: [1, 0.996, 0.306],
-  id: 'test-pdfa-note',
-  kind: 'stickyNote',
+  id: "test-pdfa-note",
+  kind: "stickyNote",
   pageIndex: 0,
   rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-  text: 'note on a PDF/A document'
+  text: "note on a PDF/A document",
 };
 
 const pdfaXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -44,26 +43,26 @@ const unrelatedXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <dc:rights>Example font licence text</dc:rights>
 </rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
 
-test('an annotated copy of a PDF/A document stops claiming PDF/A', async () => {
-  const bytes = await readFixture('test-pdfa.pdf');
-  assert.equal(await pdfLooksPdfA(bytes), true, 'fixture should be PDF/A');
+test("an annotated copy of a PDF/A document stops claiming PDF/A", async () => {
+  const bytes = await readFixture("test-pdfa.pdf");
+  assert.equal(await pdfLooksPdfA(bytes), true, "fixture should be PDF/A");
 
   const output = await writePdfAnnotations(bytes, [note], {
     replaceAnnotationSourceIds: [note.id],
-    replacePageIndexes: [0]
+    replacePageIndexes: [0],
   });
 
   assert.equal(await pdfLooksPdfA(output), false);
 });
 
-test('structural edits of a PDF/A document stop claiming PDF/A', async () => {
-  const bytes = await readFixture('test-pdfa.pdf');
-  const plain = await readFixture('test-annotated.pdf');
+test("structural edits of a PDF/A document stop claiming PDF/A", async () => {
+  const bytes = await readFixture("test-pdfa.pdf");
+  const plain = await readFixture("test-annotated.pdf");
 
   const outputs = [
     await rotatePageClockwise(bytes, 0),
     await addBlankPageAt(bytes, 1, 0),
-    (await mergePdfAfterPage(bytes, plain, 0)).bytes
+    (await mergePdfAfterPage(bytes, plain, 0)).bytes,
   ];
 
   for (const output of outputs) {
@@ -71,26 +70,26 @@ test('structural edits of a PDF/A document stop claiming PDF/A', async () => {
   }
 });
 
-test('reopening a saved copy of a PDF/A document does not force read-only', async () => {
-  const bytes = await readFixture('test-pdfa.pdf');
-  assert.equal(await detectReadOnlyReason(bytes, null, false), 'PDF/A compliant');
+test("reopening a saved copy of a PDF/A document does not force read-only", async () => {
+  const bytes = await readFixture("test-pdfa.pdf");
+  assert.equal(
+    await detectReadOnlyReason(bytes, null, false),
+    "PDF/A compliant",
+  );
 
   const output = await writePdfAnnotations(bytes, [note], {
     replaceAnnotationSourceIds: [note.id],
-    replacePageIndexes: [0]
+    replacePageIndexes: [0],
   });
 
   assert.equal(await detectReadOnlyReason(output, null, false), null);
 });
 
-// The regression this file was added for: stripping only the catalog's
-// /Metadata left a PDF/A identification behind on any other object that
-// carries XMP, so the saved copy still advertised conformance.
-test('a PDF/A claim in XMP outside the catalog is stripped too', async () => {
+test("a PDF/A claim in XMP outside the catalog is stripped too", async () => {
   const bytes = await attachMetadataStream(
-    await readFixture('test-pdfa.pdf'),
+    await readFixture("test-pdfa.pdf"),
     pdfaXmpPacket,
-    'page'
+    "page",
   );
   assert.equal(await pdfLooksPdfA(bytes), true);
 
@@ -99,12 +98,12 @@ test('a PDF/A claim in XMP outside the catalog is stripped too', async () => {
   assert.equal(await pdfLooksPdfA(output), false);
 });
 
-test('a PDF/A claim in a compressed XMP packet is stripped', async () => {
+test("a PDF/A claim in a compressed XMP packet is stripped", async () => {
   const bytes = await attachMetadataStream(
-    await readFixture('test-pdfa.pdf'),
+    await readFixture("test-pdfa.pdf"),
     pdfaXmpPacket,
-    'page',
-    { compress: true }
+    "page",
+    { compress: true },
   );
 
   const output = await rotatePageClockwise(bytes, 0);
@@ -112,50 +111,78 @@ test('a PDF/A claim in a compressed XMP packet is stripped', async () => {
   assert.equal(await pdfLooksPdfA(output), false);
 });
 
-// The strip is targeted, not a blanket "delete all XMP": re-serialising a
-// document doesn't invalidate metadata that isn't a conformance claim.
-test('XMP without a PDF/A claim survives an edit', async () => {
+// An XMP packet that declares neither /Type /Metadata nor /Subtype /XML is still
+// the document's metadata to anything following the catalog's /Metadata key, and
+// compressing it hides the marker from the byte scan saveEditedPdf verifies its
+// output with.
+test("a PDF/A claim in an untyped compressed XMP packet is stripped", async () => {
   const bytes = await attachMetadataStream(
-    await readFixture('test-annotated.pdf'),
+    await readFixture("test-annotated.pdf"),
+    pdfaXmpPacket,
+    "catalog",
+    { compress: true, typed: false },
+  );
+  assert.equal(
+    await pdfLooksPdfA(bytes),
+    true,
+    "the claim must be detected on input",
+  );
+
+  const output = await rotatePageClockwise(bytes, 0);
+
+  assert.equal(await pdfLooksPdfA(output), false);
+  assert.equal(
+    inflatedStreamsInclude(output, "pdfaid:part"),
+    false,
+    "the compressed claim must not survive into the output",
+  );
+});
+
+test("XMP without a PDF/A claim survives an edit", async () => {
+  const bytes = await attachMetadataStream(
+    await readFixture("test-annotated.pdf"),
     unrelatedXmpPacket,
-    'page'
+    "page",
   );
 
   const output = await rotatePageClockwise(bytes, 0);
 
   assert.ok(
-    Buffer.from(output).toString('latin1').includes('Example font licence text'),
-    'unrelated XMP should be preserved'
+    Buffer.from(output)
+      .toString("latin1")
+      .includes("Example font licence text"),
+    "unrelated XMP should be preserved",
   );
 });
 
-// The catalog's own XMP used to be deleted unconditionally, which quietly
-// destroyed dc:title/dc:creator/rights on every save of an ordinary document
-// that never claimed PDF/A in the first place. Only the conformance claim is
-// invalidated by re-serialising, so only that is stripped.
-test('catalog XMP without a PDF/A claim survives an edit', async () => {
+test("catalog XMP without a PDF/A claim survives an edit", async () => {
   const bytes = await attachMetadataStream(
-    await readFixture('test-annotated.pdf'),
+    await readFixture("test-annotated.pdf"),
     unrelatedXmpPacket,
-    'catalog'
+    "catalog",
   );
 
   const output = await rotatePageClockwise(bytes, 0);
 
   assert.ok(
-    Buffer.from(output).toString('latin1').includes('Example font licence text'),
-    'unrelated catalog XMP should be preserved'
+    Buffer.from(output)
+      .toString("latin1")
+      .includes("Example font licence text"),
+    "unrelated catalog XMP should be preserved",
   );
 });
 
-// Checked structurally rather than through pdfLooksPdfA: an output intent is
-// a plain dict, which pdf-lib packs into a compressed object stream, so a raw
-// byte scan can't see the marker either before or after.
-test('a GTS_PDFA output intent outside the catalog is stripped', async () => {
+// Checked structurally rather than through pdfLooksPdfA: an output intent is a
+// plain dict, which pdf-lib packs into a compressed object stream.
+test("a GTS_PDFA output intent outside the catalog is stripped", async () => {
   const bytes = await attachPageOutputIntent(
-    await readFixture('test-annotated.pdf')
+    await readFixture("test-annotated.pdf"),
   );
-  assert.equal(await pageOutputIntentSubtypes(bytes), 1, 'fixture precondition');
+  assert.equal(
+    await pageOutputIntentSubtypes(bytes),
+    1,
+    "fixture precondition",
+  );
 
   const output = await rotatePageClockwise(bytes, 0);
 
@@ -168,15 +195,15 @@ async function pageOutputIntentSubtypes(bytes: Uint8Array) {
 
   for (const page of pdfDoc.getPages()) {
     const intents = page.node.lookupMaybe(
-      PDFName.of('OutputIntents'),
-      PDFArray
+      PDFName.of("OutputIntents"),
+      PDFArray,
     );
     for (let index = 0; index < (intents?.size() ?? 0); index += 1) {
       const subtype = intents
         ?.lookupMaybe(index, PDFDict)
-        ?.lookupMaybe(PDFName.of('S'), PDFName)
+        ?.lookupMaybe(PDFName.of("S"), PDFName)
         ?.asString();
-      if (subtype?.startsWith('/GTS_PDFA')) {
+      if (subtype?.startsWith("/GTS_PDFA")) {
         count += 1;
       }
     }
@@ -185,36 +212,51 @@ async function pageOutputIntentSubtypes(bytes: Uint8Array) {
   return count;
 }
 
+function inflatedStreamsInclude(bytes: Uint8Array, marker: string) {
+  const buffer = Buffer.from(bytes);
+  for (let index = 0; index < buffer.length; index += 1) {
+    if (buffer[index] !== 0x78) {
+      continue;
+    }
+    try {
+      if (inflateSync(buffer.subarray(index)).includes(marker)) {
+        return true;
+      }
+    } catch {
+      // Not the start of a deflate stream; keep scanning.
+    }
+  }
+  return false;
+}
+
 async function attachMetadataStream(
   bytes: Uint8Array,
   packet: string,
-  target: 'page' | 'catalog',
-  { compress = false }: { compress?: boolean } = {}
+  target: "page" | "catalog",
+  {
+    compress = false,
+    typed = true,
+  }: { compress?: boolean; typed?: boolean } = {},
 ) {
   const pdfDoc = await loadEditablePdf(bytes);
   const { context } = pdfDoc;
   const packetBytes = new TextEncoder().encode(packet);
+  const typeEntries = typed ? { Type: "Metadata", Subtype: "XML" } : {};
   const ref = compress
-    ? context.register(
-        context.flateStream(packetBytes, {
-          Type: 'Metadata',
-          Subtype: 'XML'
-        })
-      )
+    ? context.register(context.flateStream(packetBytes, typeEntries))
     : context.register(
         PDFRawStream.of(
           context.obj({
-            Type: 'Metadata',
-            Subtype: 'XML',
-            Length: packetBytes.length
+            ...typeEntries,
+            Length: packetBytes.length,
           }) as PDFDict,
-          packetBytes
-        )
+          packetBytes,
+        ),
       );
 
   const owner =
-    target === 'page' ? pdfDoc.getPage(0).node : (pdfDoc.catalog as PDFDict);
-  owner.set(PDFName.of('Metadata'), ref);
+    target === "page" ? pdfDoc.getPage(0).node : (pdfDoc.catalog as PDFDict);
+  owner.set(PDFName.of("Metadata"), ref);
   return savedBytes(pdfDoc);
 }
 
@@ -223,29 +265,29 @@ async function attachPageOutputIntent(bytes: Uint8Array) {
   const { context } = pdfDoc;
   const intentRef = context.register(
     context.obj({
-      Type: 'OutputIntent',
-      S: 'GTS_PDFA1',
-      OutputConditionIdentifier: 'sRGB'
-    })
+      Type: "OutputIntent",
+      S: "GTS_PDFA1",
+      OutputConditionIdentifier: "sRGB",
+    }),
   );
   pdfDoc
     .getPage(0)
-    .node.set(PDFName.of('OutputIntents'), context.obj([intentRef]));
+    .node.set(PDFName.of("OutputIntents"), context.obj([intentRef]));
   return savedBytes(pdfDoc);
 }
 
 function savedBytes(pdfDoc: Awaited<ReturnType<typeof loadEditablePdf>>) {
-  // Deliberately pdf-lib's own save, not saveEditedPdf - these fixtures are
-  // built to still carry the claim the code under test is meant to remove.
+  // pdf-lib's own save, not saveEditedPdf: these fixtures are built to still carry
+  // the claim the code under test is meant to remove.
   return pdfDoc.save({ objectsPerTick: 500, updateFieldAppearances: false });
 }
 
-test('the PDF/A fixture stays loadable after stripping', async () => {
-  const bytes = await readFixture('test-pdfa.pdf');
+test("the PDF/A fixture stays loadable after stripping", async () => {
+  const bytes = await readFixture("test-pdfa.pdf");
   const before = await loadTestPdf(bytes);
   const output = await rotatePageClockwise(bytes, 0);
   const after = await loadTestPdf(output);
 
   assert.equal(after.getPageCount(), before.getPageCount());
-  assert.ok(!(after.catalog.get(PDFName.of('Metadata')) instanceof PDFRef));
+  assert.ok(!(after.catalog.get(PDFName.of("Metadata")) instanceof PDFRef));
 });

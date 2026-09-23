@@ -1,40 +1,43 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
-import { TabbedPdfShell } from '../tabbedapp';
+import { useCallback, useEffect, useRef, useState } from "react";
+// From its own module, not the tabbedapp barrel: the barrel also exports
+// TabbedAppDocument, and a static path to it here would defeat the shell's own lazy
+// import.
+import { TabbedAppShell } from "../tabbedapp/TabbedAppShell";
 import type {
-  TabbedPdfDocumentSummary,
-  TabbedPdfShellHandle
-} from '../tabbedapp';
-import { BrowserHome } from './BrowserHome';
+  TabbedAppOpenDocumentSummary,
+  TabbedAppShellHandle,
+} from "../tabbedapp";
+import { BrowserHome } from "./BrowserHome";
 import {
   browserFileAdapter,
-  browserFileHandlesToHostDocuments
-} from './browserFileAdapter';
-import {
-  applyAvailableServiceWorkerUpdate,
-  registerBrowserServiceWorker,
-  setPwaFileLaunchHandler
-} from './pwa';
-import { isBrowserAppFramed } from './frameGuard';
-import './styles.css';
+  browserFileHandlesToHostDocuments,
+} from "./browserFileAdapter";
+import { registerBrowserServiceWorker, setPwaFileLaunchHandler } from "./pwa";
+import { isBrowserAppFramed } from "./frameGuard";
+import { PRODUCT_NAME } from "../productName";
+import "./styles.css";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{
-    outcome: 'accepted' | 'dismissed';
+    outcome: "accepted" | "dismissed";
     platform: string;
   }>;
 };
 
 export function BrowserShell() {
-  return isBrowserAppFramed() ? <FramedBrowserAppBlock /> : <BrowserShellInner />;
+  return isBrowserAppFramed() ? (
+    <FramedBrowserAppBlock />
+  ) : (
+    <BrowserShellInner />
+  );
 }
 
 function FramedBrowserAppBlock() {
   return (
     <main className="browserapp-frame-block">
-      <section className="browserapp-frame-block-card">
-        <h1>PDF Annotator cannot run inside another page.</h1>
+      <section className="panel raised browserapp-frame-block-card">
+        <h1>{PRODUCT_NAME} cannot run inside another page.</h1>
         <p>Open it directly to use local PDF files safely.</p>
       </section>
     </main>
@@ -42,34 +45,24 @@ function FramedBrowserAppBlock() {
 }
 
 function BrowserShellInner() {
-  const shellRef = useRef<TabbedPdfShellHandle>(null);
-  const [documents, setDocuments] = useState<TabbedPdfDocumentSummary[]>([]);
+  const shellRef = useRef<TabbedAppShellHandle>(null);
+  const [documents, setDocuments] = useState<TabbedAppOpenDocumentSummary[]>(
+    [],
+  );
   const [installPrompt, setInstallPrompt] =
     useState<BeforeInstallPromptEvent | null>(null);
   const [installedAsApp, setInstalledAsApp] = useState(isPwaDisplayMode);
-  const [updateAvailable, setUpdateAvailable] = useState(false);
 
-  useEffect(
-    () => registerBrowserServiceWorker(() => setUpdateAvailable(true)),
-    []
-  );
-
-  const refreshForUpdate = useCallback(() => {
-    applyAvailableServiceWorkerUpdate();
-  }, []);
-
-  const dismissUpdateNotice = useCallback(() => {
-    setUpdateAvailable(false);
-  }, []);
+  useEffect(() => registerBrowserServiceWorker(), []);
 
   useEffect(() => {
-    const standaloneMedia = window.matchMedia('(display-mode: standalone)');
+    const standaloneMedia = window.matchMedia("(display-mode: standalone)");
     const updateInstalledState = () => setInstalledAsApp(isPwaDisplayMode());
 
     updateInstalledState();
-    standaloneMedia.addEventListener('change', updateInstalledState);
+    standaloneMedia.addEventListener("change", updateInstalledState);
     return () =>
-      standaloneMedia.removeEventListener('change', updateInstalledState);
+      standaloneMedia.removeEventListener("change", updateInstalledState);
   }, []);
 
   useEffect(() => {
@@ -83,17 +76,14 @@ function BrowserShellInner() {
       setInstalledAsApp(true);
     }
 
-    window.addEventListener(
-      'beforeinstallprompt',
-      handleBeforeInstallPrompt
-    );
-    window.addEventListener('appinstalled', handleAppInstalled);
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
     return () => {
       window.removeEventListener(
-        'beforeinstallprompt',
-        handleBeforeInstallPrompt
+        "beforeinstallprompt",
+        handleBeforeInstallPrompt,
       );
-      window.removeEventListener('appinstalled', handleAppInstalled);
+      window.removeEventListener("appinstalled", handleAppInstalled);
     };
   }, []);
 
@@ -105,10 +95,12 @@ function BrowserShellInner() {
             await browserFileHandlesToHostDocuments(handles);
           shellRef.current?.openDocuments(launchedDocuments);
         } catch {
-          shellRef.current?.showNotice('Could not open this file.');
+          shellRef.current?.showNotice("Could not open this file.", {
+            tone: "danger",
+          });
         }
       }),
-    []
+    [],
   );
 
   useEffect(() => {
@@ -118,11 +110,11 @@ function BrowserShellInner() {
 
     function handleBeforeUnload(event: BeforeUnloadEvent) {
       event.preventDefault();
-      event.returnValue = '';
+      event.returnValue = "";
     }
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [documents]);
 
   const installApp = useCallback(async () => {
@@ -137,73 +129,30 @@ function BrowserShellInner() {
   }, [installPrompt]);
 
   return (
-    <>
-      {updateAvailable ? (
-        <UpdateAvailableBanner
-          onClose={dismissUpdateNotice}
-          onRefresh={refreshForUpdate}
+    <TabbedAppShell
+      fileAdapter={browserFileAdapter}
+      onDocumentsChange={setDocuments}
+      ref={shellRef}
+      renderHome={(props) => (
+        <BrowserHome
+          {...props}
+          canHandlePdfLaunches={canHandlePwaFileLaunches()}
+          installedAsApp={installedAsApp}
+          onInstall={installPrompt && !installedAsApp ? installApp : undefined}
         />
-      ) : null}
-      <TabbedPdfShell
-        fileAdapter={browserFileAdapter}
-        onDocumentsChange={setDocuments}
-        ref={shellRef}
-        renderHome={(props) => (
-          <BrowserHome
-            {...props}
-            canHandlePdfLaunches={canHandlePwaFileLaunches()}
-            installedAsApp={installedAsApp}
-            onInstall={
-              installPrompt && !installedAsApp ? installApp : undefined
-            }
-          />
-        )}
-      />
-    </>
-  );
-}
-
-function UpdateAvailableBanner({
-  onClose,
-  onRefresh
-}: {
-  onClose: () => void;
-  onRefresh: () => void;
-}) {
-  return (
-    <div className="browserapp-update-banner ui-frame screen-only" role="status">
-      <span className="browserapp-update-banner-text">
-        A new version of PDF Annotator is available.
-      </span>
-      <div className="browserapp-update-banner-actions">
-        <button
-          className="browserapp-update-banner-refresh"
-          onClick={onRefresh}
-          type="button"
-        >
-          Refresh
-        </button>
-        <button
-          aria-label="Dismiss update notification"
-          className="icon-button ui-button browserapp-update-banner-close"
-          onClick={onClose}
-          type="button"
-        >
-          <X size={14} />
-        </button>
-      </div>
-    </div>
+      )}
+    />
   );
 }
 
 function isPwaDisplayMode() {
   return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.matchMedia("(display-mode: window-controls-overlay)").matches ||
     Boolean((navigator as Navigator & { standalone?: boolean }).standalone)
   );
 }
 
 function canHandlePwaFileLaunches() {
-  return 'launchQueue' in window;
+  return "launchQueue" in window;
 }

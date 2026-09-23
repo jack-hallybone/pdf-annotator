@@ -2,15 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" href="%BASE_URL%favicon.ico" sizes="32x32" />
-    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" sizes="any" />
-    <link rel="apple-touch-icon" sizes="180x180" href="%BASE_URL%apple-touch-icon.png" />
+    <!-- Referenced from the page, so Vite rewrites these to content-hashed
+         names and scripts/prepare-renderer-assets.mjs keeps them out of the
+         verbatim publicDir copy. The manifest's own install icons are not
+         here: the operating system fetches those, never this page. -->
+    <link rel="icon" href="/src/browserapp/assets/favicon.ico" sizes="32x32" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/src/browserapp/assets/favicon.svg"
+      sizes="any"
+    />
+    <link
+      rel="apple-touch-icon"
+      sizes="180x180"
+      href="/src/browserapp/assets/apple-touch-icon.png"
+    />
     <link rel="manifest" href="%BASE_URL%site.webmanifest" />
-    <link rel="canonical" href="https://jack-hallybone.github.io/pdf-annotator/" />
-    <meta name="application-name" content="PDF Annotator" />
+    <link rel="canonical" href="%SITE_URL%" />
+    <meta name="application-name" content="%PRODUCT_NAME%" />
     <meta name="referrer" content="no-referrer" />
-    <meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#242A2A" media="(prefers-color-scheme: dark)" />
+    <!-- The browser tints its own chrome with this, so it is the colour the app
+         paints against it: --theme-surface from src/theme.css, which is what
+         the tab strip at the top of the viewport is painted in. Two literals,
+         not derived - the theme is a pasted file that changes rarely and
+         deliberately - and held to the token over what SHIPPED by
+         tests/build/shipped-artefact.test.mjs, so a retint that missed them
+         fails the build rather than leaving the chrome on the old colour. -->
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#211f1d"
+      media="(prefers-color-scheme: dark)"
+    />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -20,42 +48,45 @@
       content="Free, client-side PDF viewer and annotator. Highlight, draw, add sticky notes and edit pages - no sign-up, no uploads, works offline."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://jack-hallybone.github.io/pdf-annotator/" />
-    <meta property="og:site_name" content="PDF Annotator" />
-    <meta property="og:title" content="PDF Annotator" />
+    <meta property="og:url" content="%SITE_URL%" />
+    <meta property="og:site_name" content="%PRODUCT_NAME%" />
+    <meta property="og:title" content="%PRODUCT_NAME%" />
     <meta
       property="og:description"
       content="Free, client-side PDF viewer and annotator. Highlight, draw, add sticky notes and edit pages - no sign-up, no uploads, works offline."
     />
-    <meta
-      property="og:image"
-      content="https://jack-hallybone.github.io/pdf-annotator/og-image.png"
-    />
+    <meta property="og:image" content="%SITE_URL%og-image.png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="PDF Annotator - free, client-side PDF viewer and annotation tool"
+      content="%PRODUCT_NAME% - free, client-side PDF viewer and annotator"
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="PDF Annotator" />
+    <meta name="twitter:title" content="%PRODUCT_NAME%" />
     <meta
       name="twitter:description"
       content="Free, client-side PDF viewer and annotator. Highlight, draw, add sticky notes and edit pages - no sign-up, no uploads, works offline."
     />
-    <meta
-      name="twitter:image"
-      content="https://jack-hallybone.github.io/pdf-annotator/og-image.png"
-    />
-    <title>PDF Annotator</title>
+    <meta name="twitter:image" content="%SITE_URL%og-image.png" />
+    <title>%PRODUCT_NAME%</title>
   </head>
   <body>
     <div id="root"></div>
+    <!-- Stamped by scripts/stamp_version.mjs when a release is built; the
+         literal here is what an unstamped build shows. -->
+    <release-version hidden>preview</release-version>
     <noscript>
       <div
-        style="margin: 3rem auto; max-width: 34rem; padding: 0 1.5rem; font-family: system-ui, sans-serif; line-height: 1.5"
+        style="
+          margin: 3rem auto;
+          max-width: 34rem;
+          padding: 0 1.5rem;
+          font-family: system-ui, sans-serif;
+          line-height: 1.5;
+        "
       >
-        <h1 style="font-size: 1.25rem">PDF Annotator needs JavaScript</h1>
+        <h1 style="font-size: 1.25rem">%PRODUCT_NAME% needs JavaScript</h1>
         <p>
           This is a fully client-side app: your PDF is opened, rendered and
           edited by code running in this browser tab, and nothing is uploaded

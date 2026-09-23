@@ -1,0 +1,16 @@
+/* Shared base for a split seam: the 7px-wide flex item and its centred
+   divider line. .pdfdocumenteditor-split-resizer and .tabbedapp-panel-resizer
+   add their own hover/focus-visible darken, cursor and row/column
+   positioning on top of this; .tabbedapp-header-divider, a purely visual
+   line matching a resizer's width rather than a resizer itself, uses just
+   this much. */
+.split-resizer {
+  flex: 0 0 7px;
+  position: relative;
+}
+
+.split-resizer::after {
+  background: var(--theme-ink-muted);
+  content: "";
+  position: absolute;
+}

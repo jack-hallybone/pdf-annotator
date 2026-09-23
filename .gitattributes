@@ -1,23 +1,13 @@
-* text=auto
+# One rule: every text file is LF in the repository and in the working tree.
+* text=auto eol=lf
 
-.gitattributes text eol=lf
-.gitignore text eol=lf
+*.png binary
 
-*.css text eol=lf
-*.html text eol=lf
-*.json text eol=lf
-*.js text eol=lf
-*.md text eol=lf
-*.mjs text eol=lf
-*.ts text eol=lf
-*.tsx text eol=lf
-*.yaml text eol=lf
-LICENSE* text eol=lf
-
+# The binary types this project ships. Git's own NUL-byte heuristic would catch most of
+# them; naming them means a new one is a deliberate line rather than a lucky detection.
 *.bcmap binary
 *.icc binary
 *.ico binary
 *.pfb binary
-*.png binary
 *.ttf binary
 *.wasm binary

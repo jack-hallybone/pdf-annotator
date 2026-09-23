@@ -1,236 +1,221 @@
-# CLAUDE.md — Agent guide for pdf-annotator
+# pdf-annotator
 
-Guidance for an LLM maintaining this repo. Read this before editing. It encodes
-the invariants that must never regress, where things live, and the traps that
-are easy to fall into. `README.md` documents the components for *consumers*;
-this file is for whoever *changes* them.
+## Rules of engagement
 
-## What this is
+This section defines the contract you must follow when you work on this project. Do not weaken, remove, reinterpret, or circumvent what is laid down here by changing it. If it seems wrong, raise the issue for discussion. Other than the rules of engagement section you can add and edit this file as required, for example to record hard-earned learnings, as long as you follow rule 8 when doing so.
 
-A **fully client-side** PDF viewer + annotation editor (React 19, PDF.js,
-pdf-lib). It opens local PDFs, edits interoperable annotations, mutates pages
-(add/delete/rotate/merge), and saves back to disk. It ships as an installable
-PWA on GitHub Pages. There is **no backend and no network I/O of user data** —
-that is a feature, not an accident (see Invariants).
+### Guiding question
 
-## Commands
+When working on this project, always ask:
 
-```bash
-npm ci                 # install (CI uses --ignore-scripts)
-npm run dev            # vite dev server on 127.0.0.1:5173 (or: docker compose up)
-npm test               # test:unit + test:dom
-npm run test:unit      # pure-logic node --test over tests/*.test.ts (no DOM)
-npm run test:dom       # component/hook tests over tests/*.dom.test.tsx (jsdom)
-npm run lint           # eslint
-npx tsc -b             # typecheck (also runs first in `npm run build`)
-npm run build          # tsc -b && vite build && generate service worker
-npm run security:audit # npm audit && npm audit signatures (CI gate)
-```
+> What is the simplest, smallest, clearest and most maintainable project that satisfies the stated intent, has no known security or data-integrity issues, and has sufficient evidence to establish that?
 
-Always run `npx tsc -b` and `npm test` before considering a change done. The
-build is what CI deploys, and it typechecks the whole project.
+### Non-negotiable rules
 
-## Architecture — three layers, capabilities flow upward
+1. A known security issue blocks release.
 
-- **`src/workspace/`** — the reusable single-PDF component (`PdfWorkspace`).
-  Owns PDF rendering, annotation editing, and all PDF mutation. This is the
-  core; most logic lives here.
-- **`src/tabbedapp/`** — `TabbedPdfShell`, a Chrome-style multi-tab wrapper
-  around `PdfWorkspace`. Owns tab lifecycle and passes host capabilities down.
-- **`src/browserapp/`** — the GitHub Pages / PWA host. Owns browser file access
-  (File System Access API), the service worker, install prompt, frame guard.
+2. A known data-integrity issue blocks release.
 
-A feature button appears only when the host supplies the matching capability
-(`printTarget`, `pickImageFile`, `saveAsTarget`, …). Don't hard-wire host
-behaviour into `PdfWorkspace`; thread it through props/`fileAdapter`.
+3. Rules 1 and 2 may only be bypassed following explicit discussion and consent.
 
-## Invariants — DO NOT REGRESS
+4. The project must solve only the intent stated in the README. This intent must not be edited without discussion and approval.
 
-These are the reason the app is trustworthy. A change that weakens any of them
-is wrong even if it "works".
+5. Features or scope that appear to extend that intent must be raised for discussion before implementation or removal.
 
-### Data safety
-1. **No network transmission of user content, ever.** No `fetch`/XHR/WebSocket/
-   `sendBeacon` carrying PDF bytes, filenames, annotations, or passwords. The
-   only allowed `fetch` is same-origin PDF.js WASM/asset warming
-   (`src/pdfRuntime.ts`). CSP `connect-src 'self'` enforces this — keep it.
-2. **No persistence of user content.** No `localStorage`/`sessionStorage`/
-   `indexedDB`/cache of PDF bytes or annotations. File handles stay in memory
-   for the session only.
-3. **`SensitivePdfWorkspaceSession` must never be serialized.** It holds full
-   bytes + history. It is tagged with a throwing `toJSON`
-   (`markNonSerializable`, `src/workspace/sensitiveSession.ts`). Never log it,
-   persist it, or send it. If you add a field that holds bytes, keep it inside
-   this guarded object.
-4. **The save path is safety-critical** (`src/browserapp/localFileAccess.ts`,
-   `savePdfToLocalFile`): re-check readwrite permission → compare SHA-256
-   fingerprint against the on-disk file to detect external edits → `exclusive`
-   write → **byte-for-byte re-read verification** after close. Do not remove the
-   fingerprint check or the post-write verification.
-5. **Service worker precache is an allowlist**
-   (`scripts/generate-service-worker.mjs`). It must keep refusing `.pdf`,
-   `.env`, `.map`, and fixtures. If you add a build asset type, extend
-   `isAllowedPrecacheFile` deliberately — never widen it to a catch-all.
-6. **Anything we write must stop claiming PDF/A.** Editing never preserves
-   conformance (no embedded-font/colour-space/transparency validation), so
-   `saveEditedPdf` (`src/workspace/pdfPageOperations.ts`) strips the claim on
-   every output — and every write path goes through it, including
-   `writePdfAnnotations`. The claim is not only in the catalog: XMP is legal on
-   *any* object and PDF 2.0 allows page-level `OutputIntents`, so the strip
-   walks the whole context. The invariant to hold is
-   `pdfLooksPdfA(ourOutput) === false` — otherwise our own saved copy reopens
-   as read-only "PDF/A compliant". `tests/pdfa-conformance.test.ts` guards it;
-   keep the marker list in sync with `pdfProtection.ts`. The strip is
-   **targeted, not a blanket "delete all XMP"** — including in the catalog.
-   Deleting the catalog's `/Metadata` unconditionally also destroyed
-   `dc:title`/`dc:creator`/rights/dates on every save of an ordinary document
-   that never claimed PDF/A. Only a conformance claim is invalidated by
-   re-serialising; the rest of the XMP is user data and is preserved.
-7. **Anything we write must stop looking signed.** Same function, same
-   reasoning: a resave breaks a signature's crypto, but its appearance stream
-   is ordinary page content to a renderer that doesn't verify (this app
-   included), so an edited copy would still *display* a "signed" stamp backed
-   by nothing. `stripSignatureFields` therefore walks the AcroForm field
-   **tree** (`/Fields` is nested — signature fields sit under parent fields,
-   widgets under signature fields) and clears the catalog's `/Perms`
-   `/DocMDP`/`/UR3`, which AcroForm pruning never reaches. Don't reduce it to a
-   flat top-level scan. `tests/signature-strip.test.ts` guards it. Assert
-   structurally there, not via `pdfLooksSignedOrCertified`: that scans raw
-   bytes, and pdf-lib compresses these dicts into object streams on output, so
-   a leftover is invisible to a byte scan while still rendering.
+6. When correctness, security, data integrity, or scope cannot be established with reasonable confidence, stop and raise the uncertainty for discussion rather than guessing.
 
-### Security
-8. **PDF.js stays hardened** (`src/workspace/pdfRender.ts`,
-   `PDFJS_DOCUMENT_OPTIONS`): `isEvalSupported: false`, `enableXfa: false`,
-   `isImageDecoderSupported: false`. Do **not** wire a `PDFScriptingManager` —
-   that would let embedded PDF JavaScript run.
-9. **Only links become HTML; everything else is painted**
-   (`src/workspace/annotationDisplayPolicy.ts`). The pdf.js annotation layer
-   builds real DOM nodes, so `shouldRenderExistingAnnotationInPdfJsLayer`
-   admits `LINK` and nothing else — a widget there would be a focusable,
-   scriptable form control built from an untrusted document, which is also why
-   that layer keeps `renderForms: false` and `enableScripting: false`. Form
-   fields and signature stamps *are* shown, via the appearance overlay, which
-   paints the document's own appearance streams onto a canvas and masks them
-   to each annotation's rect — inert pixels. Don't "simplify" the two
-   predicates into one: displaying an annotation and making it interactive are
-   different decisions. `tests/annotation-display-policy.test.ts` guards it.
-10. **External links go through sanitization** (`src/workspace/pdfLinks.ts`):
-   protocol allowlist (`http`/`https`/`mailto`), strip credentials,
-   `rel="noopener noreferrer nofollow"`, `referrerPolicy="no-referrer"`, and a
-   user-confirmed open. Never let a raw PDF URL reach `window.open` directly.
-11. **CSP is strict** (`vite.config.ts`): `default-src 'self'`, `object-src
-   'none'`, no `unsafe-eval` for scripts (only `wasm-unsafe-eval`). Keep it that
-   way. See the GitHub Pages caveat below.
-12. **No `innerHTML`/`eval`/`new Function`/`document.write`.** The codebase has
-   none; keep it that way. Build DOM with the framework or `createElement`.
+7. Prefer the simplest solution that satisfies the requirement. Do not add abstraction, indirection, configuration, files, dependencies, or code unless they are necessary to satisfy a requirement or prevent a material problem.
 
-## Comment style
+8. Avoid verbosity everywhere. The burden of proof is on additions, not omissions. Keep code, comments and documentation concise. A comment must only record what the code cannot state, such as the origin of a magic number, and must be no more than one sentence. Record other information only when it prevents a known future mistake.
 
-Comment the **why**, not the **what**. Keep comments that encode rationale,
-invariants, or a non-obvious constraint — why PDF scripting is off, why
-`bytes.slice()` copies, why refs are read instead of listed as deps, why
-`preventDefault` runs before a bail. These stop a future editor (you) from
-"simplifying" the code back into a bug. Delete comments that merely restate
-what the line does. Prefer one dense sentence over a paragraph. When a change
-looks redundant or wrong without explanation, that's exactly when a short
-"why" comment earns its place. Don't strip the existing rationale comments
-wholesale — much of the security/data-safety intent lives in them.
+9. Tests should establish intended behaviour and guard against meaningful regressions. Do not test implementation details, coverage for its own sake, or policies instead of behaviour.
 
-## Gotchas / traps
+10. Testing should be proportional to risk. When creating or changing a test, deliberately break the behaviour it protects and verify that the test fails for the right reason.
 
-- **GitHub Pages can't set HTTP headers.** `vite.config.ts` sets COOP, CORP,
-  `X-Frame-Options`, `Permissions-Policy`, and the header-form CSP — but only on
-  the dev/preview servers. Production gets only the **`<meta>` CSP**, which
-  cannot express `frame-ancestors`/`X-Frame-Options`. Clickjacking protection in
-  prod therefore rests on the JS check in `src/browserapp/frameGuard.ts`. If you
-  touch framing/isolation, remember prod ≠ dev here.
-- **`useLatestRef` / refs-over-deps is intentional.** Many effects read
-  `somethingRef.current` instead of listing deps, to avoid re-subscribing. This
-  is why `npm run lint` reports ~30 `react-hooks/exhaustive-deps` warnings (0
-  errors). Before "fixing" one, confirm the ref pattern wasn't deliberate — a
-  naive dep-array change can cause re-subscribe loops or stale closures.
-- **`PdfWorkspace.tsx` (~4.6k lines) and `PdfPageView.tsx` (~4.8k lines) are
-  huge.** State is shared across many closures via refs. A small edit can have a
-  wide blast radius. Read the whole neighbourhood before changing shared state,
-  and prefer adding to the existing helper for a concern over inlining. The
-  self-contained concerns have already been extracted into tested hooks:
-  `useWorkspaceNotices`, `useWorkspaceZoom` (+ `scrollGeometry`),
-  `useExternalLinks`, `usePageCache`, plus the pure `annotationDisplayPolicy`.
-  The remaining bulk is **intentionally left inline** — each was assessed
-  against the real code and rejected:
-  - *Image handling* — `addPreparedImageAnnotationFromData` is the shared
-    "commit annotation + select it" flow (also used by text/clipboard paste);
-    a hook would need ~10 threaded dependencies and would split
-    `handleClipboardPaste`.
-  - *Undo/redo history* — `undoHistory`/`redoHistory` call
-    `restoreDocumentHistory`, which reloads bytes and so drags in the whole
-    load pipeline. Only the stack primitives are clean, and they are already
-    out in `historyStack.ts`.
-  - *Save* — depends on ~15 things (save/saveAs/download targets, clean
-    signature refs, `currentPdfOutputBytes`, `pdfBytesRef`, busy ops,
-    notices). Extracting it means a wide, leaky interface *and* puts the
-    data-safety-critical write path at risk for little upside.
+11. Once the requirements are satisfied and sufficient evidence has been produced, stop. Do not refactor, generalise, optimise or add features without a reason.
 
-  Only extract a concern with a genuinely narrow seam; add a `useXxx()` hook or
-  pure module plus tests when you do. The goal is small blast radius, not small
-  files.
-- **Service worker navigation is cache-first.** The SW source lives in
-  `scripts/serviceWorkerSource.mjs` (pure, unit-tested via
-  `tests/service-worker-source.test.ts`); the generator writes it to
-  `out/renderer/sw.js` at build time. A navigation serves the cached shell
-  immediately (instant, works offline); picking up a new deploy is handled by
-  the browser's own SW update check plus the in-page "update available" prompt
-  (`registerBrowserServiceWorker` in `pwa.ts`), *not* by racing the network on
-  every navigation. The network path is only the fallback for "nothing cached
-  yet", and it still needs `NAVIGATION_NETWORK_TIMEOUT_MS` — a plain
-  `fetch().catch()` is NOT enough, because a weak connection *stalls* rather
-  than rejecting, hanging the installed PWA's launch. Keep the timeout.
-  Precached (hashed) assets are also cache-first.
-- **Load generations.** Async PDF loads guard against races with
-  `loadGenerationRef` / `mountedRef`. When adding async work in the load path,
-  check the generation is still current before committing state.
-- **`getDocument({ data: bytes.slice() })`** copies input bytes on purpose so
-  PDF.js can't detach the caller's buffer. Keep the copy.
+12. Potential improvements are new work. Raise them for discussion rather than implementing them.
 
-## Tests
+### Project requirements
 
-Two suites, run in separate processes so they don't share globals:
+1. The project may have public users; safety is paramount.
 
-- **`tests/*.test.ts`** — pure-logic Node tests (geometry, annotation
-  round-trips, history, fingerprint/privacy). Fast, no DOM. Some set up their
-  own lightweight DOM fakes; that's why jsdom must NOT be loaded into this
-  process.
-- **`tests/*.dom.test.tsx`** — component/hook tests that render React into
-  jsdom via `@testing-library/react`. Bootstrapped by `tests/dom-setup.ts`
-  (loaded with `--import`, so jsdom globals exist before React DOM loads) and
-  transpiled with the tests-local `tests/tsconfig.json` (automatic JSX runtime,
-  pointed at via `TSX_TSCONFIG_PATH`). Use `renderHook` for extracted hooks.
+2. The README must clearly state that the project was written by AI.
 
-`tests/fixture-privacy.test.ts` guards that fixtures don't leak — keep it green.
-It decodes long hex strings before scanning, because a signed PDF hides its
-signer's certificate (and therefore an identity) inside the `/Contents` blob
-where a plain ASCII scan can't see it. `tests/fixtures/test-signed.pdf` is
-**generated**, not sourced — rebuild it with `node
-scripts/generate-signed-fixture.mjs`; see `tests/fixtures/README.md`.
+3. Follow all dependency licence requirements exactly, including required third-party notices.
 
-When you extract a hook/component, add a matching `*.dom.test.tsx`.
+4. The project itself must remain unlicensed. Do not use dependencies whose licence would require this project, or derivative works of it, to be licensed or distributed under particular terms.
 
-A third, separate suite is the **Playwright smoke net** (`tests-e2e/*.spec.ts`,
-`npm run test:e2e`). It boots the real browser app against a dev server and
-covers the coarse load → render → serialize round trip (open a PDF, render it,
-download a copy, reparse/reopen it). It is deliberately general — not a
-per-bug regression net — and is the safety net that makes the invariant-heavy
-`PdfWorkspace` extractions (history, save) safe to attempt. It is NOT part of
-`npm test` (it needs a browser), but it *is* wired into CI — the deploy
-workflow runs `npx playwright install --with-deps chromium` and then
-`npm run test:e2e` before it builds, so a red smoke test blocks the deploy.
-Locally it uses the environment's pre-installed Chromium via `executablePath`;
-override with `PLAYWRIGHT_CHROMIUM_PATH` elsewhere.
+5. Maintain a simple Docker Compose entry point that builds and/or previews the project without a local toolchain.
 
-## When adding a feature button
+#### Consistency with other projects
 
-1. Add the capability to the host (`fileAdapter` / `PdfWorkspace` prop).
-2. Render the control only when the capability is present.
-3. If it touches bytes, route through the existing save/verify or
-   sensitive-session paths — don't open a new I/O path.
+Where applicable:
+
+6. Prefer appropriate open-source libraries over manually created artwork. Save generated assets rather than generation code when practical.
+
+7. Prefer using `theme.css` over project-specific styles for the UI. Do not edit `theme.css` without discussion and approval.
+
+8. Maintain a light and dark colour scheme and keep these in sync across the project where applicable. For example in meta tags, manifest files, favicons, and other icon files.
+
+9. Use `stamp_version.mjs` to write the release version into the footer, falling back to the string `"preview"`. Do not edit `stamp_version.mjs` without discussion and approval.
+
+10. The footer (or similar UI object) should contain `Made by Jack (and the machines)`, linking to the project's root GitHub Pages URL (https://jack-hallybone.github.io/).
+
+### Definition of Done
+
+Work is done when:
+
+- [ ] All applicable rules and requirements are satisfied.
+
+- [ ] `npm run verify` passes when any functional changes have been made.
+
+- [ ] No secrets are present. No personal information is present except what is required in the footer, and third-party information in third-party files.
+
+- [ ] No unresolved uncertainty could reasonably affect correctness, security, data integrity or scope.
+
+When these conditions are met, stop. Further improvement is a new task.
+
+## Learnings
+
+Things that cost real work to find and that the code cannot state for itself.
+Each one is a trap someone already fell into.
+
+### Rendering
+
+- PDF.js must be imported from `pdfjs-dist/legacy/…`, never the default build,
+  which calls proposal-stage methods Chromium 141 does not have: every page
+  threw before painting and the document came up blank. Covers the worker too.
+- PDF.js composes its own asset URLs by appending filenames to a base, so those
+  199 cmaps, fonts, ICC profiles and wasm blobs cannot carry a content hash.
+  The identity is in the DIRECTORY name instead.
+- `renderPriority` is a scheduling hint and must never be an effect dependency.
+  It was, and crossing a page boundary while scrolling re-ran cleanups that
+  blanked every visible canvas for two frames.
+- pdf.js hands every caller of `getPage(n)` the SAME `PDFPageProxy`, so
+  `cleanup()` blanks every view at once. A view's claim over a page is a RANGE,
+  never an active page index.
+- `visiblePageRangeRef` is the one measurement behind page residency, the lazy
+  load band and the render ranking. Deriving any of them from
+  `activePageIndex ± buffer` leaves visible pages blank when zoomed out.
+- `getDocument({ data: bytes.slice() })` copies on purpose, so PDF.js cannot
+  detach the caller's buffer. Keep the copy.
+
+### React
+
+- Never use React's `useEffectEvent` here; use `useEventCallback`. React 19.2
+  applies the closure swap in a pass that switches on the fiber tag, and
+  `ForwardRef` and `SimpleMemoComponent` fall through — so inside a `forwardRef`
+  or `memo` component, or any hook called from one, the callback is frozen at
+  its mount closure for ever, with no warning.
+- `useLatestRef` writes in an effect; `useRenderLatestRef` writes during render.
+  Substituting one for the other is a silent one-commit-stale bug.
+
+### Colour
+
+- Never take a canvas colour from a custom property. Canvas takes CSS colour
+  strings and silently ignores what it cannot parse, so a `light-dark()` literal
+  read off a token paints black. Read a resolved colour off a probe element.
+- Never paint `--theme-ink` onto an annotation colour — it shipped as a 1.0:1
+  glyph on a black note. Route every mark on a reader-chosen colour through
+  `foregroundOn()`, and `flattenOver()` first if the fill is translucent.
+
+### Layout
+
+- A flex item's own padding sets a floor under `flex-basis: 0`, even with
+  `min-width: 0`: two children with unequal padding split unevenly by tens of
+  pixels despite equal `flex-grow`. Give the ratio to an unpadded wrapper and
+  let the padded content fill it at 100%.
+
+### Input
+
+- A drag data store answers only while the drop event is being dispatched. One
+  `await` later, `dataTransfer.items` and `.files` are both empty — a drop of
+  three PDFs opened the first and silently lost the rest. Read the lot
+  synchronously before anything awaits.
+- A PWA file launch arrives in two shapes: one launch carrying N files, or, on
+  Windows, N launches of one file each. Both must work. A launch arriving before
+  the shell mounts its handler is parked and flushed later — a cold start is
+  exactly when it arrives.
+
+### PDF correctness
+
+- Annotation identity: an indirect ref including its generation is
+  authoritative; a direct dictionary uses its position, confirmed against the
+  file; anything ambiguous aborts the save rather than writing to a guess.
+  pdf.js's display array is not `/Annots` — it drops what it cannot display and
+  moves widgets and popups to the end.
+- A page edit moves the page half of an identity AND the index half; taking a
+  signature widget out shifts every entry behind it.
+- A copy renames, a relink does not. Undoing a page deletion re-creates that
+  page's annotation objects under new numbers, and object numbers are RECYCLED,
+  so a stale identity can silently resolve to a different annotation.
+- A removal the file does not answer to must STOP the save. A key matching two
+  annotations was refused while one matching none fell straight through, and a
+  deletion was silently left in a document the reader then handed on.
+- Every output must stop claiming PDF/A and stop looking signed. A resave breaks
+  the crypto while the appearance stream still renders as a signed stamp backed
+  by nothing, and it carries the signer's name and scanned signature with it.
+  `/SigFlags` is cleared from any AcroForm the strip touches, whatever it found.
+- `/Contents` is the reader's own comment, never the page's text. The text a
+  highlight covers is derived and never written.
+- Deleting a page: pdf-lib's `removePage` leaves everything behind. Placement of
+  a structure element is `/StructParents` → `/ParentTree` → `/MCID`, not `/Pg`,
+  which is optional. Reaching an object is not owning it — treating it as
+  ownership destroyed author-written text on pages the reader KEPT.
+
+### Bounds
+
+- The history stacks are the one place deleted data is kept, so they are bounded
+  in BYTES as well as in versions — a count of versions cannot see what a
+  version weighs, and thirty pasted images deleted together are one entry.
+  Eviction must actually free, and nothing is ever persisted.
+- The per-document annotation text bound is checked DURING the page walk and
+  stops the moment it is passed. A check afterwards only describes memory
+  already spent, and file size is no guide: 6,000,000 characters of notes is a
+  23 KiB file, because that text is in a compressed object stream.
+
+### Untrusted text
+
+- A document's own name is untrusted. A file called `report<RLO>fdp.exe<ALM>.pdf`
+  painted as `reportexe.pdf` in the tab strip while naming an executable. The
+  name enters the model in one place so every surface downstream is covered.
+- Annotation text takes the character rules but NOT a length bound: that text is
+  the annotation, and cutting it at a number silently deletes a reader's writing.
+  Bound it only where a bound costs pixels.
+
+### Build and host
+
+- `.npmrc`'s `ignore-scripts=true` also stops npm running THIS repository's own
+  `pre`/`post` scripts, so the build, dev and preview chains are spelled out
+  with `&&`. Never add a `prebuild`; it will be skipped in silence.
+- GitHub Pages selects a file by path and IGNORES the query, so a cache key
+  carrying a build stamp is answered with whatever that path currently holds.
+  Identity has to be in the filename, or in a directory name.
+- The service worker does not `skipWaiting` or `clientsClaim`: a new build
+  installs and waits, so a running page keeps the asset set it booted with.
+- Docker runs as root, which is acceptable only because no host path is
+  writable: the checkout is mounted read-only and everything else is a named
+  volume. A writable bind mount makes root in the container root on the disk.
+- Pages cannot set headers, so COOP, CORP, `X-Frame-Options` and the header CSP
+  are dev and preview only; production's `<meta>` CSP cannot express
+  `frame-ancestors`, and the cover there is the JS frame guard.
+
+### Design system
+
+- Snap to the nearest existing `theme.css` token instead of defining a similar
+  one-off value, accepting the small visual change that follows, unless doing
+  so would break the visual intent — then raise it rather than inventing a
+  local value.
+
+### Layering
+
+The intent does not require it, but the work is large enough to be split into
+three reusable layers, each usable without the ones above it: `src/pdfdocumenteditor`
+renders one document, `src/tabbedapp` holds several in tabs and panels, and
+`src/browserapp` supplies file access and the home screen. Each of the first
+two declares its own host contract, named for what it needs rather than for
+whichever layer happens to fulfil it: `PdfDocumentEditorHostCapabilities` for
+one document, extended by `TabbedAppHostAdapter` for the tabbed shell around
+several. A document's own write targets travel on its source, because they
+belong to the file.

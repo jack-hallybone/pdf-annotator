@@ -5,71 +5,97 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+permissions: {}
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+  build:
+    name: Build and verify
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
+
+    permissions:
+      contents: read
+      pages: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
-        run: npm ci --ignore-scripts
+        run: npm ci --ignore-scripts --engine-strict
 
+      # Not part of `verify`: it queries the advisory database over the
+      # network, so its answer changes while the repository does not, and
+      # `verify` must not go red because somebody published an advisory since
+      # the last commit.
       - name: Audit dependencies
         run: npm run security:audit
 
-      - name: Test
-        run: npm test
-
+      # Setup, not a check. Locally the browser is installed once; here it is
+      # installed per run.
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        run: npm run test:browser:setup
 
-      - name: End-to-end smoke tests
-        run: npm run test:e2e
+      # Before verify: og:image needs the absolute site URL, and Open Graph
+      # consumers don't resolve relative ones.
+      - name: Set up GitHub Pages
+        id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
-      - name: Set build metadata
-        id: build-metadata
-        run: |
-          echo "sha=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "time=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
-      - name: Build
-        run: npm run build
+      - name: Verify
+        run: npm run verify
         env:
-          BASE_PATH: ${{ github.event.repository.name == format('{0}.github.io', github.repository_owner) && '/' || format('/{0}/', github.event.repository.name) }}
-          VITE_BUILD_SHA: ${{ steps.build-metadata.outputs.sha }}
-          VITE_BUILD_TIME: ${{ steps.build-metadata.outputs.time }}
+          VITE_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}
 
-      - name: Setup Pages
-        uses: actions/configure-pages@v6
+      # Only a release is stamped; everything else keeps the "preview" literal
+      # index.html ships with.
+      - name: Stamp the release version
+        run: node scripts/stamp_version.mjs dist/index.html
 
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: ./out/renderer
+          path: ./dist
 
-      - name: Deploy
+  deploy:
+    name: Deploy
+    needs: build
+
+    # Never cancelled: a deploy already publishing must finish, or the site is
+    # left half-written.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    # workflow_dispatch can run from any branch; never let that publish.
+    if: github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    # The only job holding the Pages credential. It checks out nothing and runs
+    # no repository code.
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

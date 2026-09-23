@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  # Pins are immutable by design, so something has to move them; that is this.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: build
+    groups:
+      npm:
+        patterns:
+          - "*"
+
+  # `docker-compose`, not `docker`: the digest that is pinned sits in compose.yaml's
+  # `image:`, which is what this ecosystem parses. `docker` reads only files matching
+  # /dockerfile|containerfile/i and this repository has none — every Dockerfile in this
+  # fleet was deleted once the checkout became a read-only mount over named volumes, so
+  # a `docker` entry here would watch nothing and say nothing about it. Nothing in the
+  # repository re-checks these pins, so this is the only thing that moves them.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: build
+    groups:
+      docker-compose:
+        patterns:
+          - "*"

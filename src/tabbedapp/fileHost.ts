@@ -1,49 +1,41 @@
 import type {
   PdfDownloadTarget,
-  PdfImageFilePicker,
-  PdfMergeFilePicker,
-  PdfPrintTarget,
+  PdfDocumentEditorHostCapabilities,
   PdfSaveAsTarget,
-  PdfWorkspaceSourceInput
-} from '../workspace';
+  PdfDocumentEditorSourceInput,
+} from "./index";
 
-export type PdfHostDocument = {
-  // Must identify "this is the same underlying file" - used to detect that a
-  // file being opened is already open in another tab and refocus it instead
-  // of duplicating the tab. An adapter that never sets this (or sets it
-  // inconsistently across pdfDocumentsFromDrop/pdfDocumentsFromFileInput/
-  // pickPdfDocuments, or fails to recompute it after a save via
-  // PdfSaveTarget/PdfSaveAsResult) will silently disable dedup instead of
-  // erroring - see browserFileKey() in browserapp/browserFileAdapter.ts for
-  // a reference implementation (name+size+lastModified, synchronous since
-  // pdfDocumentsFromFileInput can't be async).
+export type TabbedAppHostDocument = {
+  // Must identify "this is the same underlying file", so an already-open
+  // document is refocused rather than duplicated.
   fileKey?: string;
-  readOnly?: boolean;
-  readOnlyMessage?: string;
-  source: PdfWorkspaceSourceInput;
+  source: PdfDocumentEditorSourceInput;
   title?: string;
 };
 
-export type PdfHostPickResult = {
-  documents: PdfHostDocument[];
+export type TabbedAppHostPickResult = {
+  documents: TabbedAppHostDocument[];
   useFileInputFallback?: boolean;
 };
 
-export type PdfHostFileInput = {
+export type TabbedAppHostFileInput = {
   accept: string;
   multiple?: boolean;
 };
 
-export type PdfHostAdapter = {
-  fileInput?: PdfHostFileInput;
+// `downloadTarget` and `saveAsTarget` here are defaults, for a document that
+// arrives with none of its own.
+export type TabbedAppHostAdapter = PdfDocumentEditorHostCapabilities & {
+  fileInput?: TabbedAppHostFileInput;
+  /**
+   * Must read everything it needs off `dataTransfer` before it awaits
+   * anything: one `await` later its items and its files are both empty.
+   */
   pdfDocumentsFromDrop?: (
-    dataTransfer: DataTransfer
-  ) => Promise<PdfHostDocument[]>;
-  pdfDocumentsFromFileInput?: (files: File[]) => PdfHostDocument[];
-  pickPdfDocuments: () => Promise<PdfHostPickResult>;
-  pickImageFile?: PdfImageFilePicker;
-  pickMergePdfFile?: PdfMergeFilePicker;
+    dataTransfer: DataTransfer,
+  ) => Promise<TabbedAppHostDocument[]>;
+  pdfDocumentsFromFileInput?: (files: File[]) => TabbedAppHostDocument[];
+  pickPdfDocuments: () => Promise<TabbedAppHostPickResult>;
   downloadTarget?: PdfDownloadTarget | null;
-  printTarget?: PdfPrintTarget | null;
   saveAsTarget?: PdfSaveAsTarget | null;
 };

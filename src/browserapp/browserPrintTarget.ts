@@ -1,6 +1,6 @@
-import type { PdfPrintTarget } from '../workspace';
-import { uint8ArrayToArrayBuffer } from '../bytes';
-import { safePdfFileName } from '../fileNames';
+import type { PdfPrintTarget } from "../tabbedapp";
+import { uint8ArrayToArrayBuffer } from "../bytes";
+import { downloadPdfBytes } from "./localFileAccess";
 
 const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
@@ -9,29 +9,25 @@ export function browserPrintTarget(): PdfPrintTarget {
   return printPdfInFrame;
 }
 
-// Each call owns its own blob URL/iframe rather than sharing module-level
-// state: this app is a multi-tab/multi-document shell, so two Print
-// invocations can legitimately be in flight at once (printing from two tabs
-// back to back, or clicking Print again before the first print dialog has
-// closed). Shared state here previously meant the second call's setup would
-// revoke the first call's still-in-use blob URL and rip its iframe out of
-// the DOM, breaking/blanking whichever print job was still open.
+// Each call owns its own blob URL and iframe, never module-level state: two
+// print jobs can be in flight at once, and shared state means the second
+// revokes the first's URL and removes its iframe mid-print.
 function printPdfInFrame(bytes: Uint8Array, outputName: string) {
   const url = URL.createObjectURL(
-    new Blob([uint8ArrayToArrayBuffer(bytes)], { type: 'application/pdf' })
+    new Blob([uint8ArrayToArrayBuffer(bytes)], { type: "application/pdf" }),
   );
-  const frame = document.createElement('iframe');
-  frame.title = 'Printable PDF';
-  frame.setAttribute('aria-hidden', 'true');
+  const frame = document.createElement("iframe");
+  frame.title = "Printable PDF";
+  frame.setAttribute("aria-hidden", "true");
   Object.assign(frame.style, {
-    border: '0',
-    bottom: '0',
-    height: '1px',
-    opacity: '0',
-    pointerEvents: 'none',
-    position: 'fixed',
-    right: '0',
-    width: '1px'
+    border: "0",
+    bottom: "0",
+    height: "1px",
+    opacity: "0",
+    pointerEvents: "none",
+    position: "fixed",
+    right: "0",
+    width: "1px",
   });
 
   let blobUrl: string | null = url;
@@ -64,7 +60,7 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
     let settled = false;
     const fallbackTimer = window.setTimeout(
       fallbackToDownload,
-      PRINT_FRAME_FALLBACK_MS
+      PRINT_FRAME_FALLBACK_MS,
     );
 
     function finish() {
@@ -82,12 +78,8 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
         return;
       }
 
-      // A download, not "open the PDF in a tab to print there": that tab
-      // would need opening without `noopener` to be usable, handing a window
-      // reference to untrusted PDF bytes. (It was also dead code -
-      // `window.open` returns null whenever `noopener` is set.)
-      // Full cleanup because nothing will print from this blob URL now and
-      // the download builds its own.
+      // A download, never a new tab: a printable tab has to be opened without
+      // `noopener`, handing a window reference to untrusted PDF bytes.
       cleanupPrintResources();
       downloadPdfBytes(bytes, outputName);
       finish();
@@ -102,11 +94,11 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
       try {
         const frameWindow = frame.contentWindow;
         if (!frameWindow) {
-          throw new Error('Print frame is not available.');
+          throw new Error("Print frame is not available.");
         }
 
-        frameWindow.addEventListener('afterprint', cleanupPrintResources, {
-          once: true
+        frameWindow.addEventListener("afterprint", cleanupPrintResources, {
+          once: true,
         });
         frameWindow.focus();
         frameWindow.print();
@@ -117,28 +109,13 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
     };
 
     frame.addEventListener(
-      'load',
+      "load",
       () => window.setTimeout(requestFramePrint, 250),
-      { once: true }
+      { once: true },
     );
-    frame.addEventListener('error', fallbackToDownload, { once: true });
+    frame.addEventListener("error", fallbackToDownload, { once: true });
 
     frame.src = url;
     document.body.append(frame);
   });
-}
-
-function downloadPdfBytes(bytes: Uint8Array, outputName: string) {
-  const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
-    type: 'application/pdf'
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = safePdfFileName(outputName);
-  link.style.display = 'none';
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }

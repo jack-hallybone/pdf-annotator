@@ -1,10 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <style>
-    path[stroke="#171C1C"] { stroke: #171C1C; }
-    path[fill="#FFFE4E"] { fill: #FFFE4E; }
+    path[stroke="#1C1917"] { stroke: #1c1917; }
+    path[fill="#FFFE4E"] { fill: #fffe4e; }
     @media (prefers-color-scheme: dark) {
-      path[stroke="#171C1C"] { stroke: #F3F3F3; }
-      path[fill="#FFFE4E"] { fill: #F0822B; }
+      path[stroke="#1C1917"] { stroke: #ebe6e0; }
+      /* Orange, not a tinted yellow: it clears the same 3:1 floor against
+         this lighter stroke and reads better than an olive-muted yellow. */
+      path[fill="#FFFE4E"] { fill: #c06823; }
     }
   </style>
   <!--
@@ -17,7 +19,7 @@
   <path
     d="m9 11-6 6v3h9l3-3"
     fill="#FFFE4E"
-    stroke="#171C1C"
+    stroke="#1C1917"
     stroke-linecap="round"
     stroke-linejoin="round"
     stroke-width="2"
@@ -25,7 +27,7 @@
   <path
     d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"
     fill="none"
-    stroke="#171C1C"
+    stroke="#1C1917"
     stroke-linecap="round"
     stroke-linejoin="round"
     stroke-width="2"

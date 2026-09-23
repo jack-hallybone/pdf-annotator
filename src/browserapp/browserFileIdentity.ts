@@ -1,4 +1,4 @@
-import type { LocalPdfFileHandle } from './localFileAccess';
+import type { LocalPdfFileHandle } from "./localFileAccess";
 
 const MAX_TRACKED_FILE_HANDLES = 256;
 const fileHandleKeys = new WeakMap<LocalPdfFileHandle, string>();
@@ -8,11 +8,8 @@ const trackedFileHandles: Array<{
 }> = [];
 let nextFileHandleKey = 0;
 
-// De-duplication must use the underlying file entry, not filename/size/mtime:
-// two files in different folders can share all three metadata fields. Plain
-// File objects do not expose entry identity, so callers intentionally leave
-// those unkeyed (opening a duplicate tab is safer than silently focusing the
-// wrong document). File System Access handles can compare their actual entries.
+// De-duplication must use the underlying file entry, never name, size or
+// mtime: two files in different folders can share all three.
 export async function browserFileHandleKey(handle: LocalPdfFileHandle) {
   const existingKey = fileHandleKeys.get(handle);
   if (existingKey) {
@@ -27,8 +24,8 @@ export async function browserFileHandleKey(handle: LocalPdfFileHandle) {
           return tracked.key;
         }
       } catch {
-        // A failed identity comparison only disables de-duplication for this
-        // handle; it must never prevent the file itself from opening.
+        // A failed comparison only disables de-duplication; it must never
+        // prevent the file from opening.
       }
     }
   }
@@ -40,7 +37,7 @@ export async function browserFileHandleKey(handle: LocalPdfFileHandle) {
   if (trackedFileHandles.length > MAX_TRACKED_FILE_HANDLES) {
     trackedFileHandles.splice(
       0,
-      trackedFileHandles.length - MAX_TRACKED_FILE_HANDLES
+      trackedFileHandles.length - MAX_TRACKED_FILE_HANDLES,
     );
   }
   return key;

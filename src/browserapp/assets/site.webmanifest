@@ -1,16 +1,15 @@
 {
-  "id": "./",
-  "name": "PDF Annotator",
-  "short_name": "PDF Annotator",
-  "description": "A lightweight client-side PDF viewer and annotation tool",
+  "name": "%PRODUCT_NAME%",
+  "short_name": "%PRODUCT_SHORT_NAME%",
+  "description": "Client-side PDF viewer and annotator. No sign-up, no uploads, works offline.",
   "lang": "en-GB",
   "dir": "ltr",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#F3F3F3",
-  "theme_color": "#FFFFFF",
+  "background_color": "#f5f3f0",
+  "theme_color": "#ffffff",
   "categories": ["productivity", "utilities"],
   "icons": [
     {

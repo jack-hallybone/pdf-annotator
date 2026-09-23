@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Split-view harness</title>
+    <!--
+      A TEST HOST, not a feature. The product renders one view; this page is
+      the second host the core claims to support, and it exists so
+      split-view.spec.ts can drive two viewports over one document in a real
+      browser. It is served by the dev server only - vite's build input is
+      index.html, so nothing here ships.
+    -->
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      .split-harness {
+        display: flex;
+        height: 100vh;
+      }
+      .split-harness-pane {
+        flex: 1 1 50%;
+        min-width: 0;
+        position: relative;
+      }
+      .split-harness-pane + .split-harness-pane {
+        border-left: 1px solid #888;
+      }
+      .split-harness-view {
+        height: 100%;
+      }
+      .split-harness-input {
+        left: -9999px;
+        position: absolute;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

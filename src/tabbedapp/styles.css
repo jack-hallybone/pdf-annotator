@@ -1,29 +1,679 @@
-@import "../theme.css";
-
-:root {
-  --tabbedapp-bg: var(--app-canvas);
-  --tabbedapp-ui: var(--app-surface);
-  --tabbedapp-ink: var(--app-foreground);
-  --tabbedapp-ink-rgb: var(--app-foreground-rgb);
-  --tabbedapp-accent: var(--app-accent);
-  --tabbedapp-accent-rgb: var(--app-accent-rgb);
-  --tabbedapp-border: rgb(var(--tabbedapp-ink-rgb) / 0.14);
-  --tabbedapp-tab-active: var(--tabbedapp-bg);
-  --tabbedapp-tab-hover: rgb(var(--tabbedapp-ink-rgb) / 0.06);
-  --tabbedapp-tab-separator: rgb(var(--tabbedapp-ink-rgb) / 0.14);
-  --tabbedapp-frame-shadow: 0 8px 22px rgb(var(--app-shadow-rgb) / 0.05);
-  --tabbedapp-menu-shadow: 0 12px 30px rgb(var(--app-shadow-rgb) / 0.18);
-  --tabbedapp-focus-ring: 0 0 0 2px rgb(var(--tabbedapp-accent-rgb) / 0.85);
-  --tabbedapp-menu-font-size: 0.8125rem;
-
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* This frame wraps the core rather than sitting inside it, so that a docked
+   notice can push the whole core down, floating chrome included. Its shape
+   is .document-shell (documentShell.css), shared with the core's own root. */
+.tabbedapp-document-viewport {
+  min-height: 0;
 }
+
+.sidebar-toggle,
+.floating-frame,
+.document-sidebar,
+.page-menu {
+  position: absolute;
+}
+
+.sidebar-toggle {
+  left: var(--theme-space-sm);
+  padding: var(--theme-space-xs);
+  top: var(--theme-space-sm);
+}
+
+.loading-overlay {
+  background: var(--theme-canvas);
+  display: grid;
+  inset: 0;
+  padding: 0 var(--theme-space-lg);
+  place-items: center;
+  position: absolute;
+}
+
+.loading-message,
+.password-unlock-form {
+  font-size: var(--theme-text-md);
+  font-weight: var(--theme-weight-medium);
+}
+
+/* Shared by the loading placeholder and the load failure, so the danger
+   colour belongs on the modifier rather than here. */
+.loading-message {
+  color: var(--theme-ink-muted);
+  gap: var(--theme-space-md);
+}
+
+.loading-message-error {
+  color: var(--theme-danger);
+}
+
+.password-unlock-form {
+  align-items: center;
+  color: var(--theme-ink);
+  gap: var(--theme-space-md);
+}
+
+.password-unlock-label {
+  display: block;
+  text-align: center;
+}
+
+.password-unlock-input {
+  min-width: 12rem;
+  padding: var(--theme-space-sm);
+}
+
+.password-unlock-button {
+  padding: var(--theme-space-sm) var(--theme-space-md);
+}
+
+.loading-retry-button {
+  padding: var(--theme-space-xs) var(--theme-space-sm);
+}
+
+.external-link-dialog {
+  width: min(30rem, calc(100vw - var(--theme-space-lg) * 2));
+}
+
+.external-link-url {
+  background: var(--theme-canvas);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-ink);
+  overflow-wrap: anywhere;
+  padding: var(--theme-space-sm);
+}
+
+.floating-frame {
+  color: var(--theme-ink);
+  padding: var(--theme-space-xs);
+  pointer-events: none;
+}
+
+.floating-frame button,
+.floating-frame input,
+.floating-frame select,
+.floating-frame textarea,
+.floating-popover {
+  pointer-events: auto;
+}
+
+.tool-dock {
+  right: calc(var(--app-control-right-edge) + var(--app-scrollbar-inline));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tool-dock-row {
+  position: relative;
+}
+
+.tool-button {
+  height: var(--theme-control-lg);
+  position: relative;
+  width: var(--theme-control-lg);
+}
+
+.tool-settings-button {
+  height: var(--theme-control-sm);
+  width: var(--theme-space-xl);
+}
+
+.floating-popover {
+  box-sizing: border-box;
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  padding: var(--theme-space-md);
+  position: absolute;
+}
+
+.tool-settings-popover,
+.image-tool-menu {
+  margin-right: var(--theme-space-sm);
+  max-width: calc(100vw - 5rem);
+  right: 100%;
+  top: 0;
+  width: max-content;
+}
+
+.tool-settings-popover {
+  min-width: 12.5rem;
+}
+
+.tool-indicator {
+  border-radius: var(--theme-radius-pill);
+  bottom: var(--theme-space-xs);
+  left: var(--theme-space-sm);
+  position: absolute;
+  right: var(--theme-space-sm);
+}
+
+.zoom-controls {
+  bottom: calc(var(--app-control-bottom-edge) + var(--app-scrollbar-block));
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  right: calc(var(--app-control-right-edge) + var(--app-scrollbar-inline));
+}
+
+.document-controls {
+  right: calc(var(--app-control-right-edge) + var(--app-scrollbar-inline));
+  top: var(--theme-space-md);
+}
+
+/* .toast.inline (theme.css) gives the in-flow, hug-content, collapse-when-
+   empty default; grid-row is ours, since only this shell knows its own grid. */
+.tabbedapp-notice-stack {
+  grid-row: 2;
+}
+
+/* The stack is rendered unconditionally, so an empty one would still hold
+   open a row once docked in flow below. */
+.tabbedapp-notice-stack:empty {
+  display: none;
+}
+
+/* Above 700px there's room to float the stack over the page instead of
+   docking it in flow, so this overrides .toast.inline's own placement back
+   to a floating, centred overlay - the same shape .toast itself has, but
+   scoped to the shell rather than fixed to the viewport, since grid-row's
+   containing block only resolves against an absolutely positioned ancestor. */
+@media (min-width: 701px) {
+  .tabbedapp-notice-stack.toast.inline {
+    /* .stack's flex column defaults to stretch; an explicitly-sized child
+       (each notice is width: max-content) ignores stretch and falls back to
+       flex-start, so centring needs restating here. Mobile leaves stretch
+       alone: each notice there is width: auto, so stretch is what fills it. */
+    align-items: center;
+    left: 50%;
+    max-width: min(58rem, calc(100% - 1.5rem));
+    position: absolute;
+    top: var(--theme-space-md);
+    transform: translateX(-50%);
+    width: min(58rem, calc(100% - 1.5rem));
+    z-index: var(--theme-z-notice);
+
+    /* A wide centred box over much narrower children: without this its empty
+       space swallows clicks on the page chrome underneath. */
+    pointer-events: none;
+  }
+
+  .tabbedapp-notice-stack.toast.inline > * {
+    pointer-events: auto;
+  }
+}
+
+/* Shape, tone and the action slot come from .panel/.banner; this is placement
+   only - a toast hugs its content rather than filling the width. */
+.tabbedapp-notice {
+  max-width: 100%;
+  width: max-content;
+}
+
+/* Not nowrap: a short notice still reads as one line because it fits, but a
+   long one (an error message, say, carrying a URL) wraps instead of
+   overflowing the toast. */
+.tabbedapp-notice-text {
+  overflow-wrap: anywhere;
+}
+
+.protected-pdf-edit-button {
+  flex: 0 0 auto;
+  min-height: var(--theme-control-sm);
+  padding: 0 var(--theme-space-md);
+}
+
+/* Below this width a floating notice has nowhere to float without covering
+   the toolbar, so .toast.inline's in-flow default is left standing and only
+   widened to fill the row (.toast.inline itself only hugs content). */
+@media (max-width: 700px) {
+  .tabbedapp-notice-stack.toast.inline {
+    box-sizing: border-box;
+    padding: var(--theme-space-sm) var(--theme-space-sm) 0;
+    width: 100%;
+  }
+
+  .tabbedapp-notice {
+    width: auto;
+  }
+}
+
+@media (max-width: 700px) {
+  .password-unlock-form,
+  .password-unlock-row,
+  .tabbedapp-notice {
+    flex-wrap: wrap;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .tabbedapp-notice-text {
+    white-space: normal;
+  }
+}
+
+.history-controls {
+  bottom: calc(var(--app-control-bottom-edge) + var(--app-scrollbar-block));
+}
+
+.zoom-button {
+  font-weight: var(--theme-weight-medium);
+  height: var(--theme-control-md);
+  min-width: 3.5rem;
+  padding: 0 var(--theme-space-sm);
+}
+
+.page-jump-control {
+  border-left: 1px solid var(--theme-border);
+  height: var(--theme-control-md);
+  margin-left: var(--theme-space-xs);
+  padding: 0 var(--theme-space-md) 0 var(--theme-space-sm);
+  white-space: nowrap;
+}
+
+.page-number-input {
+  font-weight: var(--theme-weight-medium);
+  height: var(--theme-control-xs);
+  padding: 0 var(--theme-space-xs);
+  text-align: center;
+  width: 2.25rem;
+}
+
+/* Below this width .history-controls (left-anchored) and .zoom-controls
+   (right-anchored) run into each other; page jumping stays reachable through
+   the sidebar and scrolling, so it drops rather than shrinks - narrowing
+   .zoom-controls this much is what clears the collision. */
+@media (max-width: 25rem) {
+  .page-jump-control {
+    display: none;
+  }
+}
+
+.zoom-popover {
+  bottom: 100%;
+  margin-bottom: var(--theme-space-sm);
+  right: 0;
+  width: 10rem;
+}
+
+.zoom-percent-field {
+  height: var(--theme-control-md);
+  margin-bottom: var(--theme-space-sm);
+  padding: 0 var(--theme-space-sm);
+}
+
+.zoom-percent-input {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: var(--theme-weight-medium);
+  min-width: 0;
+  text-align: right;
+}
+
+.zoom-percent-unit {
+  color: var(--theme-ink-muted);
+  padding-left: var(--theme-space-xs);
+}
+
+.zoom-preset-grid {
+  display: grid;
+  gap: var(--theme-space-xs);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.menu-button {
+  font-weight: var(--theme-weight-medium);
+  height: var(--theme-control-md);
+  padding: 0 var(--theme-space-sm);
+  text-align: left;
+}
+
+/* padding: 0 cancels .panel's own: the header and scroll area below already
+   carry their own padding, sized on the assumption of a flush outer edge. */
+.document-sidebar {
+  container: sidebar / inline-size;
+  bottom: calc(var(--theme-space-sm) + var(--app-scrollbar-block));
+  display: flex;
+  flex-direction: column;
+  left: var(--theme-space-sm);
+  max-width: calc(100vw - var(--theme-space-lg));
+  padding: 0;
+  top: var(--theme-space-sm);
+}
+
+/* The extra inline-end padding keeps the tab strip clear of the resize
+   handle, whose 8px line sits on the sidebar's own edge. */
+.document-sidebar-header {
+  border-bottom: 1px solid var(--theme-border);
+  gap: var(--theme-space-xs);
+  justify-content: space-between;
+  padding: var(--theme-space-sm);
+}
+
+/* One row that never wraps: below the width where labels fit, the container
+   query drops them instead. */
+.document-sidebar-tabs {
+  background: var(--theme-wash);
+  border-radius: var(--theme-radius-md);
+  display: flex;
+  gap: 0;
+  min-width: 0;
+  padding: var(--theme-space-2xs);
+}
+
+.document-sidebar-tab {
+  background: none;
+  border: 0;
+  flex: 1 1 0;
+  border-radius: calc(var(--theme-radius-md) - 2px);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  justify-content: center;
+  min-height: var(--theme-control-sm);
+  min-width: 0;
+  padding: 0 var(--theme-space-sm);
+}
+
+.document-sidebar-tab[aria-selected="true"] {
+  background: var(--theme-surface);
+  box-shadow: 0 1px 2px rgb(from var(--theme-shadow) r g b / 0.12);
+  font-weight: var(--theme-weight-semibold);
+}
+
+/* A bare inline span around an SVG inherits the font's line-height, which is
+   taller than the icon itself, so the icon sits off-centre within it unless
+   the span's own box is shrunk to the icon's real size. */
+.document-sidebar-tab-icon {
+  display: flex;
+}
+
+/* Keeps the close button off the 24px pointer-target floor (WCAG 2.2 SC
+   2.5.8) when three tabs are showing. */
+.document-sidebar-header > .icon-button {
+  flex: none;
+}
+
+/* The same recipe as theme.css's own .sr-only, restated: a container query can
+   apply properties conditionally but never a class, so there's no way to
+   apply .sr-only itself only below this width. */
+@container sidebar (max-width: 260px) {
+  .document-sidebar-tab-label {
+    position: absolute;
+    inline-size: 1px;
+    block-size: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* Focusable because it is a tabpanel with its own scroll. */
+.document-sidebar-scroll:focus-visible {
+  box-shadow: inset var(--theme-focus-ring);
+  outline: none;
+}
+
+/* Annotations panel */
+
+.annotations-filter {
+  justify-content: space-between;
+  margin-bottom: var(--theme-space-sm);
+}
+
+/* The swatch is the control, so it carries the 24px pointer target itself. */
+.annotations-swatch {
+  border-color: var(--theme-border);
+  display: grid;
+  height: var(--theme-control-sm);
+  padding: 0;
+  place-items: center;
+  width: var(--theme-control-sm);
+}
+
+.annotations-swatch-chip {
+  border: 1px solid var(--theme-wash-strong);
+  border-radius: var(--theme-radius-pill);
+  display: block;
+  height: 0.9rem;
+  width: 0.9rem;
+}
+
+.annotations-star-filter,
+.annotation-row-star {
+  border-color: var(--theme-border);
+  height: var(--theme-control-sm);
+  width: var(--theme-control-sm);
+}
+
+.annotations-empty {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  margin: var(--theme-space-sm) 0;
+}
+
+.annotation-row {
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius-sm);
+  padding: var(--theme-space-xs);
+}
+
+.annotation-row-selected {
+  border-color: var(--theme-ink-muted);
+  box-shadow: inset 0 0 0 1px var(--theme-wash);
+}
+
+.annotation-row-open {
+  min-height: var(--theme-control-sm);
+  min-width: 0;
+  padding: var(--theme-space-2xs);
+  text-align: left;
+}
+
+.annotation-row-swatch {
+  background: var(--theme-wash-strong);
+  border-radius: var(--theme-radius-pill);
+  flex: none;
+  height: 0.75rem;
+  margin-top: 0.15rem;
+  width: 0.75rem;
+}
+
+.annotation-row-text {
+  min-width: 0;
+}
+
+.annotation-row-meta {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+}
+
+/* Document text, so it is clamped rather than trusted to be short. */
+.annotation-row-quote {
+  display: -webkit-box;
+  font-size: var(--theme-text-sm);
+  line-height: 1.3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.annotation-row-comment {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  margin: var(--theme-space-2xs) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.annotation-comment-field {
+  margin-top: var(--theme-space-xs);
+}
+
+.annotation-comment-label {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+}
+
+.annotation-comment-input {
+  background: var(--theme-surface);
+  border: 1px solid var(--theme-control-border);
+  border-radius: var(--theme-radius-sm);
+  color: var(--theme-ink);
+  font: inherit;
+  font-size: var(--theme-text-sm);
+  padding: var(--theme-space-2xs) var(--theme-space-xs);
+  resize: vertical;
+  width: 100%;
+}
+
+.annotation-comment-input:focus-visible {
+  box-shadow: var(--theme-focus-ring);
+  outline: none;
+}
+
+/* Contents panel */
+
+.outline-entry {
+  display: block;
+  font-size: var(--theme-text-sm);
+  line-height: 1.3;
+  min-height: var(--theme-control-sm);
+  overflow-wrap: anywhere;
+  padding-block: var(--theme-space-2xs);
+  padding-inline-end: var(--theme-space-xs);
+  text-align: left;
+  width: 100%;
+}
+
+.document-sidebar-scroll {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--theme-space-sm);
+}
+
+.merge-pdf-button {
+  background: var(--theme-surface);
+  border-style: dashed;
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  justify-content: center;
+  margin-bottom: var(--theme-space-xs);
+  padding: var(--theme-space-sm);
+  width: 100%;
+}
+
+/* An 8px line with a 24px pointer target (WCAG 2.2 SC 2.5.8): the transparent
+   border widens the target while `background-clip: padding-box` keeps the fill
+   at 8px. */
+.sidebar-resize-handle {
+  background-clip: padding-box;
+  border: 0;
+  border-inline-end: calc(var(--theme-control-xs) - var(--theme-space-sm)) solid
+    transparent;
+  border-radius: 0 var(--theme-radius-sm) var(--theme-radius-sm) 0;
+  bottom: 0;
+  box-sizing: content-box;
+  cursor: ew-resize;
+  padding: 0;
+  position: absolute;
+  right: calc(var(--theme-space-sm) - var(--theme-control-xs));
+  top: 0;
+  width: var(--theme-space-sm);
+}
+
+.page-thumbnail {
+  margin-bottom: var(--theme-space-md);
+  position: relative;
+}
+
+.page-thumbnail-button {
+  background: var(--theme-surface);
+  display: block;
+  padding: var(--theme-space-xs);
+  text-align: left;
+  width: 100%;
+}
+
+.page-thumbnail-button-inactive {
+  border-color: var(--theme-border);
+}
+
+.page-thumbnail-preview {
+  background: var(--theme-surface);
+  margin: 0 auto;
+  overflow: hidden;
+  position: relative;
+}
+
+.page-thumbnail-placeholder {
+  background: var(--theme-canvas);
+  color: var(--theme-ink-muted);
+  display: grid;
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  inset: 0;
+  place-items: center;
+  position: absolute;
+}
+
+.page-thumbnail-number {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  margin-top: var(--theme-space-xs);
+  text-align: center;
+}
+
+.page-thumbnail-menu-toggle {
+  background: var(--theme-surface);
+  border-color: transparent;
+  border-radius: var(--theme-radius-sm);
+  box-shadow: var(--app-shadow-hairline);
+  height: var(--theme-control-xs);
+  position: absolute;
+  right: var(--theme-space-xs);
+  top: var(--theme-space-xs);
+  width: var(--theme-control-xs);
+}
+
+.page-menu {
+  right: var(--theme-space-xs);
+  top: var(--theme-control-md);
+  width: 10.75rem;
+}
+
+.page-menu-item-icon {
+  flex: 0 0 0.875rem;
+  opacity: 0.86;
+}
+
+.thumbnail-canvas,
+.thumbnail-annotations {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+/* Scoped to .page-menu to reach (0,2,0), which beats the primitive's
+   `.menu > button` at (0,1,1) regardless of stylesheet order. */
+.page-menu .page-menu-item-danger {
+  color: var(--theme-danger);
+}
+
+@media (min-width: 640px) {
+  .sidebar-toggle {
+    left: var(--theme-space-md);
+    top: var(--theme-space-md);
+  }
+  .document-sidebar {
+    bottom: calc(var(--theme-space-md) + var(--app-scrollbar-block));
+    left: var(--theme-space-md);
+    top: var(--theme-space-md);
+  }
+}
+
+/* Tab shell styles. */
 
 html,
 body,
@@ -33,61 +683,131 @@ body,
   min-width: 320px;
 }
 
-button {
-  font: inherit;
-}
-
+/* A third, dedicated row for the notice stack: giving it a row of its own
+   to explicitly claim (below) is what lets that row's height actually come
+   from the notice's content when docked in flow. Left implicit, the notice's
+   own `grid-row: 2` claims the row auto-placement would have given
+   .tabbedapp-content, so content was auto-placed into a new row 3 instead
+   while row 2 sized to nothing - not the notice actually reserving space. */
 .tabbedapp-shell {
-  background: var(--tabbedapp-bg);
-  color: var(--tabbedapp-ink);
+  background: var(--theme-canvas);
+  color: var(--theme-ink);
   display: grid;
-  grid-template-rows: 2.25rem minmax(0, 1fr);
+  grid-template-rows: 2.25rem auto minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   position: relative;
-}
-
-.tabbedapp-shell--desktop-titlebar {
-  grid-template-rows: 2.5rem minmax(0, 1fr);
-}
-
-.tabbedapp-shell--desktop-titlebar .tabbedapp-tabbar {
-  -webkit-app-region: drag;
-  padding-right: 8.75rem;
-}
-
-.tabbedapp-shell--desktop-titlebar .tabbedapp-home-tab,
-.tabbedapp-shell--desktop-titlebar .tabbedapp-tabs,
-.tabbedapp-shell--desktop-titlebar .tabbedapp-tabbar-actions,
-.tabbedapp-shell--desktop-titlebar .tabbedapp-tab-context-menu {
-  -webkit-app-region: no-drag;
 }
 
 .tabbedapp-hidden-input {
   display: none;
 }
 
-.tabbedapp-tabbar {
-  align-items: end;
-  background: var(--tabbedapp-ui);
-  border-bottom: 1px solid var(--tabbedapp-bg);
+/* Row 1 of the shell's grid: the tab bar alone, or the tab bar sharing the
+   row with the second-header when Split Right narrows it to the ratio. */
+.tabbedapp-header-row {
   display: flex;
+  min-width: 0;
+}
+
+/* Carries the ratio itself, so the padding on what it holds (the tab bar's
+   own Save All clearance, the second-header's end padding) can never skew
+   the split - only an unpadded box can size to an exact fraction of 100%. */
+.tabbedapp-header-slot {
+  display: flex;
+  min-width: 0;
+}
+
+/* Same width as .tabbedapp-panel-resizer below (shared shape: .split-resizer,
+   splitResizer.css), so the line down its centre lands at the same x as the
+   page separator regardless of the split ratio. */
+.tabbedapp-header-divider::after {
+  bottom: 0;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.tabbedapp-tabbar {
+  background: var(--theme-surface);
+  border-bottom: 1px solid var(--theme-canvas);
+  flex: 1 1 auto;
   gap: 0;
   min-width: 0;
   overflow: visible;
-  padding: 0.25rem 0.375rem 0;
+  /* The right inset clears a slot for the two floating buttons (tab list,
+     then Save All), so neither overlaps the tab-management cluster the flex
+     row lays out. */
+  padding: var(--theme-space-xs)
+    calc(
+      var(--theme-space-sm) +
+        (var(--theme-control-md) + var(--theme-space-xs)) * 2
+    )
+    0 var(--theme-space-sm);
+  /* z-nav, not a bare high number: the bar only needs a stacking context of
+     its own, for the active/dragging tab's local z-index: 1 below - it must
+     never outrank a menu raised from one of its own tabs. */
   position: relative;
-  z-index: 90;
 }
 
 .tabbedapp-tabs {
-  align-items: end;
-  display: flex;
-  flex: 0 1 auto;
+  /* Grows into the bar's spare width: a tab's own flex-basis has nothing to
+     grow into otherwise, and stays pinned to its floor even with room free.
+     The gap this leaves before "+" (a fixed sibling, kept outside so it
+     never scrolls away with an overflowing tab strip) is closed in JS - see
+     tabsNavRef's resize observer in the shell. */
+  flex: 1 1 auto;
   gap: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 0;
+  /* Scrollable, not scrollbar-visible: the tab-list button already gives full,
+     non-scrolling access to every open tab. */
+  scrollbar-width: none;
+}
+
+.tabbedapp-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The only cue that the strip scrolls, now that its scrollbar is hidden -
+   reachable only with an extreme number of tabs, given how far one now
+   shrinks first. A gentle fade, not a tinted shadow: this bar is otherwise
+   flat and borderless, and a colour to fade from read as a stain on it.
+   Fading all the way to fully blank read as the strip simply ending rather
+   than continuing off-screen, so the faded end stays a tenth visible
+   instead of vanishing. Three rules, not one - a single mask-image can't be
+   independently toggled per edge, so each reachable combination (both
+   edges, right only, left only) is spelled out; fully scrolled either way
+   needs none. */
+.tabbedapp-tabs--overflowing:not(.tabbedapp-tabs--at-start):not(
+    .tabbedapp-tabs--at-end
+  ) {
+  mask-image: linear-gradient(
+    to right,
+    rgb(0 0 0 / 0.1),
+    black 128px,
+    black calc(100% - 128px),
+    rgb(0 0 0 / 0.1)
+  );
+}
+
+.tabbedapp-tabs--overflowing.tabbedapp-tabs--at-start:not(
+    .tabbedapp-tabs--at-end
+  ) {
+  mask-image: linear-gradient(
+    to right,
+    black calc(100% - 128px),
+    rgb(0 0 0 / 0.1)
+  );
+}
+
+.tabbedapp-tabs--overflowing:not(
+    .tabbedapp-tabs--at-start
+  ).tabbedapp-tabs--at-end {
+  mask-image: linear-gradient(to right, rgb(0 0 0 / 0.1), black 128px);
 }
 
 .tabbedapp-tab-button,
@@ -97,78 +817,166 @@ button {
   appearance: none;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--tabbedapp-ink);
+  color: var(--theme-ink);
   cursor: pointer;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    box-shadow 120ms ease,
-    opacity 120ms ease;
+    background-color var(--theme-duration-fast) var(--theme-ease),
+    border-color var(--theme-duration-fast) var(--theme-ease),
+    box-shadow var(--theme-duration-fast) var(--theme-ease),
+    opacity var(--theme-duration-fast) var(--theme-ease);
 }
 
 .tabbedapp-tab-button:focus-visible,
 .tabbedapp-tab-main:focus-visible,
 .tabbedapp-tab-close:focus-visible {
-  box-shadow: var(--tabbedapp-focus-ring);
+  box-shadow: var(--theme-focus-ring);
   outline: none;
-}
-
-.tabbedapp-tab-button:disabled {
-  opacity: 0.45;
 }
 
 .tabbedapp-shell[data-busy="true"] .tabbedapp-tabbar {
   cursor: progress;
 }
 
+/* All four are square icon buttons of one size: without this the split
+   toggle falls through to the theme's padded button and stands 42px tall in a
+   bar that aligns to the bottom edge. */
 .tabbedapp-home-tab,
-.tabbedapp-new-tab {
+.tabbedapp-new-tab,
+.tabbedapp-split-toggle,
+.tabbedapp-tab-list-toggle {
   box-sizing: border-box;
   display: grid;
+  flex: 0 0 var(--theme-control-md);
+  height: var(--theme-control-md);
   padding: 0;
   place-items: center;
+  width: var(--theme-control-md);
 }
 
 .tabbedapp-home-tab svg,
-.tabbedapp-new-tab svg {
+.tabbedapp-new-tab svg,
+.tabbedapp-split-toggle svg,
+.tabbedapp-tab-list-toggle svg {
   display: block;
+}
+
+/* Floats beside Save All rather than in the tab-management cluster: always
+   present, since a reader with many tabs needs it before the strip ever
+   overflows, not only after. */
+.tabbedapp-tab-list-toggle-group {
+  bottom: 0;
+  position: absolute;
+  right: calc(
+    var(--theme-space-sm) + var(--theme-control-md) + var(--theme-space-xs)
+  );
+}
+
+.tabbedapp-tab-list-toggle {
+  border-color: transparent;
+  border-radius: var(--theme-radius-pill);
+  position: relative;
+}
+
+.tabbedapp-tab-list-menu-item {
+  justify-content: space-between;
+  min-width: 0;
+  width: 100%;
+}
+
+.tabbedapp-tab-list-menu-item-title {
+  min-width: 0;
+}
+
+/* Shaded, not bold: the same cue as the active tab itself, not a different one. */
+.tabbedapp-tab-list-menu-item[aria-current="true"] {
+  background: var(--theme-wash-strong);
+}
+
+.tabbedapp-tab-list-menu-item-dirty-dot {
+  background: var(--theme-ink-muted);
+  border-radius: var(--theme-radius-pill);
+  flex: 0 0 auto;
+  height: var(--theme-space-sm);
+  width: var(--theme-space-sm);
 }
 
 .tabbedapp-home-tab {
   background: transparent;
   border-color: transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--theme-radius-lg) var(--theme-radius-lg) 0 0;
   border-width: 1px 1px 0;
-  flex: 0 0 2rem;
-  height: 2rem;
   position: relative;
-  width: 2rem;
 }
 
-.tabbedapp-new-tab {
+.tabbedapp-new-tab,
+.tabbedapp-split-toggle {
   border-color: transparent;
-  border-radius: 999px;
-  flex: 0 0 1.75rem;
-  height: 1.75rem;
-  margin-bottom: 0.125rem;
-  width: 1.75rem;
+  border-radius: var(--theme-radius-pill);
+  position: relative;
 }
 
-.tabbedapp-new-tab:hover:not(:disabled) {
-  background: var(--tabbedapp-tab-hover);
+/* Floats in the slot the tab bar's own right padding reserves: set apart
+   from the tab-management cluster rather than lined up beside it. */
+.tabbedapp-save-all {
+  border-color: transparent;
+  border-radius: var(--theme-radius-pill);
+  box-sizing: border-box;
+  display: grid;
+  height: var(--theme-control-md);
+  padding: 0;
+  place-items: center;
+  bottom: 0;
+  position: absolute;
+  right: var(--theme-space-sm);
+  width: var(--theme-control-md);
+}
+
+.tabbedapp-save-all svg {
+  display: block;
+}
+
+/* Same inset hover shape as the home/document tabs (a smaller pill, not the
+   full square), rather than a differently-sized hover veil for no reason. */
+.tabbedapp-new-tab::before,
+.tabbedapp-split-toggle::before,
+.tabbedapp-tab-list-toggle::before,
+.tabbedapp-save-all::before {
+  background: transparent;
+  border-radius: var(--theme-radius-pill);
+  bottom: var(--theme-space-2xs);
+  content: "";
+  left: var(--theme-space-2xs);
+  pointer-events: none;
+  position: absolute;
+  right: var(--theme-space-2xs);
+  top: var(--theme-space-2xs);
+  transition: background-color var(--theme-duration-fast) var(--theme-ease);
+}
+
+.tabbedapp-new-tab:hover:not(:disabled)::before,
+.tabbedapp-split-toggle:hover:not(:disabled)::before,
+.tabbedapp-tab-list-toggle:hover:not(:disabled)::before,
+.tabbedapp-save-all:hover:not(:disabled)::before {
+  background: var(--theme-wash);
 }
 
 .tabbedapp-document-tab {
-  align-items: center;
   background: transparent;
   border-color: transparent;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--theme-radius-lg) var(--theme-radius-lg) 0 0;
   border-width: 1px 1px 0;
-  display: flex;
-  flex: 1 1 26rem;
-  height: 2rem;
-  max-width: 26rem;
-  min-width: 0;
+  flex: 0 1 16rem;
+  height: var(--theme-control-md);
+  max-width: 16rem;
+  /* No floor for a readable title: the tab-list menu is the reliable place
+     to read one once tabs are this tight. Below this, the close button
+     (control-xs) plus its own inset and this tab's border is all that's
+     left - it floats over .tabbedapp-tab-main rather than beside it (see
+     .tabbedapp-tab-close), so that title's own padding never has to fit
+     in the floor too. The inset is doubled (not just the button's own
+     right inset) so the button sits centred at the floor instead of
+     flush against the left border with all the slack on the right. */
+  min-width: calc(var(--theme-control-xs) + 2 * var(--theme-space-xs) + 2px);
   overflow: visible;
   position: relative;
 }
@@ -176,20 +984,33 @@ button {
 .tabbedapp-home-tab::before,
 .tabbedapp-document-tab::before {
   background: transparent;
-  border-radius: 999px;
-  bottom: 0.125rem;
+  border-radius: var(--theme-radius-pill);
+  bottom: var(--theme-space-2xs);
   content: "";
-  left: 0.125rem;
+  left: var(--theme-space-2xs);
   pointer-events: none;
   position: absolute;
-  right: 0.125rem;
-  top: 0.125rem;
-  transition: background-color 120ms ease;
+  right: var(--theme-space-2xs);
+  top: var(--theme-space-2xs);
+  transition: background-color var(--theme-duration-fast) var(--theme-ease);
 }
 
 .tabbedapp-home-tab:hover:not(.tabbedapp-tab-button-active)::before,
 .tabbedapp-document-tab:not(.tabbedapp-tab-button-active):hover::before {
-  background: var(--tabbedapp-tab-hover);
+  background: var(--theme-wash);
+}
+
+/* These draw their own hover on ::before, so the theme's veil on the button
+   box has to be turned off or the tab shape shows through it too. */
+.tabbedapp-home-tab:hover:not(:disabled),
+.tabbedapp-document-tab:hover:not(:disabled),
+.tabbedapp-tab-main:hover:not(:disabled),
+.tabbedapp-tab-close:hover:not(:disabled),
+.tabbedapp-new-tab:hover:not(:disabled),
+.tabbedapp-split-toggle:hover:not(:disabled),
+.tabbedapp-tab-list-toggle:hover:not(:disabled),
+.tabbedapp-save-all:hover:not(:disabled) {
+  background-image: none;
 }
 
 .tabbedapp-document-tab-dragging {
@@ -201,25 +1022,47 @@ button {
   pointer-events: none;
 }
 
-.tabbedapp-tab-separator {
+.tabbedapp-tab-separator,
+.tabbedapp-tabbar-divider {
   align-self: end;
   display: grid;
-  flex: 0 0 0.375rem;
-  height: 2rem;
+  flex: 0 0 var(--theme-space-sm);
+  height: var(--theme-control-md);
   place-items: center;
   pointer-events: none;
 }
 
+.tabbedapp-tabbar-divider::before {
+  background: var(--theme-border);
+  border-radius: var(--theme-radius-pill);
+  content: "";
+  height: 0.875rem;
+  width: 2px;
+}
+
+/* Pinned to where the floating buttons' own reserved padding begins, not
+   dropped into the flex flow: an uncrowded tab bar leaves a gap between the
+   "+" button and that padding, which would strand a flex-flow separator far
+   from the buttons it is meant to introduce. */
+.tabbedapp-tabbar-divider-end {
+  bottom: 0;
+  position: absolute;
+  right: calc(
+    var(--theme-space-sm) + (var(--theme-control-md) + var(--theme-space-xs)) *
+      2
+  );
+}
+
 .tabbedapp-tab-separator::before {
-  background: var(--tabbedapp-tab-separator);
-  border-radius: 999px;
+  background: var(--theme-border);
+  border-radius: var(--theme-radius-pill);
   content: "";
   height: 0.875rem;
   opacity: 1;
   transition:
-    height 120ms ease,
-    opacity 120ms ease,
-    width 120ms ease;
+    height var(--theme-duration-fast) var(--theme-ease),
+    opacity var(--theme-duration-fast) var(--theme-ease),
+    width var(--theme-duration-fast) var(--theme-ease);
   width: 2px;
 }
 
@@ -228,22 +1071,22 @@ button {
 }
 
 .tabbedapp-tab-separator-drop::before {
-  height: 1.25rem;
+  height: var(--theme-space-xl);
   opacity: 1;
   width: 4px;
 }
 
 .tabbedapp-tab-button-active {
-  background: var(--tabbedapp-tab-active);
+  background: var(--theme-canvas);
   border-color: transparent;
-  box-shadow: 0 1px 0 var(--tabbedapp-tab-active);
+  box-shadow: 0 1px 0 var(--theme-canvas);
   position: relative;
   z-index: 1;
 }
 
 .tabbedapp-tab-button-active:hover:not(:disabled),
 .tabbedapp-document-tab.tabbedapp-tab-button-active:hover {
-  background: var(--tabbedapp-tab-active);
+  background: var(--theme-canvas);
 }
 
 .tabbedapp-document-tab .tabbedapp-tab-main:hover:not(:disabled) {
@@ -251,57 +1094,52 @@ button {
 }
 
 .tabbedapp-tab-main {
-  align-items: center;
   border: 0;
-  display: flex;
-  flex: 1;
-  font-size: 0.78125rem;
-  font-weight: 500;
-  gap: 0.25rem;
+  font-size: var(--theme-text-sm);
+  font-weight: var(--theme-weight-medium);
   height: 100%;
   min-width: 0;
-  overflow: hidden;
-  padding: 0 0.375rem 0 0.6875rem;
+  /* Right padding clears the close button floating over this edge (see
+     .tabbedapp-tab-close) - control-xs plus its own inset, not the plain
+     space-sm a title with nothing to clear would need. */
+  padding: 0 calc(var(--theme-control-xs) + var(--theme-space-xs)) 0 0.6875rem;
   position: relative;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   z-index: 1;
 }
 
 .tabbedapp-tab-title {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
+/* Floats over .tabbedapp-tab-main's own right padding rather than beside it
+   as a flex sibling, so a tab this narrow still fits the button without
+   also fitting a title's padding that has nothing left to pad. */
 .tabbedapp-tab-close {
   border: 0;
-  border-radius: 999px;
-  color: rgb(var(--tabbedapp-ink-rgb) / 0.68);
+  border-radius: var(--theme-radius-pill);
+  color: var(--theme-ink-muted);
   display: grid;
-  flex: 0 0 1.375rem;
-  height: 1.375rem;
-  margin-right: 0.25rem;
+  height: var(--theme-control-xs);
   padding: 0;
   place-items: center;
-  position: relative;
-  width: 1.375rem;
+  position: absolute;
+  right: var(--theme-space-xs);
+  top: 50%;
+  transform: translateY(-50%);
+  width: var(--theme-control-xs);
   z-index: 1;
 }
 
 .tabbedapp-tab-close-icon,
 .tabbedapp-tab-dirty-dot {
   grid-area: 1 / 1;
-  transition: opacity 120ms ease;
+  transition: opacity var(--theme-duration-fast) var(--theme-ease);
 }
 
 .tabbedapp-tab-dirty-dot {
-  background: rgb(var(--tabbedapp-ink-rgb) / 0.68);
-  border-radius: 999px;
-  height: 0.5rem;
+  background: var(--theme-ink-muted);
   opacity: 0;
-  width: 0.5rem;
 }
 
 .tabbedapp-tab-close-dirty .tabbedapp-tab-close-icon {
@@ -312,7 +1150,8 @@ button {
   opacity: 1;
 }
 
-.tabbedapp-tab-close-dirty:is(:hover, :focus-visible) .tabbedapp-tab-close-icon {
+.tabbedapp-tab-close-dirty:is(:hover, :focus-visible)
+  .tabbedapp-tab-close-icon {
   opacity: 1;
 }
 
@@ -322,71 +1161,43 @@ button {
 
 .tabbedapp-document-tab:hover .tabbedapp-tab-close,
 .tabbedapp-tab-button-active .tabbedapp-tab-close {
-  color: var(--tabbedapp-ink);
+  color: var(--theme-ink);
 }
 
 .tabbedapp-tab-close:hover:not(:disabled) {
-  background: rgb(var(--tabbedapp-ink-rgb) / 0.12);
-  box-shadow: inset 0 0 0 1px rgb(var(--tabbedapp-ink-rgb) / 0.08);
+  background: var(--theme-wash-strong);
+  box-shadow: inset 0 0 0 1px rgb(from var(--theme-ink) r g b / 0.08);
 }
 
 .tabbedapp-tab-close:active:not(:disabled) {
-  background: rgb(var(--tabbedapp-ink-rgb) / 0.16);
+  background: rgb(from var(--theme-ink) r g b / 0.16);
 }
 
 .tabbedapp-tab-context-menu {
-  background: var(--tabbedapp-ui);
-  border: 1px solid rgb(var(--tabbedapp-ink-rgb) / 0.14);
-  border-radius: 6px;
-  box-shadow: var(--tabbedapp-menu-shadow);
-  box-sizing: border-box;
-  display: grid;
-  gap: 0.125rem;
   min-width: 10.5rem;
-  padding: 0.25rem;
   position: fixed;
-  z-index: 1000;
 }
 
-.tabbedapp-tab-context-menu button {
-  align-items: center;
-  appearance: none;
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  color: var(--tabbedapp-ink);
-  cursor: pointer;
-  display: flex;
-  font: inherit;
-  font-size: var(--tabbedapp-menu-font-size);
-  gap: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.tabbedapp-tab-context-menu button:hover:not(:disabled),
-.tabbedapp-tab-context-menu button:focus-visible {
-  background: var(--tabbedapp-bg);
-  outline: none;
-}
-
-.tabbedapp-tab-context-menu button:disabled {
-  opacity: 0.42;
-}
-
-.tabbedapp-context-menu-separator {
-  background: rgb(var(--tabbedapp-ink-rgb) / 0.1);
-  height: 1px;
-  margin: 0.125rem 0.25rem;
+/* Its own min/max-width, after .tabbedapp-tab-context-menu's generic one so
+   this wins - max-width matches the estimate clampTabListMenuPosition is
+   given for this menu: width: max-content alone sizes to the longest
+   title's UNtruncated width (truncation only clips after that's decided),
+   which could run past the position the clamp already committed to. */
+.tabbedapp-tab-list-menu {
+  max-height: 22rem;
+  max-width: 22rem;
+  min-width: 16rem;
+  overflow-y: auto;
+  width: max-content;
 }
 
 .tabbedapp-tabbar-actions {
-  align-items: end;
-  display: flex;
   flex: 0 0 auto;
-  gap: 0.1875rem;
-  margin-left: 0.125rem;
+  margin-left: var(--theme-space-2xs);
+  /* A full tab strip grows nav right up to this reserved padding's edge
+     (see .tabbedapp-tabbar), leaving "+" nothing between it and the
+     divider that starts there without this. */
+  margin-right: var(--theme-space-xs);
   min-width: 0;
   position: relative;
 }
@@ -397,203 +1208,200 @@ button {
 }
 
 .tabbedapp-content {
+  grid-row: 3;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
 }
 
-.tabbedapp-cornell-template-icon {
-  display: inline-grid;
-  flex: 0 0 auto;
-  place-items: center;
-  position: relative;
-}
-
-.tabbedapp-cornell-template-icon svg {
-  display: block;
-}
-
-.tabbedapp-cornell-template-rule {
-  background: currentColor;
-  border-radius: 999px;
-  bottom: 22%;
-  left: calc(43% + 1px);
-  opacity: 0.9;
-  position: absolute;
-  top: 31%;
-  transform: translateX(-100%);
-  width: 1.5px;
-}
-
-.tabbedapp-workspace {
+.tabbedapp-document-pane {
   height: 100%;
 }
 
-.tabbedapp-modal-backdrop {
-  align-items: center;
-  background: rgb(var(--app-canvas-rgb) / 0.76);
-  backdrop-filter: blur(2px);
-  box-sizing: border-box;
+/* `min-width: 0` is what keeps the two panels equal: a flex item's default
+   minimum is its content, and a PDF page is wider than half the window. */
+.tabbedapp-panels {
   display: flex;
-  inset: 0;
-  justify-content: center;
-  padding: 1rem;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.tabbedapp-panel {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.tabbedapp-panels-column {
+  flex-direction: column;
+}
+
+/* The draggable seam between the two panels; a resize on either axis reads
+   `splitRatio` back into both panels' flex-grow and the header split above.
+   Shape is .split-resizer (splitResizer.css); this adds interaction only. */
+.tabbedapp-panel-resizer {
+  background: transparent;
+  touch-action: none;
+}
+
+.tabbedapp-panels:not(.tabbedapp-panels-column) .tabbedapp-panel-resizer {
+  cursor: col-resize;
+}
+
+.tabbedapp-panels-column .tabbedapp-panel-resizer {
+  cursor: row-resize;
+}
+
+.tabbedapp-panels:not(.tabbedapp-panels-column)
+  .tabbedapp-panel-resizer::after {
+  bottom: 0;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.tabbedapp-panels-column .tabbedapp-panel-resizer::after {
+  height: 2px;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tabbedapp-panel-resizer:hover::after,
+.tabbedapp-panel-resizer:focus-visible::after {
+  background: var(--theme-ink);
+}
+
+/* Capping the panel it sits above, whichever direction put it there. */
+.tabbedapp-second-header {
+  background: var(--theme-surface);
+  box-sizing: border-box;
+  justify-content: space-between;
+  min-width: 0;
+  padding-inline: var(--theme-space-sm);
+}
+
+/* Same weight as a tab's title, muted rather than the full ink: named like a
+   tab, not competing with the reader's document for attention. */
+.tabbedapp-second-header-title {
+  color: var(--theme-ink-muted);
+  flex: 1 1 auto;
+  font-size: var(--theme-text-sm);
+  font-weight: var(--theme-weight-medium);
+  min-width: 0;
+}
+
+.tabbedapp-second-header--row {
+  border-bottom: 1px solid var(--theme-canvas);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tabbedapp-second-header--column {
+  border-bottom: 1px solid var(--theme-border);
+  flex: 0 0 var(--theme-control-md);
+  padding-block: var(--theme-space-2xs);
+}
+
+/* A hairline along the top edge, not a ring: a border around the panel would
+   read as part of the reader's document. */
+.tabbedapp-panel-active::after {
+  background: var(--theme-accent);
+  content: "";
+  inset: 0 0 auto 0;
+  height: 2px;
+  pointer-events: none;
   position: absolute;
-  z-index: 1100;
+  z-index: 1;
+}
+
+.tabbedapp-document-pane-loading {
+  align-items: center;
+  color: var(--theme-ink-muted);
+  display: flex;
+  font-size: var(--theme-text-md);
+  font-weight: var(--theme-weight-medium);
+  justify-content: center;
 }
 
 .tabbedapp-modal-surface {
-  background: var(--tabbedapp-ui);
-  border: 1px solid var(--tabbedapp-border);
-  border-radius: 8px;
-  box-shadow: var(--tabbedapp-menu-shadow);
-  box-sizing: border-box;
-  color: var(--tabbedapp-ink);
-}
-
-.tabbedapp-drop-backdrop {
-  z-index: 1110;
+  border-radius: var(--theme-radius-lg);
 }
 
 .tabbedapp-drop-card {
-  align-items: center;
-  display: flex;
-  font-size: 1rem;
-  font-weight: 650;
-  gap: 0.75rem;
+  font-size: var(--theme-text-lg);
+  font-weight: var(--theme-weight-bold);
   justify-content: center;
   min-width: min(18rem, calc(100vw - 3rem));
-  padding: 1rem 1.25rem;
+  padding: var(--theme-space-lg) var(--theme-space-xl);
   text-align: center;
 }
 
-.tabbedapp-close-dialog {
-  display: grid;
-  gap: 0.75rem;
-  max-width: 100%;
-  padding: 1rem;
-  width: min(30rem, calc(100vw - 2rem));
+/* Shared by every dialog listing PDFs by name: the close-changes prompt and
+   the save-destination prompt both need one. */
+.tabbedapp-file-list-dialog {
+  width: min(30rem, calc(100vw - var(--theme-space-lg) * 2));
 }
 
-.tabbedapp-close-dialog h2,
-.tabbedapp-close-dialog p {
-  margin: 0;
-}
-
-.tabbedapp-close-dialog h2 {
-  font-size: 1rem;
-  font-weight: 650;
-}
-
-.tabbedapp-close-dialog p,
-.tabbedapp-close-dialog li {
-  font-size: 0.875rem;
+.tabbedapp-file-list-dialog p,
+.tabbedapp-file-list-dialog li {
+  font-size: var(--theme-text-md);
   line-height: 1.45;
 }
 
-.tabbedapp-close-dialog ul {
-  background: var(--tabbedapp-bg);
-  border: 1px solid var(--tabbedapp-border);
-  border-radius: 6px;
+.tabbedapp-file-list-dialog p {
+  margin: 0;
+}
+
+.tabbedapp-file-list-dialog ul {
+  background: var(--theme-canvas);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius-lg);
   display: grid;
-  gap: 0.25rem;
+  gap: var(--theme-space-xs);
   list-style: none;
   margin: 0;
   max-height: 8.5rem;
   overflow: auto;
-  padding: 0.5rem;
+  padding: var(--theme-space-sm);
 }
 
-.tabbedapp-close-dialog li {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tabbedapp-save-destination-row {
+  justify-content: space-between;
 }
 
-.tabbedapp-close-dialog-actions {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-
-.tabbedapp-close-dialog-actions button {
-  appearance: none;
-  background: var(--tabbedapp-ui);
-  border: 1px solid var(--tabbedapp-border);
-  border-radius: 6px;
-  color: var(--tabbedapp-ink);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--tabbedapp-menu-font-size);
-  font-weight: 600;
-  padding: 0.4375rem 0.6875rem;
-}
-
-.tabbedapp-close-dialog-actions button:hover,
-.tabbedapp-close-dialog-actions button:focus-visible {
-  background: var(--tabbedapp-bg);
-  outline: none;
-}
-
-.tabbedapp-close-dialog-actions button:focus-visible {
-  box-shadow: var(--tabbedapp-focus-ring);
-}
-
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary {
-  background: var(--tabbedapp-ink);
-  border-color: var(--tabbedapp-ink);
-  color: var(--tabbedapp-ui);
-}
-
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:hover,
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-primary:focus-visible {
-  background: rgb(var(--tabbedapp-ink-rgb) / 0.88);
-}
-
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger {
-  border-color: var(--app-danger);
-  color: var(--app-danger);
-}
-
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger:hover,
-.tabbedapp-close-dialog-actions .tabbedapp-close-dialog-danger:focus-visible {
-  background: rgb(var(--app-danger-rgb) / 0.1);
+.tabbedapp-save-destination-row button {
+  flex: 0 0 auto;
+  padding: 0.3em 0.7em;
 }
 
 .tabbedapp-rename-dialog {
-  display: grid;
-  gap: 0.75rem;
-  max-width: 100%;
-  padding: 1rem;
-  width: min(24rem, calc(100vw - 2rem));
-}
-
-.tabbedapp-rename-dialog h2 {
-  font-size: 1rem;
-  font-weight: 650;
-  margin: 0;
+  width: min(24rem, calc(100vw - var(--theme-space-lg) * 2));
 }
 
 .tabbedapp-rename-dialog label {
   display: grid;
-  font-size: var(--tabbedapp-menu-font-size);
-  font-weight: 600;
-  gap: 0.375rem;
+  font-size: var(--theme-text-sm);
+  font-weight: var(--theme-weight-semibold);
+  gap: var(--theme-space-sm);
 }
 
 .tabbedapp-rename-dialog input {
-  background: var(--tabbedapp-ui);
-  border: 1px solid var(--tabbedapp-border);
-  border-radius: 6px;
+  background: var(--theme-surface);
+  border-radius: var(--theme-radius-lg);
   box-sizing: border-box;
-  color: var(--tabbedapp-ink);
+  color: var(--theme-ink);
   font: inherit;
   min-width: 0;
-  padding: 0.5rem 0.625rem;
+  padding: var(--theme-space-sm) var(--theme-space-md);
   width: 100%;
 }
 
 .tabbedapp-rename-dialog input:focus {
-  box-shadow: var(--tabbedapp-focus-ring);
+  box-shadow: var(--theme-focus-ring);
   outline: none;
 }

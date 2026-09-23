@@ -1,95 +1,48 @@
-import { GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
-import 'pdfjs-dist/web/pdf_viewer.css';
+// main.tsx imports this module, so it must not import PDF.js code: `?url`
+// resolves to a build-time string and keeps the library out of the initial
+// chunk.
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
-let configured = false;
-let warmFetchStarted = false;
+export { pdfWorkerUrl };
+
+// PDF.js appends filenames to this base, so those files cannot carry a content
+// hash of their own: the digest is in the directory name, written by
+// scripts/prepare-renderer-assets.mjs.
+declare const __PDFJS_ASSET_DIR__: string;
+
+// The name the build substitutes; the fallback is for `node --test` only.
+const PDFJS_ASSET_DIR: string =
+  typeof __PDFJS_ASSET_DIR__ === "string" ? __PDFJS_ASSET_DIR__ : "pdfjs";
+
+export const pdfjsAssetBase = (): string =>
+  `${import.meta.env?.BASE_URL ?? "/"}${PDFJS_ASSET_DIR}/`;
+
 const preloadedLinks = new Set<string>();
-const pdfJsWasmAssetBase = `${import.meta.env?.BASE_URL ?? '/'}pdfjs/wasm/`;
-const warmablePdfJsAssets = [
-  `${pdfJsWasmAssetBase}openjpeg.wasm`,
-  `${pdfJsWasmAssetBase}jbig2.wasm`,
-  `${pdfJsWasmAssetBase}qcms_bg.wasm`
-];
 
-export function configurePdfRuntime() {
-  if (configured) {
-    return;
-  }
-
-  configured = true;
-  GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-  warmPdfRuntimeCaches();
-}
-
-export function warmPdfRuntimeCaches({
-  immediate = false
-}: { immediate?: boolean } = {}) {
+// Anything added here must check both the preload credentials mode and whether
+// the service worker already precaches the file, or it fetches the same bytes
+// twice on every cold load.
+export function warmPdfRuntimeCaches() {
   preloadModule(pdfWorkerUrl);
-
-  for (const assetUrl of warmablePdfJsAssets) {
-    preloadFetch(assetUrl, 'application/wasm');
-  }
-
-  if (immediate) {
-    fetchWarmAssets(warmablePdfJsAssets);
-    return;
-  }
-
-  scheduleIdleWork(() => fetchWarmAssets(warmablePdfJsAssets));
 }
 
 function preloadModule(href: string) {
   appendPreloadLink(`module:${href}`, (link) => {
     link.href = href;
-    link.rel = 'modulepreload';
-  });
-}
-
-function preloadFetch(href: string, type: string) {
-  appendPreloadLink(`fetch:${href}`, (link) => {
-    link.as = 'fetch';
-    // No crossOrigin: these are same-origin, and setting it put the preload
-    // in CORS mode while the fetch below uses same-origin mode. Different
-    // preload-cache keys, so the preload never matched and every cold load
-    // fetched ~435 KiB of WASM twice.
-    link.href = href;
-    link.rel = 'preload';
-    link.type = type;
-    link.setAttribute('fetchpriority', 'low');
+    link.rel = "modulepreload";
   });
 }
 
 function appendPreloadLink(
   key: string,
-  configure: (link: HTMLLinkElement) => void
+  configure: (link: HTMLLinkElement) => void,
 ) {
   if (preloadedLinks.has(key)) {
     return;
   }
 
-  const link = document.createElement('link');
+  const link = document.createElement("link");
   configure(link);
   document.head.append(link);
   preloadedLinks.add(key);
-}
-
-function fetchWarmAssets(assetUrls: string[]) {
-  if (warmFetchStarted) {
-    return;
-  }
-
-  warmFetchStarted = true;
-  for (const assetUrl of assetUrls) {
-    void fetch(assetUrl, { cache: 'force-cache' }).catch(() => undefined);
-  }
-}
-
-function scheduleIdleWork(task: () => void) {
-  if (window.requestIdleCallback) {
-    window.requestIdleCallback(task, { timeout: 600 });
-    return;
-  }
-
-  window.setTimeout(task, 200);
 }

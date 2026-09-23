@@ -1,30 +1,35 @@
-.agents
-
-# Dependencies and generated output
-/node_modules
+# Build output
+/dist
 /.generated
-/out
 /.vite
 /coverage
 /playwright-report
 /test-results
 *.tsbuildinfo
-
-# Local files and secrets (except test fixture pdfs)
-*.pdf
-!tests/fixtures/test-*.pdf
-*.key
+# Dependencies
+node_modules
+# Secrets — never commit these
+.env
+.env.*
+.npmrc
+# ...except the root one, which carries `ignore-scripts=true` and no secret, and
+# a setting that is not in the checkout is one CI and a fresh clone never see.
+!/.npmrc
 *.pem
+*.key
 *.p12
 *.pfx
-*.local
-.npmrc
-.env*
-
-# Tooling and operating-system files
+# OS and editor cruft
 .DS_Store
 Thumbs.db
-.idea
-.vscode
-.claude
+*.swp
+.idea/
+.vscode/
+.claude/
+# Project-specific
+.agents
+*.local
 npm-debug.log*
+# PDFs are user content and never committed — except the scrubbed test fixtures.
+*.pdf
+!tests/fixtures/test-*.pdf

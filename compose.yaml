@@ -1,32 +1,47 @@
+# `docker compose up` serves the BUILT app on http://127.0.0.1:4173/ — the thing
+# a visitor actually gets. One service, because the four this replaced (install,
+# build, preview and an opt-in dev profile) were a dependency graph standing in
+# for `&&`. The dev server is `npm run dev`; it ran Vite's HMR websocket, which
+# looks, reasonably enough, like the app phoning home, and it never needed a
+# container. Nothing here runs the test suite: `npm run verify` is a thing you
+# run, not a thing `up` does to you.
 services:
-  app:
-    image: node:26-bookworm-slim
+  preview:
+    # Pinned BY DIGEST, never by tag: a tag is a name its owner can move.
+    image: node:24-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03
+    # RUNS AS ROOT, deliberately, and this is the reason there is no Dockerfile. Docker takes a
+    # fresh named volume's ownership from the image's directory at that path; this image has no
+    # /app, so the volume below arrives owned by root, and an unprivileged user could not write a
+    # byte into it without a Dockerfile whose whole job is one mkdir and one chown. Root costs
+    # little here: every capability is dropped, no privilege can be gained through a setuid
+    # binary, the source is mounted READ-ONLY so root cannot alter it, and no host path is bound
+    # WRITABLE — so nothing this container writes reaches the working copy, or survives
+    # `docker compose down -v`.
+    working_dir: /app
     init: true
-    working_dir: /workspace
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-
     volumes:
-      - .:/workspace
-      - node_modules:/workspace/node_modules
-
-    ports:
-      - "127.0.0.1:5173:5173"
-      - "127.0.0.1:4173:4173"
-
-    environment:
-      VITE_HOST: 0.0.0.0
-
+      # THE CHECKOUT IS BOUND AT /src, NOT AT /app, and that is not cosmetic. Mounting it
+      # read-only at /app and then mounting volumes at /app/node_modules, /app/.generated and
+      # /app/out asks Docker to CREATE those mountpoints inside a read-only mount, which it can
+      # only do if they already exist in the checkout — and all three are gitignored, so a fresh
+      # clone has none of them and `up` dies with `read-only file system`. /app is a named
+      # volume the container fills from /src instead: the source stays read-only, nothing
+      # written reaches the working copy, and a fresh clone works.
+      - ".:/src:ro"
+      - "app:/app"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # preview:docker binds 0.0.0.0 inside the container only; this keeps it on
+    # loopback.
+    ports: ["127.0.0.1:4173:4173"]
+    # The copy re-runs on every `up`, so source edits are picked up. The three paths the build
+    # writes are left out of it: a host tree may hold packages built for another platform, and
+    # the build's own output is not an input.
+    # It never DELETES: a source file you removed or renamed lingers in the volume until
+    # `docker compose down -v`.
     command: >
-      sh -c "deps_hash=$$(sha256sum package.json package-lock.json | sha256sum | cut -d ' ' -f 1);
-      if [ ! -f node_modules/.install-hash ] || [ \"$$(cat node_modules/.install-hash)\" != \"$$deps_hash\" ];
-      then npm ci --ignore-scripts
-      && rm -rf node_modules/.vite
-      && printf '%s' \"$$deps_hash\" > node_modules/.install-hash;
-      fi;
-      npm run dev"
-
+      sh -c "tar -C /src --exclude=./node_modules --exclude=./dist --exclude=./.generated -cf - . | tar -C /app -xf -
+      && npm ci --ignore-scripts --engine-strict
+      && npm run build && npm run preview:docker"
 volumes:
-  node_modules:
+  app:

@@ -8,6 +8,9 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+    // vite.config.ts imports scripts/precache.mjs, which is plain JS because
+    // tests/build/shipped-artefact.test.mjs reads the same description.
+    "allowJs": true,
     "isolatedModules": true,
     "noEmit": true,
     "strict": true,

@@ -1,27 +1,28 @@
-import { createPdfFileLoader, readPdfFile } from '../workspace';
-import type {
-  PdfDownloadTarget,
-  PdfSaveAsTarget,
-  PdfSaveTarget
-} from '../workspace';
-import { uint8ArrayToArrayBuffer } from '../bytes';
-import { safePdfFileName } from '../fileNames';
-import type { PdfHostAdapter, PdfHostDocument } from '../tabbedapp';
-import { browserPrintTarget } from './browserPrintTarget';
+// Never src/pdfdocumenteditor's barrel: it re-exports PdfDocumentEditor, and this file is
+// in the initial chunk.
+import { createPdfFileLoader, readPdfFile } from "../pdfdocumenteditor/pdfFile";
+import type { PdfSaveAsTarget, PdfSaveTarget } from "../tabbedapp";
+import { PdfSaveError } from "../pdfdocumenteditor/host";
+import type { TabbedAppHostAdapter, TabbedAppHostDocument } from "../tabbedapp";
+import { browserPrintTarget } from "./browserPrintTarget";
 import {
   canPickLocalPdfFile,
   canSaveLocalPdfFileAs,
+  downloadPdfBytes,
   fingerprintPdfBytes,
   fingerprintPdfFile,
+  isPdfFile,
   localPdfFilesFromDrop,
   localPdfFilesFromHandles,
+  readDroppedFiles,
   pickLocalPdfSaveFile,
   pickLocalImageFile,
   pickLocalPdfFiles,
-  savePdfToLocalFile
-} from './localFileAccess';
-import type { LocalPdfFileHandle } from './localFileAccess';
-import { browserFileHandleKey } from './browserFileIdentity';
+  savePdfToLocalFile,
+} from "./localFileAccess";
+import type { LocalPdfFileHandle } from "./localFileAccess";
+import { browserFileHandleKey } from "./browserFileIdentity";
+import { PACKAGE_NAME } from "../packageName";
 
 type BrowserPdfFile = {
   file: File;
@@ -29,11 +30,11 @@ type BrowserPdfFile = {
   handle?: LocalPdfFileHandle | null;
 };
 
-export const browserFileAdapter: PdfHostAdapter = {
-  downloadTarget: browserFileDownloadTarget(),
+export const browserFileAdapter: TabbedAppHostAdapter = {
+  downloadTarget: downloadPdfBytes,
   fileInput: {
-    accept: 'application/pdf',
-    multiple: true
+    accept: "application/pdf",
+    multiple: true,
   },
   saveAsTarget: browserFileSaveAsTarget(),
   async pickPdfDocuments() {
@@ -43,35 +44,38 @@ export const browserFileAdapter: PdfHostAdapter = {
 
     const pickedFiles = await pickLocalPdfFiles();
     return {
-      documents: await browserHandleFilesToHostDocuments(pickedFiles)
+      documents: await browserHandleFilesToHostDocuments(pickedFiles),
     };
   },
   pickMergePdfFile: browserPickMergePdfFile,
   pickImageFile: browserPickImageFile,
   printTarget: browserPrintTarget(),
   async pdfDocumentsFromDrop(dataTransfer) {
+    // Must stay the first statement and the only one touching `dataTransfer`:
+    // the run up to the first `await` is the whole window a drop answers in.
+    const dropped = readDroppedFiles(dataTransfer);
+
     try {
-      const localFiles = await localPdfFilesFromDrop(dataTransfer);
+      const localFiles = await localPdfFilesFromDrop(dropped);
       if (localFiles.length > 0) {
         return browserHandleFilesToHostDocuments(localFiles);
       }
     } catch {
-      // Falls back to the plain File-object path below, which still opens
-      // the dropped file(s) - just without in-place-save support for them.
+      // The plain File path below still opens them, without in-place save.
     }
 
-    return browserFilesToHostDocuments(filesToBrowserFiles(dataTransfer.files));
+    return browserFilesToHostDocuments(filesToBrowserFiles(dropped.files));
   },
   pdfDocumentsFromFileInput(files) {
     return browserFilesToHostDocuments(filesToBrowserFiles(files));
-  }
+  },
 };
 
 export async function browserFileHandlesToHostDocuments(
-  handles: LocalPdfFileHandle[]
+  handles: LocalPdfFileHandle[],
 ) {
   return browserHandleFilesToHostDocuments(
-    await localPdfFilesFromHandles(handles)
+    await localPdfFilesFromHandles(handles),
   );
 }
 
@@ -91,7 +95,7 @@ async function browserPickMergePdfFile() {
   return file
     ? {
         bytes: await readPdfFile(file),
-        name: file.name
+        name: file.name,
       }
     : null;
 }
@@ -102,29 +106,29 @@ async function browserHandleFilesToHostDocuments(files: BrowserPdfFile[]) {
       ...file,
       fileKey: file.handle
         ? await browserFileHandleKey(file.handle)
-        : undefined
-    }))
+        : undefined,
+    })),
   );
   return browserFilesToHostDocuments(keyedFiles);
 }
 
 function browserFilesToHostDocuments(
-  files: BrowserPdfFile[]
-): PdfHostDocument[] {
+  files: BrowserPdfFile[],
+): TabbedAppHostDocument[] {
   return files
     .filter(({ file }) => isPdfFile(file))
     .map(({ file, fileKey, handle }, index) => ({
       fileKey,
       source: {
-        kind: 'loader',
+        kind: "loader",
         loadBytes: createPdfFileLoader(file, { preload: index === 0 }),
         name: file.name,
         saveAsTarget: browserFileAdapter.saveAsTarget ?? null,
         saveTarget: handle
           ? createBrowserPdfSaveTarget(handle, file, fileKey)
-          : null
+          : null,
       },
-      title: file.name
+      title: file.name,
     }));
 }
 
@@ -134,28 +138,28 @@ function filesToBrowserFiles(files: FileList | File[]) {
 
 function pickImageFileWithInput() {
   return pickFilesWithInput({
-    accept: 'image/png,image/jpeg,image/webp',
-    multiple: false
+    accept: "image/png,image/jpeg,image/webp",
+    multiple: false,
   }).then((files) => files[0] ?? null);
 }
 
 function pickPdfFilesWithInput({ multiple }: { multiple: boolean }) {
-  return pickFilesWithInput({ accept: 'application/pdf', multiple });
+  return pickFilesWithInput({ accept: "application/pdf", multiple });
 }
 
 function pickFilesWithInput({
   accept,
-  multiple
+  multiple,
 }: {
   accept: string;
   multiple: boolean;
 }) {
   return new Promise<File[]>((resolve) => {
-    const input = document.createElement('input');
+    const input = document.createElement("input");
     input.accept = accept;
     input.multiple = multiple;
-    input.type = 'file';
-    input.style.display = 'none';
+    input.type = "file";
+    input.style.display = "none";
 
     function cleanup(files: File[]) {
       window.setTimeout(() => {
@@ -165,11 +169,11 @@ function pickFilesWithInput({
     }
 
     input.addEventListener(
-      'change',
+      "change",
       () => cleanup(Array.from(input.files ?? [])),
-      { once: true }
+      { once: true },
     );
-    input.addEventListener('cancel', () => cleanup([]), { once: true });
+    input.addEventListener("cancel", () => cleanup([]), { once: true });
 
     document.body.append(input);
     input.click();
@@ -189,22 +193,31 @@ function browserFileSaveAsTarget(): PdfSaveAsTarget | null {
 
     const bytes = await createBytes();
     await savePdfToLocalFile(handle, bytes);
-    const savedFile = await handle.getFile();
-    const fileKey = await browserFileHandleKey(handle);
+    let savedFile: File;
+    let fileKey: string;
+    try {
+      savedFile = await handle.getFile();
+      fileKey = await browserFileHandleKey(handle);
+    } catch (error) {
+      throw new PdfSaveError(
+        "The PDF was saved and verified, but its file identity could not be refreshed.",
+        { cause: error, mayHaveCommitted: true, stage: "post-save" },
+      );
+    }
     const saveTarget = createBrowserPdfSaveTarget(handle, savedFile, fileKey);
     return {
       bytes,
       fileKey,
       fileName: handle.name,
-      saveTarget
+      saveTarget,
     };
   };
 }
 
-export function createBrowserPdfSaveTarget(
+function createBrowserPdfSaveTarget(
   fileHandle: LocalPdfFileHandle,
   initialFile: File,
-  initialFileKey?: string
+  initialFileKey?: string,
 ): PdfSaveTarget {
   let expectedVersion = pdfFileVersion(initialFile);
   let expectedFingerprint: Promise<string> | null = null;
@@ -212,8 +225,8 @@ export function createBrowserPdfSaveTarget(
     expectedFingerprint ??= fingerprintPdfFile(initialFile);
     return expectedFingerprint;
   };
-  const lockName = `pdf-annotator:file-write:${fileHandle.name
-    .normalize('NFC')
+  const lockName = `${PACKAGE_NAME}:file-write:${fileHandle.name
+    .normalize("NFC")
     .toLocaleLowerCase()}`;
   const fileKeyRequest = initialFileKey
     ? Promise.resolve(initialFileKey)
@@ -224,36 +237,42 @@ export function createBrowserPdfSaveTarget(
       const currentFile = await fileHandle.getFile();
       if (!samePdfFileVersion(expectedVersion, pdfFileVersion(currentFile))) {
         throw new Error(
-          'The PDF changed outside this window. Use Save As to avoid overwriting newer changes.'
+          "The PDF changed outside this window. Use Save As to avoid overwriting newer changes.",
         );
       }
 
       await savePdfToLocalFile(fileHandle, bytes, {
-        expectedCurrentFingerprint: await getExpectedFingerprint()
+        expectedCurrentFingerprint: await getExpectedFingerprint(),
       });
-      const savedFile = await fileHandle.getFile();
-      expectedVersion = pdfFileVersion(savedFile);
-      expectedFingerprint = fingerprintPdfBytes(bytes);
-      // Return the stable entry-identity key so the shell keeps the same tab
-      // identity after Save changes the file's size and modified time.
-      return { fileKey: await fileKeyRequest };
+      try {
+        const savedFile = await fileHandle.getFile();
+        expectedVersion = pdfFileVersion(savedFile);
+        expectedFingerprint = fingerprintPdfBytes(bytes);
+        // The entry-identity key: Save changes size and modified time.
+        return { fileKey: await fileKeyRequest };
+      } catch (error) {
+        throw new PdfSaveError(
+          "The PDF was saved and verified, but its file identity could not be refreshed.",
+          { cause: error, mayHaveCommitted: true, stage: "post-save" },
+        );
+      }
     });
 }
 
 type BrowserLockManager = {
   request: <T>(
     name: string,
-    options: { mode: 'exclusive' },
-    callback: () => Promise<T>
+    options: { mode: "exclusive" },
+    callback: () => Promise<T>,
   ) => Promise<T>;
 };
 
 function withBrowserFileLock<T>(name: string, task: () => Promise<T>) {
   const locks =
-    typeof navigator === 'undefined'
+    typeof navigator === "undefined"
       ? undefined
       : (navigator as Navigator & { locks?: BrowserLockManager }).locks;
-  return locks ? locks.request(name, { mode: 'exclusive' }, task) : task();
+  return locks ? locks.request(name, { mode: "exclusive" }, task) : task();
 }
 
 function pdfFileVersion(file: File) {
@@ -262,36 +281,10 @@ function pdfFileVersion(file: File) {
 
 function samePdfFileVersion(
   expected: ReturnType<typeof pdfFileVersion>,
-  current: ReturnType<typeof pdfFileVersion>
+  current: ReturnType<typeof pdfFileVersion>,
 ) {
   return (
     expected.lastModified === current.lastModified &&
     expected.size === current.size
-  );
-}
-
-function browserFileDownloadTarget(): PdfDownloadTarget {
-  return browserDownloadPdf;
-}
-
-function browserDownloadPdf(bytes: Uint8Array, suggestedName: string) {
-  const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
-    type: 'application/pdf'
-  });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = safePdfFileName(suggestedName);
-  link.style.display = 'none';
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
-function isPdfFile(file: File) {
-  return (
-    file.type === 'application/pdf' ||
-    file.name.toLowerCase().endsWith('.pdf')
   );
 }

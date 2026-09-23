@@ -1,88 +1,88 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import assert from "node:assert/strict";
+import test from "node:test";
 import {
   annotationFingerprint,
   annotationSourceIdsForReplacement,
   byteFingerprint,
-  groupAnnotationsByPageStable
-} from '../src/workspace/annotationState';
-import type { PdfAnnotation } from '../src/workspace/types';
+  groupAnnotationsByPageStable,
+} from "../src/pdfdocumenteditor/annotationState";
+import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
 function stickyNote(id: string, pageIndex: number): PdfAnnotation {
   return {
     color: [1, 0.9, 0.25],
     id,
-    kind: 'stickyNote',
+    kind: "stickyNote",
     pageIndex,
     rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-    text: ''
+    text: "",
   };
 }
 
-test('replacement keys include original source IDs and app-written annotation IDs', () => {
+test("replacement keys use the authoritative imported source ID", () => {
   const editedImportedNote: PdfAnnotation = {
     color: [1, 0.9, 0.25],
-    id: 'imported-0-note-1',
-    kind: 'stickyNote',
+    id: "imported-0-note-1",
+    kind: "stickyNote",
     pageIndex: 0,
     rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-    sourceId: '12 0 R|original-note',
-    text: 'edited note'
+    sourceId: "12 0 R|original-note",
+    text: "edited note",
   };
 
   const keys = annotationSourceIdsForReplacement(
     [editedImportedNote],
     new Set(),
-    [editedImportedNote]
+    [editedImportedNote],
   );
 
-  assert.equal(keys.has('12 0 R|original-note'), true);
-  assert.equal(keys.has('imported-0-note-1'), true);
+  assert.equal(keys.has("12 0 R|original-note"), true);
+  assert.equal(keys.has("imported-0-note-1"), false);
 });
 
-test('removed replacement keys are ignored when that annotation is present again', () => {
+test("removed replacement keys are ignored when that annotation is present again", () => {
   const restoredNote: PdfAnnotation = {
     color: [1, 0.9, 0.25],
-    id: 'imported-0-note-1',
-    kind: 'stickyNote',
+    id: "imported-0-note-1",
+    kind: "stickyNote",
     pageIndex: 0,
     rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-    sourceId: '12 0 R|original-note',
-    text: 'restored note'
+    sourceId: "12 0 R|original-note",
+    text: "restored note",
   };
 
   const keys = annotationSourceIdsForReplacement(
     [],
-    new Set(['12 0 R|original-note', 'imported-0-note-1']),
-    [restoredNote]
+    new Set(["12 0 R|original-note", "imported-0-note-1"]),
+    [restoredNote],
   );
 
   assert.deepEqual(Array.from(keys), []);
 });
 
-test('empty current annotations request removal by source ID and app ID', () => {
+test("empty current annotations request removal by authoritative source ID", () => {
   const emptyImportedNote: PdfAnnotation = {
     color: [1, 0.9, 0.25],
-    id: 'imported-0-note-1',
-    kind: 'stickyNote',
+    id: "imported-0-note-1",
+    kind: "stickyNote",
     pageIndex: 0,
     rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
-    sourceId: '12 0 R|original-note',
-    text: ''
+    sourceId: "12 0 R|original-note",
+    text: "",
   };
 
   const keys = annotationSourceIdsForReplacement(
     [],
     new Set(),
     [],
-    [emptyImportedNote]
+    [emptyImportedNote],
   );
 
-  assert.equal(keys.has('12 0 R|original-note'), true);
-  assert.equal(keys.has('imported-0-note-1'), true);
+  assert.equal(keys.has("12 0 R|original-note"), true);
+  assert.equal(keys.has("imported-0-note-1"), false);
 });
 
-test('byte fingerprints include changes outside sampled ranges', () => {
+test("byte fingerprints include changes outside sampled ranges", () => {
   const left = new Uint8Array(200_000).fill(65);
   const right = left.slice();
   right[100_003] = 66;
@@ -90,85 +90,86 @@ test('byte fingerprints include changes outside sampled ranges', () => {
   assert.notEqual(byteFingerprint(left), byteFingerprint(right));
 });
 
-test('annotation fingerprints include free-text and image-stamp rotation', () => {
+test("annotation fingerprints include free-text and image-stamp rotation", () => {
   const freeText: PdfAnnotation = {
     color: [0, 0, 0],
     fontSize: 12,
-    id: 'free-text',
-    kind: 'freeText',
+    id: "free-text",
+    kind: "freeText",
     opacity: 1,
     pageIndex: 0,
     rect: { x1: 10, x2: 110, y1: 10, y2: 40 },
     rotation: 0,
-    text: 'Rotated text'
+    text: "Rotated text",
   };
   const imageStamp: PdfAnnotation = {
     heightPx: 10,
-    id: 'image-stamp',
-    imageData: 'AAAA',
-    kind: 'imageStamp',
-    mimeType: 'image/png',
+    id: "image-stamp",
+    imageData: "AAAA",
+    comment: "",
+    kind: "imageStamp",
+    mimeType: "image/png",
     pageIndex: 0,
     rect: { x1: 10, x2: 30, y1: 10, y2: 30 },
     rotation: 0,
-    widthPx: 10
+    widthPx: 10,
   };
 
   assert.notEqual(
     annotationFingerprint(freeText),
-    annotationFingerprint({ ...freeText, rotation: 90 })
+    annotationFingerprint({ ...freeText, rotation: 90 }),
   );
   assert.notEqual(
     annotationFingerprint(imageStamp),
-    annotationFingerprint({ ...imageStamp, rotation: 90 })
+    annotationFingerprint({ ...imageStamp, rotation: 90 }),
   );
 });
 
-test('groupAnnotationsByPageStable reuses unaffected pages by reference', () => {
-  const page0a = stickyNote('a', 0);
-  const page0b = stickyNote('b', 0);
-  const page1a = stickyNote('c', 1);
+test("groupAnnotationsByPageStable reuses unaffected pages by reference", () => {
+  const page0a = stickyNote("a", 0);
+  const page0b = stickyNote("b", 0);
+  const page1a = stickyNote("c", 1);
   const cache = new Map<number, PdfAnnotation[]>();
 
   const first = groupAnnotationsByPageStable([page0a, page0b, page1a], cache);
   const firstPage0 = first.get(0);
   const firstPage1 = first.get(1);
 
-  const editedPage0b = { ...page0b, text: 'edited' };
+  const editedPage0b = { ...page0b, text: "edited" };
   const second = groupAnnotationsByPageStable(
     [page0a, editedPage0b, page1a],
-    cache
+    cache,
   );
 
-  assert.notEqual(second.get(0), firstPage0, 'edited page gets a new bucket');
-  assert.equal(second.get(1), firstPage1, 'untouched page reuses its bucket');
+  assert.notEqual(second.get(0), firstPage0, "edited page gets a new bucket");
+  assert.equal(second.get(1), firstPage1, "untouched page reuses its bucket");
 });
 
-test('groupAnnotationsByPageStable does not reuse a bucket when its length changes', () => {
-  const page0a = stickyNote('a', 0);
-  const page1a = stickyNote('b', 1);
+test("groupAnnotationsByPageStable does not reuse a bucket when its length changes", () => {
+  const page0a = stickyNote("a", 0);
+  const page1a = stickyNote("b", 1);
   const cache = new Map<number, PdfAnnotation[]>();
 
   const first = groupAnnotationsByPageStable([page0a, page1a], cache);
   const firstPage1 = first.get(1);
 
-  const page1NewAnnotation = stickyNote('c', 1);
+  const page1NewAnnotation = stickyNote("c", 1);
   const second = groupAnnotationsByPageStable(
     [page0a, page1a, page1NewAnnotation],
-    cache
+    cache,
   );
 
   assert.notEqual(
     second.get(1),
     firstPage1,
-    'page with an added annotation gets a new bucket'
+    "page with an added annotation gets a new bucket",
   );
   assert.equal(second.get(1)?.length, 2);
 });
 
-test('groupAnnotationsByPageStable drops pages that lose all their annotations', () => {
-  const page0a = stickyNote('a', 0);
-  const page1a = stickyNote('b', 1);
+test("groupAnnotationsByPageStable drops pages that lose all their annotations", () => {
+  const page0a = stickyNote("a", 0);
+  const page1a = stickyNote("b", 1);
   const cache = new Map<number, PdfAnnotation[]>();
 
   groupAnnotationsByPageStable([page0a, page1a], cache);
@@ -178,9 +179,9 @@ test('groupAnnotationsByPageStable drops pages that lose all their annotations',
   assert.equal(cache.has(1), false);
 });
 
-test('groupAnnotationsByPageStable stays stable across repeated calls with no changes', () => {
-  const page0a = stickyNote('a', 0);
-  const page1a = stickyNote('b', 1);
+test("groupAnnotationsByPageStable stays stable across repeated calls with no changes", () => {
+  const page0a = stickyNote("a", 0);
+  const page1a = stickyNote("b", 1);
   const cache = new Map<number, PdfAnnotation[]>();
 
   const first = groupAnnotationsByPageStable([page0a, page1a], cache);

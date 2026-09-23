@@ -1,0 +1,618 @@
+@import "../theme.css";
+@import "../documentShell.css";
+@import "../splitResizer.css";
+
+/*
+ * src/theme.css is never edited here and is imported by this file and no other.
+ */
+
+/* theme.css's own defaults now match what this project used to retint to,
+   so there is nothing left to redeclare here. */
+:root {
+  /* --theme-accent is left at the theme's own default (--theme-ink): nothing
+     in the app's own chrome carries colour except a reader's marks and the
+     one exception below. */
+
+  /* The one exception: a selection needs to read as "selected", not just
+     "focused", once accent turns monochrome. Fixed in both schemes, not
+     light-dark - it marks a selection over the page, which is always white
+     paper regardless of the app's own colour scheme (same reasoning as
+     --app-ink-on-light/dark below). */
+  --app-selection: #1a56b0;
+
+  /* Fixed in both schemes: a reader-chosen fill does not follow the colour
+     scheme, so an ink that flipped would invert the contrast it was chosen
+     for. */
+  --app-ink-on-light: #1c1917;
+  --app-ink-on-dark: #ffffff;
+}
+
+@media (prefers-contrast: more) {
+  :root:root {
+    /* Same reasoning as theme.css's own high-contrast overrides: a fixed
+       value needs its own darker step here since it can't ride --theme-ink's. */
+    --app-selection: #0b3d91;
+  }
+}
+
+/* Overrides theme.css's accent-tinted default: selected text should read as
+   "selected", the same cue as everything else this project marks that way. */
+::selection {
+  background: rgb(from var(--app-selection) r g b / 0.24);
+}
+
+/* 6px reads better at these sizes than the theme's 8px default. */
+input:where(:not([type="checkbox"], [type="radio"], [type="range"])),
+select,
+textarea {
+  border-radius: var(--theme-radius-md);
+}
+
+/* ── the document editor itself ──────────────────────────────────────────── */
+
+.pdfdocumenteditor {
+  /* --app-scrollbar-* are written from PdfDocumentEditor.tsx once the real
+     scrollbar gutter is measured. */
+  --app-control-bottom-edge: var(--theme-space-md);
+  --app-control-right-edge: var(--theme-space-md);
+  --app-floating-safe-inline: 5rem;
+  /* Halved onto both sides rather than added only on the right, so the page
+     stack centres on the true viewport rather than on a box the dock alone
+     narrows; the total reserved width, and so the fit-to-width calculation
+     that reads it, is unchanged. */
+  --app-dock-clearance: calc(
+    (var(--app-floating-safe-inline) + var(--app-scrollbar-inline)) / 2
+  );
+  /* --app-selection-button-size: written from viewerConfig.ts, which also
+     positions the button. */
+  --app-scrollbar-block: 0px;
+  --app-scrollbar-inline: 0px;
+
+  /* White in both colour schemes because paper is. */
+  --app-page: #ffffff;
+  --app-page-shadow: 0 10px 15px -3px rgb(from var(--theme-shadow) r g b / 0.15);
+
+  --app-shadow-hairline: 0 1px 2px rgb(from var(--theme-shadow) r g b / 0.05);
+}
+
+/* Positioned, so the floating chrome anchors here and never starts under the
+   docked notices. */
+.pdfdocumenteditor-body {
+  min-height: 0;
+  position: relative;
+}
+
+/* `min-width`/`min-height: 0` on children is what lets an even split hold:
+   a flex item's default minimum is its content, and a PDF page is wider (or,
+   stacked, taller) than half the window whenever the reader zooms in. */
+.pdfdocumenteditor-split {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.pdfdocumenteditor-split--column {
+  flex-direction: column;
+}
+.pdfdocumenteditor-split > * {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* The draggable seam between the two views; dragging it only ever moves
+   `splitRatio`, the same state a resize by keyboard changes. Shares
+   .split-resizer's shape (splitResizer.css), but must restate flex here:
+   .pdfdocumenteditor-split > * above sets it too, at equal specificity, and
+   this rule needs to win by coming after it in this file. */
+.pdfdocumenteditor-split-resizer {
+  background: transparent;
+  flex: 0 0 7px;
+  touch-action: none;
+}
+.pdfdocumenteditor-split:not(.pdfdocumenteditor-split--column)
+  .pdfdocumenteditor-split-resizer {
+  cursor: col-resize;
+}
+.pdfdocumenteditor-split--column .pdfdocumenteditor-split-resizer {
+  cursor: row-resize;
+}
+.pdfdocumenteditor-split:not(.pdfdocumenteditor-split--column)
+  .pdfdocumenteditor-split-resizer::after {
+  bottom: 0;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: 2px;
+}
+.pdfdocumenteditor-split--column .pdfdocumenteditor-split-resizer::after {
+  height: 2px;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.pdfdocumenteditor-split-resizer:hover::after,
+.pdfdocumenteditor-split-resizer:focus-visible::after {
+  background: var(--theme-ink);
+}
+.pdfdocumenteditor-fill {
+  height: 100%;
+  inset: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.pdfdocumenteditor[data-busy="true"] .pdfdocumenteditor-scroll-root {
+  cursor: progress;
+}
+
+.pdfdocumenteditor-scroll-root {
+  box-sizing: border-box;
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding: var(--theme-space-lg)
+    calc(var(--theme-space-lg) + var(--app-dock-clearance)) 50vh
+    calc(var(--theme-space-lg) + var(--app-dock-clearance));
+}
+
+.pdfdocumenteditor-pages {
+  box-sizing: border-box;
+  min-width: max-content;
+}
+
+.pdfdocumenteditor-page-frame {
+  background: var(--app-page);
+  box-shadow: var(--app-page-shadow);
+  margin: 0 auto var(--theme-space-lg);
+  outline: none;
+  width: fit-content;
+}
+
+.pdfdocumenteditor-page {
+  background: var(--app-page);
+  overflow: hidden;
+  position: relative;
+}
+
+.pdfdocumenteditor-page[data-tool="draw"],
+.pdfdocumenteditor-page[data-tool="highlight"],
+.pdfdocumenteditor-page[data-tool="textHighlight"],
+.pdfdocumenteditor-page[data-tool="freehandHighlight"],
+.pdfdocumenteditor-page[data-tool="freeText"],
+.pdfdocumenteditor-page[data-tool="stickyNote"],
+.pdfdocumenteditor-page[data-tool="eraser"],
+.pdfdocumenteditor-page[data-tool="lasso"] {
+  touch-action: none;
+}
+
+.pdfdocumenteditor-page[data-tool="select"] {
+  touch-action: auto;
+}
+
+.pdfdocumenteditor-interaction-layer,
+.pdfdocumenteditor-image-stamp-layer {
+  touch-action: none;
+}
+
+.pdfdocumenteditor-page-placeholder {
+  background: var(--theme-surface);
+  box-shadow: var(--app-shadow-hairline);
+  color: var(--theme-ink-muted);
+  display: grid;
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  margin: 0 auto var(--theme-space-lg);
+  place-items: center;
+  width: fit-content;
+}
+
+.settings-panel {
+  box-sizing: border-box;
+  display: grid;
+  font-size: var(--theme-text-md);
+  gap: var(--theme-space-sm);
+  min-width: 12rem;
+  width: max-content;
+}
+
+.settings-field {
+  font-size: var(--theme-text-xs);
+  gap: var(--theme-space-sm);
+}
+
+.color-palette {
+  align-items: center;
+  display: grid;
+  gap: var(--theme-space-sm);
+  grid-template-columns: repeat(8, var(--theme-control-xs));
+  width: max-content;
+}
+
+/* --theme-control-border, not --theme-border: this line is the only thing
+   that says where the control is, so it owes WCAG 1.4.11's 3:1. */
+.color-swatch,
+.color-picker-button {
+  border-color: var(--theme-control-border);
+  border-radius: var(--theme-radius-pill);
+  box-shadow: inset 0 0 0 1px rgb(from var(--theme-surface) r g b / 0.45);
+  height: var(--theme-control-xs);
+  padding: 0;
+  width: var(--theme-control-xs);
+}
+
+.color-picker-button {
+  background: var(--theme-surface);
+  color: var(--theme-ink);
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  position: relative;
+}
+
+.color-swatch-active {
+  box-shadow:
+    inset 0 0 0 1px rgb(from var(--theme-surface) r g b / 0.55),
+    0 0 0 2px var(--theme-surface),
+    0 0 0 3px rgb(from var(--theme-ink) r g b / 0.52);
+}
+
+.color-picker-icon {
+  pointer-events: none;
+}
+
+.color-picker-input {
+  cursor: pointer;
+  height: 100%;
+  inset: 0;
+  opacity: 0;
+  position: absolute;
+  width: 100%;
+}
+
+/* Written from PdfPageView, so the button previews the highlight it makes. */
+.text-selection-highlight-button {
+  --app-selection-button-tint: var(
+    --app-selection-button-color,
+    var(--app-selection)
+  );
+  --app-selection-button-glow: 0 4px 14px
+    rgb(from var(--app-selection-button-tint) r g b / 0.38);
+
+  align-items: center;
+  animation: app-selection-button-in 140ms ease-out;
+  background: var(--app-selection-button-tint);
+  border: 1px solid var(--app-selection-button-tint);
+  border-radius: var(--theme-radius-pill);
+  box-shadow:
+    var(--app-selection-button-glow),
+    0 1px 2px rgb(from var(--theme-shadow) r g b / 0.12);
+  box-sizing: border-box;
+  color: var(--app-selection-button-ink, #ffffff);
+  cursor: pointer;
+  display: grid;
+  height: var(--app-selection-button-size);
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  width: var(--app-selection-button-size);
+  z-index: 12;
+}
+
+.text-selection-highlight-button:hover,
+.text-selection-highlight-button:focus-visible {
+  filter: brightness(1.08);
+  outline: none;
+}
+
+.text-selection-highlight-button:focus-visible {
+  box-shadow: var(--theme-focus-ring), var(--app-selection-button-glow);
+}
+
+@keyframes app-selection-button-in {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.number-setting {
+  background: var(--theme-wash);
+  border: 1px solid var(--theme-border);
+  border-radius: var(--theme-radius-sm);
+  box-sizing: border-box;
+  color: var(--theme-ink);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  justify-content: space-between;
+  min-height: var(--theme-control-sm);
+  padding: var(--theme-space-2xs) var(--theme-space-xs) var(--theme-space-2xs)
+    var(--theme-space-sm);
+}
+
+.number-setting-input {
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  height: var(--theme-control-xs);
+  padding: 0 var(--theme-space-sm);
+  /* Right-aligned digits sit under Windows/Chrome's native spinner arrows. */
+  text-align: left;
+  width: 3.5rem;
+}
+
+.free-text-editor,
+.free-text-view {
+  box-sizing: border-box;
+  display: block;
+  font-family: var(--app-font-family, var(--theme-sans));
+  font-kerning: normal;
+  font-weight: 400;
+  height: 100%;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  width: 100%;
+  word-break: normal;
+}
+
+.free-text-editor {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  margin: 0;
+  outline: 1px dashed rgb(from var(--app-selection) r g b / 0.85);
+  outline-offset: -1px;
+  padding: 0;
+  resize: none;
+}
+
+.free-text-editor::placeholder {
+  color: currentColor;
+  opacity: 0.5;
+}
+
+.highlight-handle,
+.free-text-width-handle {
+  cursor: ew-resize;
+}
+
+.selection-toolbar {
+  box-sizing: border-box;
+  padding: var(--theme-space-md);
+  width: max-content;
+}
+
+.selection-toolbar-actions {
+  justify-content: flex-end;
+}
+
+.selection-copy-button,
+.selection-delete-button,
+.selection-rotate-button {
+  border-color: var(--theme-border);
+  height: var(--theme-control-sm);
+}
+
+.selection-copy-button {
+  padding: 0 var(--theme-space-sm);
+}
+
+.selection-delete-button {
+  justify-self: end;
+  width: var(--theme-control-sm);
+}
+
+.selection-rotate-button {
+  display: grid;
+  padding: 0;
+  place-items: center;
+  width: var(--theme-control-sm);
+}
+
+.note-popover {
+  background: var(--theme-wash);
+  border: 1px solid var(--theme-control-border);
+  border-radius: var(--theme-radius-sm);
+  box-shadow: var(--theme-shadow-floating);
+  color: var(--theme-ink);
+  font-size: var(--theme-text-md);
+  line-height: 1.25rem;
+  overflow: auto;
+  padding: var(--theme-space-sm);
+}
+
+.note-popover-editor {
+  outline: none;
+  overflow: hidden;
+  resize: none;
+}
+
+.note-popover-editor:focus {
+  box-shadow:
+    var(--theme-shadow-floating),
+    0 0 0 2px rgb(from var(--app-selection) r g b / 0.18);
+}
+
+/* Suppresses the iOS Safari selection callout over the highlight button. */
+.pdfdocumenteditor-page .textLayer {
+  -webkit-touch-callout: none;
+  pointer-events: auto;
+}
+.pdfdocumenteditor-page .pdfViewer {
+  z-index: 0;
+}
+.pdfdocumenteditor-page .pdfdocumenteditor-annotation-appearance-layer {
+  pointer-events: none;
+  z-index: 1;
+}
+.pdfdocumenteditor-page .pdfdocumenteditor-highlight-canvas-layer {
+  mix-blend-mode: multiply;
+}
+.pdfdocumenteditor-page .pdfdocumenteditor-ink-canvas-layer {
+  pointer-events: none;
+  z-index: 4;
+}
+.pdfdocumenteditor-page .pdfdocumenteditor-image-stamp-layer {
+  z-index: 3;
+}
+.pdfdocumenteditor-page .pdfdocumenteditor-interaction-layer {
+  z-index: 5;
+}
+.pdfdocumenteditor-page .text-selection-highlight-button {
+  z-index: 8;
+}
+.pdfdocumenteditor-page .annotationLayer {
+  pointer-events: none;
+  z-index: 2;
+}
+
+.pdfdocumenteditor-page .annotationLayer .linkAnnotation {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.pdfdocumenteditor-page .annotationLayer .linkAnnotation *,
+.pdfdocumenteditor-page .annotationLayer [data-internal-link],
+.pdfdocumenteditor-page .annotationLayer .pdfdocumenteditor-external-link {
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.pdfdocumenteditor-page .annotationLayer .linkAnnotation > a,
+.pdfdocumenteditor-page .annotationLayer [data-internal-link],
+.pdfdocumenteditor-page .annotationLayer .pdfdocumenteditor-external-link {
+  pointer-events: auto;
+}
+
+.pdfdocumenteditor-page .annotationLayer .linkAnnotation > a,
+.pdfdocumenteditor-page .annotationLayer [data-internal-link],
+.pdfdocumenteditor-page .annotationLayer .pdfdocumenteditor-external-link {
+  background: rgb(from var(--theme-accent) r g b / 0.08) !important;
+  border: 1px solid rgb(from var(--theme-accent) r g b / 0.42) !important;
+  box-shadow: none !important;
+  color: inherit;
+  cursor: pointer;
+  outline: none !important;
+}
+
+.pdfdocumenteditor-page .pdfViewer {
+  --page-border: 0 solid transparent;
+  --page-margin: 0;
+  --loading-icon-delay: 0ms;
+}
+
+.pdfdocumenteditor-page:not(.show-delayed-spinner)
+  .pdfViewer
+  .page.loadingIcon::after {
+  display: none !important;
+}
+
+.pdfdocumenteditor-page .pdfViewer .page {
+  background: transparent;
+  border: 0;
+  margin: 0;
+  outline: none;
+  overflow: hidden;
+}
+
+.pdfdocumenteditor-page .pdfViewer .canvasWrapper {
+  overflow: hidden;
+}
+.pdfdocumenteditor-page .pdfViewer .canvasWrapper canvas {
+  display: block;
+  margin: 0;
+}
+
+.pdfdocumenteditor-page .pdfViewer .canvasWrapper .selection {
+  background: rgb(from var(--app-selection) r g b / 0.24) !important;
+}
+
+.pdfdocumenteditor-page .textLayer::selection {
+  background: transparent;
+}
+
+.pdfdocumenteditor-page .textLayer ::selection {
+  background: transparent !important;
+}
+
+.pdfdocumenteditor-page .textLayer br::selection,
+.pdfdocumenteditor-page .textLayer .endOfContent::selection,
+.pdfdocumenteditor-page .textLayer .markedContent::selection {
+  background: transparent;
+}
+
+.pdfdocumenteditor-page .textLayer::-moz-selection {
+  background: transparent;
+}
+
+.pdfdocumenteditor-page .textLayer ::-moz-selection {
+  background: transparent !important;
+}
+
+.pdfdocumenteditor-page .textLayer br::-moz-selection,
+.pdfdocumenteditor-page .textLayer .endOfContent::-moz-selection,
+.pdfdocumenteditor-page .textLayer .markedContent::-moz-selection {
+  background: transparent;
+}
+
+.pdfdocumenteditor-page svg {
+  user-select: none;
+}
+
+@media print {
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  html,
+  body,
+  #root {
+    background: white !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .pdfdocumenteditor-scroll-root {
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .pdfdocumenteditor-pages {
+    min-width: 0 !important;
+  }
+
+  .pdfdocumenteditor-page-slot {
+    break-after: page;
+    margin: 0 !important;
+    page-break-after: always;
+  }
+
+  .pdfdocumenteditor-page-slot:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .pdfdocumenteditor-page-slot > article {
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+
+  .pdfdocumenteditor-page {
+    box-shadow: none !important;
+  }
+}
