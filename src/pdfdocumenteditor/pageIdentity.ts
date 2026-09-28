@@ -1,7 +1,4 @@
-/*
- * A page edit moves both halves of an identity: the page half of a `direct:`
- * position, and the object numbers a copy re-creates.
- */
+/* A page edit moves both halves of an identity: the page half of a `direct:` position, and the object numbers a copy re-creates. */
 import {
   directSourceId,
   directSourcePosition,
@@ -121,11 +118,7 @@ export function composePageMappings(
   };
 }
 
-/**
- * An identity whose page the edit removed must become `unresolved:`, which
- * stops the next save: a restated position would resolve to whichever
- * annotation now sits in that slot.
- */
+/** An identity whose page the edit removed must become `unresolved:`, which stops the next save: a restated position would resolve to whichever annotation now sits in that slot. */
 export function restatedSourceIdAcrossPages(
   sourceId: string,
   mapping: PdfPageMapping,
@@ -147,10 +140,7 @@ export function restatedSourceIdAcrossPages(
     : directSourceId(pageIndex, position.annotationIndex);
 }
 
-/**
- * A composite (`5 0 R|geom:...`) is answered by its reference part, which is
- * the part the writer resolves it by.
- */
+/** A composite (`5 0 R|geom:...`) is answered by its reference part, which is the part the writer resolves it by. */
 function renamedSourceId(sourceId: string, renames: PdfAnnotationRenames) {
   if (renames.size === 0) {
     return sourceId;
@@ -160,10 +150,7 @@ function renamedSourceId(sourceId: string, renames: PdfAnnotationRenames) {
   return (key && renames.get(key)) || sourceId;
 }
 
-/**
- * Returns the array it was handed when nothing moved, so React's reference
- * survives.
- */
+/** Returns the array it was handed when nothing moved, so React's reference survives. */
 export function remapAnnotationsAcrossPageEdit<T extends PdfAnnotation>(
   annotations: T[],
   mapping: PdfPageMapping,
@@ -196,11 +183,7 @@ export function remapAnnotationsAcrossPageEdit<T extends PdfAnnotation>(
   return changed ? next : annotations;
 }
 
-/**
- * A removal whose page the edit took out is dropped rather than restated:
- * carrying the position forward would delete whichever annotation moved into
- * that slot.
- */
+/** A removal whose page the edit took out is dropped rather than restated: carrying the position forward would delete whichever annotation moved into that slot. */
 export function remapRemovedSourcesAcrossPageEdit(
   removedSourceIds: Iterable<string>,
   mapping: PdfPageMapping,

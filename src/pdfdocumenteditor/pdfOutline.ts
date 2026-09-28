@@ -1,7 +1,4 @@
-/*
- * pdf.js hands the outline tree over already parsed; everything below is about
- * not trusting it.
- */
+/* pdf.js hands the outline tree over already parsed; everything below is about not trusting it. */
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { boundedDocumentLine } from "./untrustedText";
 
@@ -15,8 +12,7 @@ export type PdfOutlineEntry = {
   destination: unknown;
 };
 
-// A document is free to declare a million entries, or to nest them until a
-// recursive render blows the stack.
+// A document is free to declare a million entries, or to nest them until a recursive render blows the stack.
 const MAX_OUTLINE_ENTRIES = 2000;
 const MAX_OUTLINE_DEPTH = 12;
 const MAX_OUTLINE_TITLE_LENGTH = 300;
@@ -97,10 +93,7 @@ function sanitizeOutlineItems(
   return entries;
 }
 
-/**
- * A named destination or an explicit array; anything else is dropped and the
- * entry renders as a plain heading.
- */
+/** A named destination or an explicit array; anything else is dropped and the entry renders as a plain heading. */
 function usableDestination(dest: unknown) {
   if (typeof dest === "string") {
     return dest.length > 0 && dest.length <= MAX_OUTLINE_TITLE_LENGTH

@@ -1,7 +1,4 @@
-// The code-splitting boundary, measured against the built output: one static
-// import of the tabbedapp barrel pulls the lazily imported PDF stack back into
-// the entry (rolldown only warns), and it looks fine on the dev server, whose
-// module graph is unbundled.
+// The code-splitting boundary, measured against the built output: one static import of the tabbedapp barrel pulls the lazily imported PDF stack back into the entry (rolldown only warns), and it looks fine on the dev server, whose module graph is unbundled.
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,15 +21,13 @@ const sizeOf = (file) => {
 };
 
 test("the deferred PDF code is not in the initial bundle", () => {
-  // An index.html this pattern read nothing out of would pass whatever the build
-  // put in it.
+  // An index.html this pattern read nothing out of would pass whatever the build put in it.
   assert.ok(
     referenced.length > 0,
     "index.html references no built asset at all; this case is reading the wrong file",
   );
 
-  // pdf.worker is a URL preloaded on purpose to warm the cache, never imported
-  // as code, so it does not count against the boundary.
+  // pdf.worker is a URL preloaded on purpose to warm the cache, never imported as code, so it does not count against the boundary.
   const deferred = /(pdfjs|TabbedAppDocument|pdfTemplates|^es-)/;
   const leaked = referenced.filter(
     (file) => deferred.test(file) && !/pdf\.worker/.test(file),

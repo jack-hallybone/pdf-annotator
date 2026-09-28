@@ -26,43 +26,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
+      # Stamps the source before the build, so Workbox hashes the real content.
+      - name: Stamp version
+        run: sed -i 's|<span id="version" hidden>v. dev</span>|<span id="version" hidden>v. '"$(date -u '+%Y-%m-%d %H:%M:%S UTC')"'</span>|' index.html
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts --engine-strict
-
-      # Not part of `verify`: it queries the advisory database over the
-      # network, so its answer changes while the repository does not, and
-      # `verify` must not go red because somebody published an advisory since
-      # the last commit.
-      - name: Audit dependencies
-        run: npm run security:audit
-
-      # Setup, not a check. Locally the browser is installed once; here it is
-      # installed per run.
-      - name: Install Playwright browser
-        run: npm run test:browser:setup
-
-      # Before verify: og:image needs the absolute site URL, and Open Graph
-      # consumers don't resolve relative ones.
+      # Before verify: og:image needs the absolute site URL, and Open Graph consumers don't resolve relative ones.
       - name: Set up GitHub Pages
         id: pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
+      # No native Node setup here: verify (dependency audit and Playwright browser included) runs entirely inside the same pinned container compose.yaml and agents use - one environment for everyone, not three.
       - name: Verify
-        run: npm run verify
+        run: docker compose run --rm verify
         env:
           VITE_SITE_URL: ${{ steps.pages.outputs.base_url }}
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
-
-      # Only a release is stamped; everything else keeps the "preview" literal
-      # index.html ships with.
-      - name: Stamp the release version
-        run: node scripts/stamp_version.mjs dist/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
@@ -73,8 +51,7 @@ jobs:
     name: Deploy
     needs: build
 
-    # Never cancelled: a deploy already publishing must finish, or the site is
-    # left half-written.
+    # Never cancelled: a deploy already publishing must finish, or the site is left half-written.
     concurrency:
       group: pages
       cancel-in-progress: false
@@ -85,8 +62,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
-    # The only job holding the Pages credential. It checks out nothing and runs
-    # no repository code.
+    # The only job holding the Pages credential. It checks out nothing and runs no repository code.
     permissions:
       pages: write
       id-token: write

@@ -16,9 +16,7 @@ import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import type { PdfDocumentEditorViewBridge } from "../src/pdfdocumenteditor/useDocumentModel";
 import type { PdfDocumentEditorViewSnapshot } from "../src/pdfdocumenteditor/viewSnapshot";
 
-// The document model's own save and annotation-save-identity.test.ts's parked
-// one keep their own copies of the same steps, and the defect lived in the step
-// they share: the saved bytes become the baseline without being re-imported.
+// The document model's own save and annotation-save-identity.test.ts's parked one keep their own copies of the same steps, and the defect lived in the step they share: the saved bytes become the baseline without being re-imported.
 
 // pdf.js's browser entry touches these globals while it is evaluated.
 class FakeDOMMatrix {}
@@ -36,8 +34,7 @@ globals.Path2D ??= FakePath2D;
 const { useDocumentModel } =
   await import("../src/pdfdocumenteditor/useDocumentModel");
 
-// pdfRender's module side effect points workerSrc at a stubbed Vite asset, so it
-// has to be aimed at the real worker after that import.
+// pdfRender's module side effect points workerSrc at a stubbed Vite asset, so it has to be aimed at the real worker after that import.
 const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 GlobalWorkerOptions.workerSrc = new URL(
   "../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
@@ -105,10 +102,7 @@ test("the model's own save resolves the second edit in the file it just wrote", 
   assert.deepEqual(await noteTexts(written.at(-1)!), ["B edited twice", "C"]);
 });
 
-// The first save takes the annotation's dictionary out of the file, and
-// restating that identity as `unresolved:shifted:` put an identity nothing can
-// match onto the annotation the undo brings back, stopping the next save for the
-// whole document.
+// The first save takes the annotation's dictionary out of the file, and restating that identity as `unresolved:shifted:` put an identity nothing can match onto the annotation the undo brings back, stopping the next save for the whole document.
 test("a note deleted, saved and undone is written fresh by the next save", async () => {
   const { sourceIdBeforeDelete } = await deleteSaveUndoSave(directNotesPdf);
   assert.equal(sourceIdBeforeDelete, "direct:0:0");

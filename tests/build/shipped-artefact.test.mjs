@@ -1,6 +1,4 @@
-// One property, read from `dist/` rather than from the sources: every
-// precached file carries its identity in its path, which Workbox states itself -
-// `revision` is null exactly when the path is already the identity.
+// One property, read from `dist/` rather than from the sources: every precached file carries its identity in its path, which Workbox states itself - `revision` is null exactly when the path is already the identity.
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import test from "node:test";
@@ -39,8 +37,7 @@ test("the build precaches something at all", () => {
 });
 
 test("workbox reported nothing about the manifest it built", () => {
-  // An oversize file is dropped with a warning rather than an error: the PDF.js
-  // worker is 2.33 MB and Workbox's default ceiling is 2 MiB.
+  // An oversize file is dropped with a warning rather than an error: the PDF.js worker is 2.33 MB and Workbox's default ceiling is 2 MiB.
   assert.deepEqual(warnings, []);
 });
 
@@ -68,8 +65,7 @@ test("the set of precached files without an identity in their path is unchanged"
 });
 
 test("nothing the build emitted under a hashed path was left out", () => {
-  // Derived rather than declared: a file of an unclassified shape fails the build
-  // naming itself instead of being absorbed into the cache or silently skipped.
+  // Derived rather than declared: a file of an unclassified shape fails the build naming itself instead of being absorbed into the cache or silently skipped.
   const pdfjs = readdirSync(OUT_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && PDFJS_DIR.test(entry.name))
     .map((entry) => entry.name);
@@ -101,8 +97,7 @@ test("nothing the build emitted under a hashed path was left out", () => {
 
 test("no built file points at a source map that did not ship", () => {
   const files = builtFiles(OUT_DIR);
-  // A walk that found nothing would pass this on an artefact full of dangling
-  // references.
+  // A walk that found nothing would pass this on an artefact full of dangling references.
   assert.ok(files.length > 0, "the build output was walked and held no files");
 
   const bad = [];
@@ -154,8 +149,7 @@ test("the app's own bundles fetch PDF.js from the hashed directory", () => {
   );
 });
 
-// Not "no field called undoStack is written" - a spelling, and the next spelling
-// passes it - but that the shipped code has no way to write to a store.
+// Not "no field called undoStack is written" - a spelling, and the next spelling passes it - but that the shipped code has no way to write to a store.
 
 const STORAGE_WRITE_APIS = [
   "localStorage",
@@ -190,15 +184,14 @@ test("the shipped app reaches no browser store", () => {
 
 test("no build-time name token survived into the shipped files", () => {
   const found = [];
-  for (const where of ["index.html", "site.webmanifest"]) {
+  for (const where of ["index.html", "manifest.webmanifest"]) {
     const path = join(OUT_DIR, where);
     if (!existsSync(path)) {
       found.push(`${where} was not emitted`);
       continue;
     }
     const text = readFileSync(path, "utf8");
-    // A file that never carried a token proves nothing, so require the substituted
-    // value to be there before trusting its absence.
+    // A file that never carried a token proves nothing, so require the substituted value to be there before trusting its absence.
     if (!text.includes(PRODUCT_NAME)) {
       found.push(`${where} does not name the product at all`);
     }
@@ -209,10 +202,7 @@ test("no build-time name token survived into the shipped files", () => {
   assert.deepEqual(found, []);
 });
 
-// The browser's chrome and the installed app's splash cannot read a custom
-// property, so index.html's two `theme-color` metas and the manifest's two
-// colours are hand-copied hexes. A manifest carries no media query, so its value
-// is the light half, and conditional at-rule blocks are dropped before resolving.
+// The browser's chrome and the installed app's splash cannot read a custom property, so index.html's two `theme-color` metas and the manifest's two colours are hand-copied hexes. A manifest carries no media query, so its value is the light half, and conditional at-rule blocks are dropped before resolving.
 
 const hex = (value) => {
   const text = String(value).toLowerCase();
@@ -243,8 +233,7 @@ const shippedStyles = () => {
     );
 };
 
-// The light/dark pair a token resolves to, or null. The second spelling is what
-// Lightning CSS downlevels `light-dark()` to when it minifies this build.
+// The light/dark pair a token resolves to, or null. The second spelling is what Lightning CSS downlevels `light-dark()` to when it minifies this build.
 const lightDark = (css, token) => {
   const HEX = "#[0-9a-f]{3}(?:[0-9a-f]{3})?";
   const pattern = new RegExp(
@@ -276,8 +265,7 @@ const bodyGround = (css) => {
 test("the colours declared outside the stylesheet are the ones the app paints", () => {
   const css = shippedStyles();
 
-  // A ground that could not be read would leave the splash colour compared
-  // against nothing.
+  // A ground that could not be read would leave the splash colour compared against nothing.
   const ground = bodyGround(css);
   assert.ok(
     ground,
@@ -313,7 +301,7 @@ test("the colours declared outside the stylesheet are the ones the app paints", 
   );
 
   const manifest = JSON.parse(
-    readFileSync(join(OUT_DIR, "site.webmanifest"), "utf8"),
+    readFileSync(join(OUT_DIR, "manifest.webmanifest"), "utf8"),
   );
   const declared = {
     "the light theme-color meta": [metas.light, chrome.light],

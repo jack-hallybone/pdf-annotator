@@ -1,14 +1,11 @@
-// The caches this project's worker sweeps must stay its own, because
-// `caches.keys()` is origin-wide and several projects share this origin.
+// The caches this project's worker sweeps must stay its own, because `caches.keys()` is origin-wide and several projects share this origin.
 
 //   Run:  node tests/worker.test.mjs   (builds the site; needs playwright's chromium)
 
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
 
-// From @playwright/test, which is what package.json declares: `playwright`
-// resolves only because it is installed underneath it, so naming it here would
-// be an undeclared dependency and declaring it a second version pin.
+// From @playwright/test, which is what package.json declares: `playwright` resolves only because it is installed underneath it, so naming it here would be an undeclared dependency and declaring it a second version pin.
 import { chromium } from "@playwright/test";
 import { serveBuiltSite } from "./site.mjs";
 
@@ -22,9 +19,7 @@ const APP_READY = ".browserapp-home-card";
 // Matched rather than named: its hash changes every time the source does.
 const ENTRY = /\/assets\/index-[A-Za-z0-9_-]+\.js$/u;
 
-// Activated is not the same as controlling: with no `clientsClaim` the page that
-// installs the worker is not controlled by it, so waiting for a
-// `controllerchange` on that first load waits forever.
+// Activated is not the same as controlling: with no `clientsClaim` the page that installs the worker is not controlled by it, so waiting for a `controllerchange` on that first load waits forever.
 const activated = (page) =>
   page.evaluate(async () => {
     const registration = await navigator.serviceWorker.ready;
@@ -39,9 +34,7 @@ const activated = (page) =>
     });
   });
 
-// Found by asking rather than by rebuilding Workbox's naming rule: a name
-// derived here would stop matching the moment Workbox changed it, and the case
-// would pass having planted nothing.
+// Found by asking rather than by rebuilding Workbox's naming rule: a name derived here would stop matching the moment Workbox changed it, and the case would pass having planted nothing.
 const precacheName = (page) =>
   page.evaluate(async () => {
     const names = await caches.keys();
@@ -55,9 +48,7 @@ async function installer(context) {
   return page;
 }
 
-// A page the worker actually serves, asserted rather than assumed: an
-// uncontrolled page reads straight from the network and would pass every case
-// below while proving nothing about the cache.
+// A page the worker actually serves, asserted rather than assumed: an uncontrolled page reads straight from the network and would pass every case below while proving nothing about the cache.
 async function served(context, { offline = false } = {}) {
   const page = await context.newPage();
   await page.goto(APP, { waitUntil: "domcontentloaded" }).catch(() => {});
@@ -107,9 +98,7 @@ test("the app installs a worker and opens with the network dead", async (t) => {
 });
 
 test("the precache is namespaced to this deployment, so a sibling's sweep cannot reach it", async (t) => {
-  // Eleven projects share this origin, and `cleanupOutdatedCaches()` deletes
-  // caches that look like older versions of its own. Workbox's default cache
-  // suffix is `registration.scope`, which differs per project.
+  // Eleven projects share this origin, and `cleanupOutdatedCaches()` deletes caches that look like older versions of its own. Workbox's default cache suffix is `registration.scope`, which differs per project.
   const context = await browser.newContext();
   t.after(async () => await context.close());
 

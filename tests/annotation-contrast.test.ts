@@ -23,8 +23,7 @@ import {
   toolFillColor,
 } from "../src/tabbedapp/toolConfig";
 
-// foregroundOn() returns a token reference and the light token is #231d22, not
-// pure black: measuring against black flatters the result by most of a point.
+// foregroundOn() returns a token reference and the light token is #1c1917, not pure black: measuring against black flatters the result by most of a point.
 const { light: INK_ON_LIGHT, dark: INK_ON_DARK } = FOREGROUND_INKS;
 
 function chosenContrast(fill: RgbColor) {
@@ -54,9 +53,7 @@ test("foreground choice beats the alternative for every swatch", () => {
   }
 });
 
-// The highlighter glyph is an icon rather than text, so the bar is WCAG's 3:1
-// for non-text content and red is the tightest at 3.91:1. The button paints its
-// glyph opaque, which is why full-strength ink is measured here and nowhere else.
+// The highlighter glyph is an icon rather than text, so the bar is WCAG's 3:1 for non-text content and red is the tightest at 3.91:1. The button paints its glyph opaque, which is why full-strength ink is measured here and nowhere else.
 test("marks on a swatch clear the non-text contrast floor", () => {
   for (const color of annotationColorSwatches) {
     const value = chosenContrast(color);
@@ -73,10 +70,7 @@ test("foregroundOn returns a token, never a raw colour", () => {
   }
 });
 
-// The assertion above is satisfied by any name of that shape, so a rename in the
-// stylesheet would leave it green with every mark painted from an unset custom
-// property, which resolves to nothing and inherits the ink. Comments are
-// stripped first, so a token named in prose is not a declaration.
+// The assertion above is satisfied by any name of that shape, so a rename in the stylesheet would leave it green with every mark painted from an unset custom property, which resolves to nothing and inherits the ink. Comments are stripped first, so a token named in prose is not a declaration.
 test("the inks foregroundOn names are declared, and are the ones measured here", () => {
   const styles = readFileSync(
     fileURLToPath(
@@ -138,10 +132,7 @@ test("note popover text stays legible for every note colour", () => {
   assert.equal(prefersDarkForegroundOn(annotationColors.black), false);
 });
 
-// A note's outline and glyph are the same ink at NOTE_MARK_OPACITY over the
-// note's own fill: at the 0.62 and 0.66 they used to be, purple and red measured
-// about 2.5:1. The opacities are imported rather than repeated, so lowering
-// either constant is what fails this test.
+// A note's outline and glyph are the same ink at NOTE_MARK_OPACITY over the note's own fill: at the 0.62 and 0.66 they used to be, purple and red measured about 2.5:1. The opacities are imported rather than repeated, so lowering either constant is what fails this test.
 test("the marks on a note clear the same floor at the alpha they are painted", () => {
   for (const color of annotationColorSwatches) {
     const ink = prefersDarkForegroundOn(color) ? INK_ON_LIGHT : INK_ON_DARK;
@@ -159,14 +150,11 @@ test("the marks on a note clear the same floor at the alpha they are painted", (
   }
 });
 
-// --theme-ink's own two values (src/tabbedapp/toolConfig.ts's THEME_INK_LIGHT
-// / THEME_INK_DARK), kept here as raw RGB so the test measures against the
-// same backdrop the fix targets, not a value it recomputes independently.
-const THEME_INK_LIGHT: RgbColor = [0x23 / 255, 0x1d / 255, 0x22 / 255];
-const THEME_INK_DARK: RgbColor = [0xed / 255, 0xe5 / 255, 0xeb / 255];
+// --theme-ink's own two values (src/tabbedapp/toolConfig.ts's THEME_INK_LIGHT / THEME_INK_DARK), kept here as raw RGB so the test measures against the same backdrop the fix targets, not a value it recomputes independently.
+const THEME_INK_LIGHT: RgbColor = [0x1c / 255, 0x19 / 255, 0x17 / 255];
+const THEME_INK_DARK: RgbColor = [0xe9 / 255, 0xe7 / 255, 0xe2 / 255];
 
-// Either a plain "#rrggbb" (fill already clears the floor in both schemes) or
-// "light-dark(#rrggbb, #rrggbb)" (it didn't, in at least one scheme).
+// Either a plain "#rrggbb" (fill already clears the floor in both schemes) or "light-dark(#rrggbb, #rrggbb)" (it didn't, in at least one scheme).
 function parseFill(value: string): { light: RgbColor; dark: RgbColor } {
   const pair = /^light-dark\((#[0-9a-fA-F]{6}),\s*(#[0-9a-fA-F]{6})\)$/.exec(
     value,
@@ -179,12 +167,7 @@ function parseFill(value: string): { light: RgbColor; dark: RgbColor } {
   return { light: rgb, dark: rgb };
 }
 
-// The highlighter and note toolbar icons keep a plain-ink stroke, like every
-// other tool, and paint the reader's own colour as a small fill instead
-// (toolFillColor). That fill must still clear the icon's 3:1 floor against
-// the ink it now sits next to: the default yellow measured ~1.15:1 against
-// dark mode's plain ink, close enough to invisible that the shape read as a
-// blob rather than an icon.
+// The highlighter and note toolbar icons keep a plain-ink stroke, like every other tool, and paint the reader's own colour as a small fill instead (toolFillColor). That fill must still clear the icon's 3:1 floor against the ink it now sits next to: the default yellow measured ~1.15:1 against dark mode's plain ink, close enough to invisible that the shape read as a blob rather than an icon.
 test("the highlight and note tool icons' fill clears the floor against theme ink in both schemes", () => {
   for (const tool of ["highlight", "stickyNote"] as const) {
     for (const color of annotationColorSwatches) {
@@ -210,11 +193,7 @@ test("the highlight and note tool icons' fill clears the floor against theme ink
   }
 });
 
-// A highlight always lands on a white page, so its toolbar preview must read
-// the same regardless of the app's own theme: a colour scheme cannot enter
-// this computation, only paper can. Also guards against reverting to the raw
-// colour plus CSS opacity, which would (correctly) look flattened over
-// whatever background the button happens to have instead.
+// A highlight always lands on a white page, so its toolbar preview must read the same regardless of the app's own theme: a colour scheme cannot enter this computation, only paper can. Also guards against reverting to the raw colour plus CSS opacity, which would (correctly) look flattened over whatever background the button happens to have instead.
 test("the highlight indicator is flattened against paper, not raw colour plus opacity", () => {
   for (const color of annotationColorSwatches) {
     for (const opacity of [0.1, 0.5, 0.8]) {
@@ -270,12 +249,7 @@ test("toolFillColor has a fill only for the tools with a fillable region", () =>
   }
 });
 
-// The favicon and wordmark hand-draw the same highlighter icon as a static
-// SVG, with a dark-mode rule flipping ink strokes to a light colour like
-// every other icon stroke. The mark's true yellow fill fails 3:1 against
-// that lighter ink, so a second dark-mode rule bends the FILL for contrast
-// instead (deliberately to a different hue, not just a muted yellow) - the
-// stroke is left alone, following the scheme plainly.
+// The favicon and wordmark hand-draw the same highlighter icon as a static SVG, with a dark-mode rule flipping ink strokes to a light colour like every other icon stroke. The mark's true yellow fill fails 3:1 against that lighter ink, so a second dark-mode rule bends the FILL for contrast instead (deliberately to a different hue, not just a muted yellow) - the stroke is left alone, following the scheme plainly.
 test("the favicon and wordmark's highlighter mark fill bends for contrast in dark mode, not the stroke", () => {
   for (const asset of ["favicon.svg", "title.svg"]) {
     const svg = readFileSync(

@@ -430,8 +430,7 @@ function dedupeClientRects(rects: DOMRect[]) {
   });
 }
 
-// Text-highlight resize handles: mapping a drag point back onto the page's
-// text-layer segments.
+// Text-highlight resize handles: mapping a drag point back onto the page's text-layer segments.
 export function oppositeHighlightHandleAnchor(
   annotation: Extract<PdfAnnotation, { kind: "textHighlight" }>,
   handle: "start" | "end",

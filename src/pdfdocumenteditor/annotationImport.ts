@@ -22,6 +22,7 @@ import { normalizeAnnotationComment } from "./annotationComments";
 import { strippedDocumentText } from "./untrustedText";
 import {
   DIRECT_SOURCE_ID_PREFIX,
+  clampPdfCoordinateMagnitude,
   clampPdfNumber,
   directSourceId,
   unresolvedSourceId,
@@ -29,8 +30,7 @@ import {
 import { loadEditablePdf } from "./pdfPageOperations";
 import type { PdfAnnotation, PdfPoint, PdfRect } from "./types";
 
-// Each annotation subtype has a different runtime shape; every field is
-// validated below.
+// Each annotation subtype has a different runtime shape; every field is validated below.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ExistingPdfAnnotation = Record<string, any>;
 
@@ -56,8 +56,7 @@ export function getDisplayAnnotations(page: PDFPageProxy) {
   return annotations;
 }
 
-// An editable kind that failed validation, distinct from `null`, which means
-// "not an editable kind".
+// An editable kind that failed validation, distinct from `null`, which means "not an editable kind".
 const MALFORMED = Symbol("malformed-annotation");
 
 const editableAnnotationTypes = new Set<number>([
@@ -68,12 +67,10 @@ const editableAnnotationTypes = new Set<number>([
   AnnotationType.TEXT,
 ]);
 
-// At 3-6 bytes of heap per character, roughly 30 MiB of note text, beside the
-// 128 MiB of file bytes the app already accepts.
+// At 3-6 bytes of heap per character, roughly 30 MiB of note text, beside the 128 MiB of file bytes the app already accepts.
 export const MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS = 8_000_000;
 
-// Returns as soon as the total passes `budget`, so the number means "at least
-// this many" and the walk never holds more than roughly `budget` characters.
+// Returns as soon as the total passes `budget`, so the number means "at least this many" and the walk never holds more than roughly `budget` characters.
 export async function annotationTextCharacters(
   pdf: PDFDocumentProxy,
   budget: number,
@@ -102,8 +99,7 @@ export async function annotationTextCharacters(
   return characters;
 }
 
-// Imported stamps are retained as PNG/base64 in annotation state, so these stay
-// well below the general file-image preflight ceiling.
+// Imported stamps are retained as PNG/base64 in annotation state, so these stay well below the general file-image preflight ceiling.
 const MAX_EDITABLE_STAMP_PIXELS = 4_000_000;
 const MAX_EDITABLE_STAMP_PIXELS_PER_DOCUMENT = 12_000_000;
 const MAX_ENCODED_STAMP_STREAM_BYTES = 16 * 1024 * 1024;
@@ -120,8 +116,7 @@ export async function importExistingAnnotationsForPage(
   pdfBytes: Uint8Array,
 ) {
   const annotations = await getDisplayAnnotations(page);
-  // Sequential on purpose: a stamp import owns decoded RGB, RGBA, canvas and
-  // base64 buffers at once, and mapping in parallel multiplies that peak.
+  // Sequential on purpose: a stamp import owns decoded RGB, RGBA, canvas and base64 buffers at once, and mapping in parallel multiplies that peak.
   const mapped: Array<PdfAnnotation | null | typeof MALFORMED> = [];
   for (const [annotationIndex, annotation] of annotations.entries()) {
     mapped.push(
@@ -174,7 +169,8 @@ async function mapExistingAnnotation(
 
   switch (annotation.annotationType) {
     case AnnotationType.HIGHLIGHT: {
-      const rects = quadPointsToRects(annotation.quadPoints, annotation.rect);
+      const quadPoints = cappedQuadPoints(annotation.quadPoints);
+      const rects = quadPointsToRects(quadPoints, annotation.rect);
       if (rects.length === 0) {
         return null;
       }
@@ -187,8 +183,8 @@ async function mapExistingAnnotation(
         pageIndex,
         rects,
         quadPoints:
-          annotation.quadPoints?.length > 0
-            ? chunkQuadPoints(annotation.quadPoints)
+          quadPoints && quadPoints.length > 0
+            ? chunkQuadPoints(quadPoints)
             : rects.map(rectToQuadPoints),
         color,
         opacity: highlightOpacity(annotation),
@@ -236,8 +232,7 @@ async function mapExistingAnnotation(
         return null;
       }
 
-      // Recovers the rotation freeTextAppearance wrote; null for anything that
-      // does not match that shape, which falls back to the plain Rect.
+      // Recovers the rotation freeTextAppearance wrote; null for anything that does not match that shape, which falls back to the plain Rect.
       const appearance = await extractAppearanceRotationAndRect(
         pdfBytes,
         pageIndex,
@@ -412,6 +407,25 @@ type InkList =
       y: number;
     }>;
 
+// A corrupt or hostile /InkList can claim millions of points across one or many paths; without a cap, one annotation could balloon memory, redraw cost and the bytes a later save has to write back out. The cap is on the raw list, before pointsArrayToPath ever walks it, so a huge claim costs one bounded slice rather than however large it says it is.
+export const MAX_INK_POINTS_PER_ANNOTATION = 20_000;
+
+function rawInkListLength(list: InkList) {
+  return isPointObjectList(list) ? list.length : Math.floor(list.length / 2);
+}
+
+function capRawInkList(list: InkList, maxPoints: number): InkList {
+  if (maxPoints <= 0) {
+    return [];
+  }
+  if (rawInkListLength(list) <= maxPoints) {
+    return list;
+  }
+  return isPointObjectList(list)
+    ? list.slice(0, maxPoints)
+    : (list as number[] | Float32Array).slice(0, maxPoints * 2);
+}
+
 function normalizeInkLists(annotation: ExistingPdfAnnotation): PdfPoint[][] {
   const rawInkLists =
     annotation.inkLists ??
@@ -425,7 +439,11 @@ function normalizeInkLists(annotation: ExistingPdfAnnotation): PdfPoint[][] {
   }
 
   if (isFlatNumberList(rawInkLists)) {
-    return [pointsArrayToPath(rawInkLists)];
+    return [
+      pointsArrayToPath(
+        capRawInkList(rawInkLists, MAX_INK_POINTS_PER_ANNOTATION),
+      ),
+    ];
   }
 
   if (!isIterable(rawInkLists)) {
@@ -433,13 +451,26 @@ function normalizeInkLists(annotation: ExistingPdfAnnotation): PdfPoint[][] {
   }
 
   const lists = Array.from(rawInkLists as Iterable<unknown>);
-  return lists
-    .map((inkList) =>
-      isFlatNumberList(inkList) || isPointObjectList(inkList)
-        ? pointsArrayToPath(inkList as InkList)
-        : [],
-    )
-    .filter((path) => path.length > 0);
+  const paths: PdfPoint[][] = [];
+  // The cap is shared across every path in this one annotation, not per-path, so a hostile file cannot dodge it by splitting one huge claim into many smaller-looking ones.
+  let remainingPoints = MAX_INK_POINTS_PER_ANNOTATION;
+  for (const inkList of lists) {
+    if (remainingPoints <= 0) {
+      break;
+    }
+    if (!(isFlatNumberList(inkList) || isPointObjectList(inkList))) {
+      continue;
+    }
+
+    const path = pointsArrayToPath(
+      capRawInkList(inkList as InkList, remainingPoints),
+    );
+    if (path.length > 0) {
+      paths.push(path);
+      remainingPoints -= path.length;
+    }
+  }
+  return paths;
 }
 
 function isFlatNumberList(value: unknown): value is number[] | Float32Array {
@@ -540,8 +571,7 @@ function inkColor(
 }
 
 function isInkHighlight(annotation: ExistingPdfAnnotation) {
-  // An explicit intent settles it before the text hints, which read /Contents
-  // and would turn a pen stroke commented "highlight this" into a highlighter.
+  // An explicit intent settles it before the text hints, which read /Contents and would turn a pen stroke commented "highlight this" into a highlighter.
   if (annotation.it === "Ink" || annotation.intent === "Ink") {
     return false;
   }
@@ -732,13 +762,10 @@ function firstFiniteNumber(...values: unknown[]) {
   return null;
 }
 
-// /Contents and nothing else: falling back to pdf.js's appearance
-// re-extraction would invent a comment from whatever the mark is drawn over.
+// /Contents and nothing else: falling back to pdf.js's appearance re-extraction would invent a comment from whatever the mark is drawn over. Character rules but no length bound, same as extractAnnotationText: this is the reader's own comment, and any OTHER edit to the annotation rewrites it verbatim, so truncating it here would silently cut it on that later save.
 function extractAnnotationComment(annotation: ExistingPdfAnnotation) {
   const contents = annotation.contentsObj?.str ?? annotation.contents;
-  return typeof contents === "string"
-    ? normalizeAnnotationComment(contents)
-    : "";
+  return typeof contents === "string" ? strippedDocumentText(contents) : "";
 }
 
 function extractOverlaidText(annotation: ExistingPdfAnnotation) {
@@ -751,14 +778,13 @@ function extractOverlaidText(annotation: ExistingPdfAnnotation) {
   return text.length > 0 ? text : undefined;
 }
 
-// Character rules but no length bound; see CLAUDE.md Learnings.
+// Character rules but no length bound, same as extractAnnotationComment: this is the reader's own writing, and truncating it here would silently cut it on the next save.
 function extractAnnotationText(annotation: ExistingPdfAnnotation) {
   return strippedDocumentText(rawAnnotationText(annotation));
 }
 
 function rawAnnotationText(annotation: ExistingPdfAnnotation) {
-  // `/Contents` wins: `textContent` is pdf.js's re-extraction of what was
-  // drawn, so preferring it would bake word-wrap points in as newlines.
+  // `/Contents` wins: `textContent` is pdf.js's re-extraction of what was drawn, so preferring it would bake word-wrap points in as newlines.
   const fromContents = annotation.contentsObj?.str ?? annotation.contents;
   if (typeof fromContents === "string" && fromContents.length > 0) {
     return fromContents;
@@ -813,8 +839,7 @@ export function existingAnnotationId(
   );
 }
 
-// Confirm here, where pdf.js's subtype and rectangle are still to hand and the
-// same check `existingAnnotationDict` makes can be applied.
+// Confirm here, where pdf.js's subtype and rectangle are still to hand and the same check `existingAnnotationDict` makes can be applied.
 async function confirmedAnnotationSourceId(
   pdfBytes: Uint8Array,
   annotation: ExistingPdfAnnotation,
@@ -849,16 +874,14 @@ function existingAnnotationSourceId(
   pageIndex: number,
   annotationIndex: number,
 ) {
-  // A ref-shaped id (5R, 50R1) is stronger than /NM, geometry or array
-  // position, so never OR those weaker aliases into the same identity.
+  // A ref-shaped id (5R, 50R1) is stronger than /NM, geometry or array position, so never OR those weaker aliases into the same identity.
   const pdfJsId = annotationTextHint(annotation.id).trim();
   if (parsePdfJsRef(pdfJsId)) {
     return pdfJsId;
   }
 
   if (pdfJsId) {
-    // A direct dictionary's /NM is user-controlled metadata and must not
-    // override its /Annots position.
+    // A direct dictionary's /NM is user-controlled metadata and must not override its /Annots position.
     return directSourceId(pageIndex, annotationIndex);
   }
 
@@ -875,8 +898,7 @@ function existingAnnotationSourceId(
     return preciseCandidates[0];
   }
 
-  // Page and /Annots position is the only exact locator a direct dictionary
-  // has, and it holds until the writer mutates that array.
+  // Page and /Annots position is the only exact locator a direct dictionary has, and it holds until the writer mutates that array.
   return directSourceId(pageIndex, annotationIndex);
 }
 
@@ -902,10 +924,23 @@ function uniqueSourceIdCandidates(values: unknown[]) {
   return candidates;
 }
 
+// A corrupt or hostile /QuadPoints can claim millions of quads across one annotation; capped the same way ink points are - on the raw array, before either chunkQuadPoints call site below ever walks it - so a huge claim costs one bounded slice. The cap lives here, once, so the rects this builds and the raw quadPoints the annotation keeps for its own /QuadPoints on save cannot disagree about how much survived.
+export const MAX_QUADPOINTS_PER_ANNOTATION = 5_000;
+
+function cappedQuadPoints(quadPoints?: number[]) {
+  if (!quadPoints || quadPoints.length === 0) {
+    return quadPoints;
+  }
+  return quadPoints.length > MAX_QUADPOINTS_PER_ANNOTATION * 8
+    ? quadPoints.slice(0, MAX_QUADPOINTS_PER_ANNOTATION * 8)
+    : quadPoints;
+}
+
 function quadPointsToRects(quadPoints?: number[], rect?: number[]) {
   if (quadPoints?.length) {
     return chunkQuadPoints(quadPoints)
       .filter((quad) => quad.every(Number.isFinite))
+      .map((quad) => quad.map(clampPdfCoordinateMagnitude))
       .map((quad) => ({
         x1: Math.min(quad[0], quad[2], quad[4], quad[6]),
         y1: Math.min(quad[1], quad[3], quad[5], quad[7]),
@@ -929,14 +964,23 @@ function pointsArrayToPath(points: InkList): PdfPoint[] {
   if (isPointObjectList(points)) {
     return points
       .map((point) => ({ x: Number(point.x), y: Number(point.y) }))
-      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .map((point) => ({
+        x: clampPdfCoordinateMagnitude(point.x),
+        y: clampPdfCoordinateMagnitude(point.y),
+      }));
   }
 
   const numericPoints = Array.from(points as number[] | Float32Array);
   return Array.from({ length: Math.floor(points.length / 2) }, (_, index) => ({
     x: Number(numericPoints[index * 2]),
     y: Number(numericPoints[index * 2 + 1]),
-  })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => ({
+      x: clampPdfCoordinateMagnitude(point.x),
+      y: clampPdfCoordinateMagnitude(point.y),
+    }));
 }
 
 const editablePdfCache = new WeakMap<Uint8Array, Promise<PDFDocument>>();
@@ -964,9 +1008,7 @@ type AppearanceRotationAndRect = {
   rotation: number;
 };
 
-// The raw pdf-lib dictionary behind a pdf.js annotation, matched by object and
-// generation number or by confirmed /Annots position, and nothing weaker: /NM,
-// geometry and "the only Highlight on the page" can all hit a different object.
+// The raw pdf-lib dictionary behind a pdf.js annotation, matched by object and generation number or by confirmed /Annots position, and nothing weaker: /NM, geometry and "the only Highlight on the page" can all hit a different object.
 async function existingAnnotationDict(
   pdfBytes: Uint8Array,
   pageIndex: number,
@@ -1003,8 +1045,7 @@ async function existingAnnotationDict(
     return null;
   }
 
-  // The entry itself, not a lookup: a reference here means pdf.js was reading
-  // some other annotation as direct, so the position is not this one's identity.
+  // The entry itself, not a lookup: a reference here means pdf.js was reading some other annotation as direct, so the position is not this one's identity.
   const entry = annots.get(annotationIndex);
   if (
     !(entry instanceof PDFDict) ||
@@ -1016,8 +1057,7 @@ async function existingAnnotationDict(
   return { annotDict: entry, pdfDoc };
 }
 
-// A confirmation, never an identity: subtype and rectangle must single out one
-// entry, or an unchecked position reads or writes a neighbour.
+// A confirmation, never an identity: subtype and rectangle must single out one entry, or an unchecked position reads or writes a neighbour.
 type DirectArrayPlacement = "ambiguous" | "confirmed" | "shifted";
 
 function directArrayPlacement(
@@ -1094,15 +1134,12 @@ function describeDirectEntry(
     const comparable = comparableAnnotationRect(subtype, rect);
     return subtype && comparable ? { rect: comparable, subtype } : null;
   } catch {
-    // A wrong-typed /Subtype or /Rect makes pdf-lib throw rather than return
-    // undefined; such an entry confirms nothing.
+    // A wrong-typed /Subtype or /Rect makes pdf-lib throw rather than return undefined; such an entry confirms nothing.
     return null;
   }
 }
 
-// pdf.js reports an appearance-less /Text annotation at a fixed icon box
-// anchored to the stored rect's top-left (TextAnnotation: rect[1] = rect[3] -
-// 22, rect[2] = rect[0] + 22).
+// pdf.js reports an appearance-less /Text annotation at a fixed icon box anchored to the stored rect's top-left (TextAnnotation: rect[1] = rect[3] - 22, rect[2] = rect[0] + 22).
 const TEXT_ANNOTATION_ICON_SIZE = 22;
 
 function comparableAnnotationRect(subtype: unknown, rect: PdfRect | null) {
@@ -1151,8 +1188,7 @@ async function directAnnotationPlacement(
   }
 }
 
-// Absent, false or any other type reads as unstarred: the key is private, so a
-// third-party document may have put anything under that name.
+// Absent, false or any other type reads as unstarred: the key is private, so a third-party document may have put anything under that name.
 async function extractAnnotationBookmark(
   pdfBytes: Uint8Array,
   pageIndex: number,
@@ -1179,8 +1215,7 @@ async function extractAnnotationBookmark(
   }
 }
 
-// Returns null unless the BBox-to-Rect relationship is a pure translate, since
-// a producer that scales instead would be silently mis-sized.
+// Returns null unless the BBox-to-Rect relationship is a pure translate, since a producer that scales instead would be silently mis-sized.
 export async function extractAppearanceRotationAndRect(
   pdfBytes: Uint8Array,
   pageIndex: number,
@@ -1228,8 +1263,7 @@ export async function extractAppearanceRotationAndRect(
 
     const matrix = formStream.dict.lookupMaybe(PDFName.of("Matrix"), PDFArray);
     const rotation = matrix ? rotationFromMatrix(matrix) : 0;
-    // A Matrix matching no rotation this writer produces cannot be assumed
-    // unrotated, so decline rather than show or save the wrong orientation.
+    // A Matrix matching no rotation this writer produces cannot be assumed unrotated, so decline rather than show or save the wrong orientation.
     if (rotation === null) {
       return null;
     }
@@ -1269,8 +1303,7 @@ function nearlyEqual(a: number, b: number) {
   return Math.abs(a - b) <= 0.5;
 }
 
-// Only the shape `imageStampAppearance` writes is recognised; anything else
-// stays read-only.
+// Only the shape `imageStampAppearance` writes is recognised; anything else stays read-only.
 export function extractStampImage(
   pdfBytes: Uint8Array,
   pageIndex: number,
@@ -1490,8 +1523,7 @@ function pdfArrayNumber(array: PDFArray, index: number) {
   return array.lookupMaybe(index, PDFNumber)?.asNumber() ?? 0;
 }
 
-// A non-identity /Decode would reinterpret the samples, so only an absent
-// array or an explicit identity is accepted.
+// A non-identity /Decode would reinterpret the samples, so only an absent array or an explicit identity is accepted.
 function isIdentityOrAbsentDecodeArray(dict: PDFDict, componentCount: number) {
   const decode = dict.lookupMaybe(PDFName.of("Decode"), PDFArray);
   if (!decode) {
@@ -1626,12 +1658,13 @@ function rectFromArray(
   if (!values.every(Number.isFinite)) {
     return null;
   }
+  const [x1, y1, x2, y2] = values.map(clampPdfCoordinateMagnitude);
 
   return {
-    x1: Math.min(values[0], values[2]),
-    y1: Math.min(values[1], values[3]),
-    x2: Math.max(values[0], values[2]),
-    y2: Math.max(values[1], values[3]),
+    x1: Math.min(x1, x2),
+    y1: Math.min(y1, y2),
+    x2: Math.max(x1, x2),
+    y2: Math.max(y1, y2),
   };
 }
 

@@ -1,13 +1,9 @@
-// main.tsx imports this module, so it must not import PDF.js code: `?url`
-// resolves to a build-time string and keeps the library out of the initial
-// chunk.
+// main.tsx imports this module, so it must not import PDF.js code: `?url` resolves to a build-time string and keeps the library out of the initial chunk.
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.mjs?url";
 
 export { pdfWorkerUrl };
 
-// PDF.js appends filenames to this base, so those files cannot carry a content
-// hash of their own: the digest is in the directory name, written by
-// scripts/prepare-renderer-assets.mjs.
+// PDF.js appends filenames to this base, so those files cannot carry a content hash of their own: the digest is in the directory name, written by scripts/prepare-renderer-assets.mjs.
 declare const __PDFJS_ASSET_DIR__: string;
 
 // The name the build substitutes; the fallback is for `node --test` only.
@@ -19,9 +15,7 @@ export const pdfjsAssetBase = (): string =>
 
 const preloadedLinks = new Set<string>();
 
-// Anything added here must check both the preload credentials mode and whether
-// the service worker already precaches the file, or it fetches the same bytes
-// twice on every cold load.
+// Anything added here must check both the preload credentials mode and whether the service worker already precaches the file, or it fetches the same bytes twice on every cold load.
 export function warmPdfRuntimeCaches() {
   preloadModule(pdfWorkerUrl);
 }

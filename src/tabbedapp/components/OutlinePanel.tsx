@@ -1,9 +1,6 @@
 import type { PdfOutlineEntry } from "../../pdfdocumenteditor";
 
-/**
- * Entries arrive bounded and stripped from the core, and a destination is
- * opaque: it goes back to goToDestination and is never rendered.
- */
+/** Entries arrive bounded and stripped from the core, and a destination is opaque: it goes back to goToDestination and is never rendered. */
 export function OutlinePanel({
   entries,
   onSelectDestination,

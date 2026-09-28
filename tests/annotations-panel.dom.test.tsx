@@ -4,18 +4,13 @@ import { render } from "@testing-library/react";
 import "./rendererAssetStubs";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// The panel reads one constant from the document editor's barrel, which pulls in a
-// stylesheet the Node runner cannot load; rendererAssetStubs answers that, and
-// its hooks are only registered once this module's body runs.
+// The panel reads one constant from the document editor's barrel, which pulls in a stylesheet the Node runner cannot load; rendererAssetStubs answers that, and its hooks are only registered once this module's body runs.
 const { AnnotationsPanel } =
   await import("../src/tabbedapp/components/AnnotationsPanel");
 const { EMPTY_ANNOTATION_FILTER, annotationListRows } =
   await import("../src/tabbedapp/annotationList");
 
-// A sticky note's own text is unbounded in the model, so the bound is on the
-// render and is asserted through the real panel, because a panel that painted
-// the annotation's own text would leave `annotationListRows` perfectly correct
-// and unread.
+// A sticky note's own text is unbounded in the model, so the bound is on the render and is asserted through the real panel, because a panel that painted the annotation's own text would leave `annotationListRows` perfectly correct and unread.
 test("a note far longer than a row can show is not put into the DOM whole", () => {
   const long = `start ${"x".repeat(100_000)} end`;
   const rows = annotationListRows(new Map([[0, [note("long", long)]]]));

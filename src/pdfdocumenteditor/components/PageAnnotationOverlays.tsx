@@ -1,5 +1,4 @@
-// PdfPageView owns the page-level pointer state; these overlays reach it only
-// through props.
+// PdfPageView owns the page-level pointer state; these overlays reach it only through props.
 import { AlignLeft, Copy, RotateCw, Trash2 } from "lucide-react";
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -28,6 +27,7 @@ import {
   SettingsPanelShell,
 } from "../SettingsPanel";
 import type { PageViewport, PdfAnnotation, Tool } from "../types";
+import { strippedLiveText } from "../untrustedText";
 import { clamp } from "../viewerConfig";
 import {
   AutoFocusTextarea,
@@ -87,10 +87,7 @@ export const AnnotationShape = memo(function AnnotationShape({
     annotationId: string,
     updater: (annotation: PdfAnnotation) => PdfAnnotation,
   ) => void;
-  // Independent of `selected` below: image stamps always pass
-  // `selected={false}` so ImageStampSelectionOverlay can own their outline, but
-  // a drag-start still needs true membership, or clicking one image in a
-  // multi-selection collapses it to that image.
+  // Independent of `selected` below: image stamps always pass `selected={false}` so ImageStampSelectionOverlay can own their outline, but a drag-start still needs true membership, or clicking one image in a multi-selection collapses it to that image.
   partOfSelection: boolean;
   readOnly: boolean;
   scale: number;
@@ -167,11 +164,7 @@ export const AnnotationShape = memo(function AnnotationShape({
             const bounds = pdfRectToViewportRect(rect, viewport);
             return (
               <g key={`${annotation.id}-${index}`}>
-                {/* The visible fill is painted on the highlight canvas layer
-                    (see renderTextHighlightCanvas) so its multiply blend can
-                    reach the real page content - an outermost <svg> always
-                    isolates blend modes, so this rect only exists as an
-                    invisible hit target for selecting/dragging. */}
+                {/* The visible fill is painted on the highlight canvas layer (see renderTextHighlightCanvas) so its multiply blend can reach the real page content - an outermost <svg> always isolates blend modes, so this rect only exists as an invisible hit target for selecting/dragging. */}
                 <rect
                   fill={rgbToCss(annotation.color)}
                   height={bounds.height}
@@ -346,8 +339,7 @@ export const AnnotationShape = memo(function AnnotationShape({
 
     case "stickyNote": {
       const rect = pdfRectToViewportRect(annotation.rect, viewport);
-      // The border and glyph sit on the note's own colour, so they cannot use
-      // the theme ink: it goes invisible at both ends of the palette.
+      // The border and glyph sit on the note's own colour, so they cannot use the theme ink: it goes invisible at both ends of the palette.
       const detailColor = foregroundOn(annotation.color);
       return (
         <g {...commonProps} transform={`translate(${rect.x} ${rect.y})`}>
@@ -362,11 +354,7 @@ export const AnnotationShape = memo(function AnnotationShape({
             strokeWidth={selected ? 2 : 1}
             width={Math.max(rect.width, 22)}
           />
-          {/*
-            Lucide's lines-of-text glyph, placed rather than scaled: `size` and
-            `x`/`y` put its 24-unit drawing over 6..18 x 7..17 of the note, and
-            `strokeWidth` 2.25 at that size paints 1.5.
-          */}
+          {/* Lucide's lines-of-text glyph, placed rather than scaled: `size` and `x`/`y` put its 24-unit drawing over 6..18 x 7..17 of the note, and `strokeWidth` 2.25 at that size paints 1.5. */}
           <AlignLeft
             color={detailColor}
             size={16}
@@ -396,7 +384,7 @@ export const AnnotationShape = memo(function AnnotationShape({
               onTextChange={(text) =>
                 onUpdate(annotation.id, (current) =>
                   current.kind === "stickyNote"
-                    ? { ...current, text }
+                    ? { ...current, text: strippedLiveText(text) }
                     : current,
                 )
               }
@@ -643,8 +631,7 @@ export function SelectionToolbar({
     minToolbarY,
     visibleBounds.bottom - activeToolbarHeight,
   );
-  // Above the selection when it fits, below otherwise; the clamp keeps the
-  // fallback on screen.
+  // Above the selection when it fits, below otherwise; the clamp keeps the fallback on screen.
   const preferredToolbarY = aboveY >= minToolbarY ? aboveY : belowY;
   const toolbarY = clamp(preferredToolbarY, minToolbarY, maxToolbarY);
 

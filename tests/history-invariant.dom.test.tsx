@@ -21,8 +21,7 @@ import type {
 } from "../src/pdfdocumenteditor/useDocumentModel";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// Driven through the real push paths, because a push path that never calls the
-// trim satisfies every test written against the trim.
+// Driven through the real push paths, because a push path that never calls the trim satisfies every test written against the trim.
 
 function stickyNote(index: number): PdfAnnotation {
   return {
@@ -115,8 +114,7 @@ test("annotation edits driven past the bound stop the undo stack growing", async
     assertWithinBounds(model().undoStack, model().redoStack, "annotation edit");
   }
 
-  // Without this the cap could be met by a model that stopped recording after the
-  // first edit.
+  // Without this the cap could be met by a model that stopped recording after the first edit.
   assert.equal(
     model().annotations.length,
     pushes,
@@ -132,10 +130,7 @@ test("annotation edits driven past the bound stop the undo stack growing", async
 });
 
 test("pasted images driven past the byte budget stop the undo stack growing", async () => {
-  // Every push here is inside MAX_HISTORY_ENTRIES and none is a document entry, so
-  // the other bounds hold at every step while the megabytes only go up. Driven
-  // through commitAnnotations, because a bound the push path does not call is not
-  // a bound.
+  // Every push here is inside MAX_HISTORY_ENTRIES and none is a document entry, so the other bounds hold at every step while the megabytes only go up. Driven through commitAnnotations, because a bound the push path does not call is not a bound.
   const { result } = await mountLoadedModel();
   const model = () => result.current.model;
   const stampBytes = 12 * 1024 * 1024;
@@ -175,9 +170,7 @@ test("a live edit's push is capped on the same bound", async () => {
   const model = () => result.current.model;
   const pushes = MAX_HISTORY_ENTRIES * 2;
 
-  // Three acts rather than one: the annotations ref catches up inside the state
-  // updater React runs at render time, so a begin/move/finish collapsed into one
-  // act records nothing.
+  // Three acts rather than one: the annotations ref catches up inside the state updater React runs at render time, so a begin/move/finish collapsed into one act records nothing.
   for (let index = 0; index < pushes; index += 1) {
     await act(async () => {
       model().beginAnnotationEdit();
@@ -309,8 +302,7 @@ async function writtenMarkers(model: {
 
 test("the page a reader deleted stays on the undo stack and leaves the file", async () => {
   const bytes = await twoPagesOneMarked();
-  // The control: the scan can see the marker through the deflated, hex-encoded
-  // content stream it is written in.
+  // The control: the scan can see the marker through the deflated, hex-encoded content stream it is written in.
   assert.deepEqual(
     [...(await markersIn(bytes, PAGE_MARKER_PATTERN))],
     [`${PAGE_MARKER}-PAGETWO`],

@@ -63,10 +63,7 @@ for (const asset of unusedWasmAssets) {
   removePath(join(pdfjsTargetRoot, "wasm", asset));
 }
 
-// PDF.js builds each of these URLs by appending a filename to a base we hand
-// it, so the files cannot carry a content hash the way a bundled asset does.
-// Hashing the directory puts the identity in the path instead, and it only
-// changes when the assets do, so a browser keeps them across releases.
+// PDF.js builds each of these URLs by appending a filename to a base we hand it, so the files cannot carry a content hash the way a bundled asset does. Hashing the directory puts the identity in the path instead, and it only changes when the assets do, so a browser keeps them across releases.
 const digest = hashTree(pdfjsTargetRoot);
 const pdfjsAssetDir = `pdfjs-${digest}`;
 renameSync(pdfjsTargetRoot, join(generatedRoot, pdfjsAssetDir));
@@ -74,8 +71,7 @@ renameSync(pdfjsTargetRoot, join(generatedRoot, pdfjsAssetDir));
 fillManifestProductName();
 writeThirdPartyNotices();
 
-// Paths as well as bytes: moving a file changes what PDF.js can fetch while
-// leaving the set of bytes identical.
+// Paths as well as bytes: moving a file changes what PDF.js can fetch while leaving the set of bytes identical.
 function hashTree(dir) {
   const files = [];
   const walk = (at) => {
@@ -97,10 +93,7 @@ function hashTree(dir) {
   return tree.digest("hex").slice(0, 12);
 }
 
-// The display name is declared once, as package.json's `productName`, so the
-// committed manifest carries placeholders and this fills them. The service
-// worker's cache prefix and the directory-picker and lock ids key off the
-// package's `name` instead, because they address a user's stored data.
+// The display name is declared once, as package.json's `productName`, so the committed manifest carries placeholders and this fills them. The service worker's cache prefix and the directory-picker and lock ids key off the package's `name` instead, because they address a user's stored data.
 function fillManifestProductName() {
   const { productName, productShortName } = JSON.parse(
     readFileSync(join(root, "package.json"), "utf8"),
@@ -113,11 +106,10 @@ function fillManifestProductName() {
     );
   }
 
-  const source = join(browserAssetsRoot, "site.webmanifest");
+  const source = join(browserAssetsRoot, "manifest.webmanifest");
   const template = readFileSync(source, "utf8");
 
-  // A manifest that stopped carrying the placeholders would be copied through
-  // with whatever name was typed into it.
+  // A manifest that stopped carrying the placeholders would be copied through with whatever name was typed into it.
   for (const token of ["%PRODUCT_NAME%", "%PRODUCT_SHORT_NAME%"]) {
     if (!template.includes(token)) {
       throw new Error(
@@ -131,12 +123,10 @@ function fillManifestProductName() {
     .replaceAll("%PRODUCT_NAME%", productName)
     .replaceAll("%PRODUCT_SHORT_NAME%", productShortName);
 
-  writeFileSync(join(generatedRoot, "site.webmanifest"), filled);
+  writeFileSync(join(generatedRoot, "manifest.webmanifest"), filled);
 }
 
-// Read out of the page rather than listed here: these travel through the
-// module graph, where Vite content-hashes them, so copying them verbatim as
-// well would ship a second copy at an identity-free path.
+// Read out of the page rather than listed here: these travel through the module graph, where Vite content-hashes them, so copying them verbatim as well would ship a second copy at an identity-free path.
 function pageReferencedAssets() {
   const page = readFileSync(join(root, "index.html"), "utf8");
   const names = new Set(
@@ -145,8 +135,7 @@ function pageReferencedAssets() {
       (match) => match[1],
     ),
   );
-  // A page that referenced none of them would go back to shipping every icon
-  // unhashed at the site root.
+  // A page that referenced none of them would go back to shipping every icon unhashed at the site root.
   if (names.size === 0) {
     throw new Error(
       "index.html references no src/browserapp/assets file, so nothing is " +
@@ -156,13 +145,10 @@ function pageReferencedAssets() {
   return names;
 }
 
-// Tracked at the repository root and imported from there by the app footer, so
-// one file answers both a repository reader and an installed offline copy.
-// Regenerated on every build, because a hand-kept one goes stale in silence.
+// Tracked at the repository root and imported from there by the app footer, so one file answers both a repository reader and an installed offline copy. Regenerated on every build, because a hand-kept one goes stale in silence.
 function writeThirdPartyNotices() {
   const { packages, missing } = collectThirdPartyPackages(root);
-  // A licence that cannot be found fails the build rather than emitting a
-  // notices file with a hole in it.
+  // A licence that cannot be found fails the build rather than emitting a notices file with a hole in it.
   if (missing.length > 0) {
     throw new Error(
       `Third-party notices: could not determine a licence for:\n  ` +

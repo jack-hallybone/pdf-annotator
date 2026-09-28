@@ -5,11 +5,9 @@ import { ANNOTATION_BOOKMARK_KEY } from "../src/pdfdocumenteditor/annotationBook
 import { writePdfAnnotations } from "../src/pdfdocumenteditor/pdfWriter";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// A bookmark is a flag in a private key, which pdf.js never reports, so it has
-// to be read back out of the raw document.
+// A bookmark is a flag in a private key, which pdf.js never reports, so it has to be read back out of the raw document.
 
-// annotationImport reaches PDF.js's browser entry, which touches these while the
-// module is evaluated even though nothing here renders to a canvas.
+// annotationImport reaches PDF.js's browser entry, which touches these while the module is evaluated even though nothing here renders to a canvas.
 installPdfJsGlobals();
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const { importExistingAnnotationsForPage } =
@@ -21,9 +19,7 @@ async function blankPdf() {
   return pdfDoc.save({ useObjectStreams: false });
 }
 
-// Everything this app writes is registered as an indirect object, so a round
-// trip starting at writePdfAnnotations never reaches a direct dictionary in
-// /Annots.
+// Everything this app writes is registered as an indirect object, so a round trip starting at writePdfAnnotations never reaches a direct dictionary in /Annots.
 async function pdfWithDirectHighlight({ starred }: { starred: boolean }) {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([612, 792]);
@@ -152,9 +148,7 @@ test("starring a directly-stored annotation survives a save and reload", async (
   assert.equal(unstarred.bookmarked, undefined);
 });
 
-// pdf.js reports a /Text annotation's rectangle as a fixed icon box anchored to
-// the stored rectangle's top-left corner, so the confirmation has to reduce both
-// sides the same way rather than comparing the raw numbers.
+// pdf.js reports a /Text annotation's rectangle as a fixed icon box anchored to the stored rectangle's top-left corner, so the confirmation has to reduce both sides the same way rather than comparing the raw numbers.
 test("a star on a directly-stored sticky note is read back", async () => {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([612, 792]);
@@ -180,8 +174,7 @@ test("a star on a directly-stored sticky note is read back", async () => {
   assert.equal(reloaded.bookmarked, true);
 });
 
-// A direct dictionary is found by its position in /Annots, and pdf.js's array is
-// not always that array, because it drops what it cannot display.
+// A direct dictionary is found by its position in /Annots, and pdf.js's array is not always that array, because it drops what it cannot display.
 test("a star is not read off the neighbour when pdf.js's array is shifted", async () => {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([612, 792]);

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PDFDocument, PDFHexString, PDFName, PDFString } from "pdf-lib";
+import {
+  PDFDict,
+  PDFDocument,
+  PDFHexString,
+  PDFName,
+  PDFString,
+} from "pdf-lib";
+import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// The visible text of a free-text box or a sticky note is a /Contents string and
-// did not go through `untrustedText.ts`, so a note reading `<RLO>txt.exe<PDF>`
-// reached the sidebar as the file wrote it.
+// The visible text of a free-text box or a sticky note is a /Contents string and did not go through `untrustedText.ts`, so a note reading `<RLO>txt.exe<PDF>` reached the sidebar as the file wrote it.
 
-// annotationImport reaches PDF.js's browser entry, which touches these globals
-// while the module is evaluated.
+// annotationImport reaches PDF.js's browser entry, which touches these globals while the module is evaluated.
 installPdfJsGlobals();
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 const { importExistingAnnotationsForPage } =
@@ -91,10 +95,38 @@ test("a note's own text loses the bidi overrides and control characters", async 
   }
 });
 
-// The rule above was written as a list, and the list was Unicode's minus U+061C
-// ARABIC LETTER MARK: ten invisible code points reached the sidebar through a
-// hostile PDF. `tests/hidden-characters.test.ts` is the sweep over Unicode; this
-// is the end of the real path, so the sweep cannot pass while this route is open.
+// Complements the hostile-PDF tests above: a note typed or pasted straight into the app reaches pdfWriter.ts as a plain PdfAnnotation with no character allowlist (unlike free text), so it must be stripped on write - checked by reading with pdf-lib directly, not importedTexts, since PDF.js would strip these characters on the way in regardless of whether the write side did.
+test("a note built straight from typed or pasted text loses the same hidden characters on save", async () => {
+  const hostile = `safe${RLO}txt.exe${POP} a${NUL}b${BEL}c`;
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.addPage([612, 792]);
+  const bytes = await pdfDoc.save({ useObjectStreams: false });
+
+  const note: PdfAnnotation = {
+    color: [1, 0.9, 0.25],
+    id: "hostile-note",
+    kind: "stickyNote",
+    pageIndex: 0,
+    rect: { x1: 72, x2: 92, y1: 700, y2: 720 },
+    text: hostile,
+  };
+
+  const output = await writePdfAnnotations(bytes, [note], {
+    replaceAnnotationSourceIds: ["hostile-note"],
+    replacePageIndexes: [0],
+  });
+
+  const outputDoc = await PDFDocument.load(output);
+  const annots = outputDoc.getPage(0).node.Annots();
+  assert.ok(annots && annots.size() === 1);
+  const dict = annots.lookup(0, PDFDict);
+  const written = dict
+    .lookupMaybe(PDFName.of("Contents"), PDFString, PDFHexString)
+    ?.decodeText();
+  assert.equal(written, "safetxt.exe abc");
+});
+
+// The rule above was written as a list, and the list was Unicode's minus U+061C ARABIC LETTER MARK: ten invisible code points reached the sidebar through a hostile PDF. `tests/hidden-characters.test.ts` is the sweep over Unicode; this is the end of the real path, so the sweep cannot pass while this route is open.
 test("a note's own text loses every invisible code point, not a listed few", async () => {
   const invisibles =
     "\u061c\u200b\u200d\u2060\ufeff\u2028\u2029\u00ad\ufff9\u{e0041}";

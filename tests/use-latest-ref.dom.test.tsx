@@ -3,9 +3,7 @@ import { test } from "node:test";
 import { act, renderHook } from "@testing-library/react";
 import { useLatestRef } from "../src/useLatestRef";
 
-// The contract worth pinning is the timing: the write happens in an effect, so
-// `.current` still holds the previous value while the render that supplied the
-// new one is running.
+// The contract worth pinning is the timing: the write happens in an effect, so `.current` still holds the previous value while the render that supplied the new one is running.
 
 test("exposes the latest value after the render commits", () => {
   const { result, rerender } = renderHook(

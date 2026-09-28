@@ -1,10 +1,8 @@
 import type { PdfAnnotation } from "./types";
 
-// Host capabilities are all optional callbacks: the core shows the
-// corresponding UI only when the host supplies one.
+// Host capabilities are all optional callbacks: the core shows the corresponding UI only when the host supplies one.
 
-// Returns a refreshed `fileKey` when saving changed the file's identity, or
-// the shell's already-open-file dedup stops recognizing the file as itself.
+// Returns a refreshed `fileKey` when saving changed the file's identity, or the shell's already-open-file dedup stops recognizing the file as itself.
 export type PdfSaveTarget = (
   bytes: Uint8Array,
 ) => Promise<{ fileKey?: string } | void>;
@@ -12,8 +10,7 @@ export type PdfSaveTarget = (
 export type PdfSaveStage =
   "permission" | "preflight" | "write" | "close" | "verify" | "post-save";
 
-// A save target may fail after bytes are already committed, so the UI never
-// promises an original is unchanged when it cannot know that.
+// A save target may fail after bytes are already committed, so the UI never promises an original is unchanged when it cannot know that.
 export class PdfSaveError extends Error {
   mayHaveCommitted: boolean;
   stage: PdfSaveStage;
@@ -49,10 +46,15 @@ export type PdfSaveWithResult = {
   saveTarget?: PdfSaveTarget | null;
 };
 
+/** What a save (or leaving read-only for an in-memory copy) left current, so a host mirroring these on the source it handed in does not fall behind what the mounted core is now using. */
+export type PdfSaveTargetChange = {
+  fileKey: string | null;
+  saveTarget: PdfSaveTarget | null;
+};
+
 export type PdfSaveAsResult = {
   bytes: Uint8Array;
-  // Recomputed for the file this Save As created or overwrote, never carried
-  // over from what was open before.
+  // Recomputed for the file this Save As created or overwrote, never carried over from what was open before.
   fileKey?: string;
   fileName?: string;
   saveTarget?: PdfSaveTarget | null;
@@ -82,16 +84,14 @@ export type PdfMergeFile = {
 
 export type PdfMergeFilePicker = () => Promise<PdfMergeFile | null | undefined>;
 
-/* A document's own write targets are not here: they belong to the file, and
- * live on PdfDocumentEditorSource. */
+/* A document's own write targets are not here: they belong to the file, and live on PdfDocumentEditorSource. */
 export type PdfDocumentEditorCapabilities = {
   pickImageFile?: PdfImageFilePicker;
   pickMergePdfFile?: PdfMergeFilePicker;
   printTarget?: PdfPrintTarget | null;
 };
 
-/* The chrome adds opening a link; the core only reports that one was clicked,
-   because where a reader is sent is the host's decision. */
+/* The chrome adds opening a link; the core only reports that one was clicked, because where a reader is sent is the host's decision. */
 export type PdfDocumentEditorHostCapabilities =
   PdfDocumentEditorCapabilities & {
     onOpenExternalLink?: PdfExternalLinkOpener;

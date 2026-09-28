@@ -20,9 +20,7 @@ test("PDF filenames fall back safely", () => {
   assert.equal(safePdfFileName(" /// ", "NUL.pdf"), "_NUL.pdf");
 });
 
-// The named cases from the finding: the rules used to enumerate the ASCII
-// controls and left every bidi override standing, and the derived class is swept
-// against Unicode by `hidden-characters.test.ts`.
+// The named cases from the finding: the rules used to enumerate the ASCII controls and left every bidi override standing, and the derived class is swept against Unicode by `hidden-characters.test.ts`.
 test("PDF filenames lose the characters that make a name read backwards", () => {
   assert.equal(
     safePdfFileName("report\u202Efdp.exe.pdf"),

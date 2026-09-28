@@ -20,11 +20,9 @@ type ReorderableTab = {
 
 type TabDragReorderParams<T extends ReorderableTab> = {
   closeTabContextMenu: () => void;
-  // The shell's `useLatestRef` mirror of `shellLocked`, so this bail reads it
-  // the same way the shell's own command handlers do.
+  // The shell's `useLatestRef` mirror of `shellLocked`, so this bail reads it the same way the shell's own command handlers do.
   shellLockedRef: RefObject<boolean>;
-  // The hook reorders the tab list but does not own it; the shell keeps the
-  // documents state and lends only its setter.
+  // The hook reorders the tab list but does not own it; the shell keeps the documents state and lends only its setter.
   setDocuments: Dispatch<SetStateAction<T[]>>;
   tabsNavRef: RefObject<HTMLElement | null>;
 };
@@ -42,10 +40,7 @@ type TabDragReorderApi = {
   updateTabDragTarget: (event: ReactDragEvent<HTMLElement>) => void;
 };
 
-/*
- * Tab positions are measured from the DOM rather than tracked in state,
- * because CSS lays out the tab bar's widths.
- */
+/* Tab positions are measured from the DOM rather than tracked in state, because CSS lays out the tab bar's widths. */
 export function useTabDragReorder<T extends ReorderableTab>({
   closeTabContextMenu,
   shellLockedRef,
@@ -108,8 +103,7 @@ export function useTabDragReorder<T extends ReorderableTab>({
     const lastTab = tabElements.at(-1);
     const lastTabId = lastTab?.dataset.tabbedappTabId;
     if (lastTabId && clientX > lastTab.getBoundingClientRect().right) {
-      // A single row in DOM order, so past the last tab's right edge is the
-      // answer without measuring the others.
+      // A single row in DOM order, so past the last tab's right edge is the answer without measuring the others.
       targetId = lastTabId;
       placement = "after";
     } else {
@@ -211,8 +205,7 @@ export function useTabDragReorder<T extends ReorderableTab>({
       const nextDocuments = [...current];
       const [draggedDocument] = nextDocuments.splice(fromIndex, 1);
       let insertIndex = targetIndex + (placement === "after" ? 1 : 0);
-      // The removal above shifted everything after `fromIndex` down by one, so
-      // an insertion point past it has to come down with them.
+      // The removal above shifted everything after `fromIndex` down by one, so an insertion point past it has to come down with them.
       if (fromIndex < insertIndex) {
         insertIndex -= 1;
       }

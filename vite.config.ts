@@ -9,12 +9,7 @@ declare const process: {
   env: Record<string, string | undefined>;
 };
 
-/*
- * The display name is declared once, as package.json's `productName`, and
- * everything showing it derives from here. package.json's `name` is a separate
- * thing: the browser-storage ids key off it, so renaming the product must not
- * move it or a reader's saved data is orphaned.
- */
+/* The display name is declared once, as package.json's `productName`, and everything showing it derives from here. package.json's `name` is a separate thing: the browser-storage ids key off it, so renaming the product must not move it or a reader's saved data is orphaned. */
 const productName = readProductName();
 const packageName = readPackageName();
 
@@ -83,6 +78,7 @@ function contentSecurityPolicy({
   meta?: boolean;
 } = {}) {
   return [
+    // <meta> cannot express frame-ancestors at all; src/browserapp/frameGuard.ts is production's actual cover for it.
     ...baseContentSecurityPolicy.filter(
       (directive) => !(meta && directive.startsWith("frame-ancestors ")),
     ),
@@ -118,8 +114,7 @@ function applyHeaders(headers: Record<string, string>) {
 
 function resolveSiteUrl(value: string | undefined, basePath: string) {
   const origin = value?.trim() || "http://127.0.0.1:5173";
-  // new URL() rather than string concatenation: it collapses the double slash
-  // when the origin already carries a path, which Pages base URLs do.
+  // new URL() rather than string concatenation: it collapses the double slash when the origin already carries a path, which Pages base URLs do.
   return new URL(basePath, `${origin.replace(/\/+$/, "")}/`).href;
 }
 
@@ -138,8 +133,7 @@ function normalizeBasePath(value: string | undefined) {
     : `${withLeadingSlash}/`;
 }
 
-// Read off disk rather than passed, so the name has one source of truth: a
-// disagreement between writer and reader is a 404 for every font in a document.
+// Read off disk rather than passed, so the name has one source of truth: a disagreement between writer and reader is a 404 for every font in a document.
 function pdfjsAssetDir() {
   const found = readdirSync(".generated/renderer-assets").filter((entry) =>
     /^pdfjs-[0-9a-f]{12}$/.test(entry),
@@ -163,23 +157,17 @@ export default defineConfig({
   },
   publicDir: ".generated/renderer-assets",
   build: {
-    // The service-worker generator precaches every allowed output file, so a
-    // rebuild must never retain obsolete hashed bundles from a prior build.
+    modulePreload: { polyfill: false },
+    // The service-worker generator precaches every allowed output file, so a rebuild must never retain obsolete hashed bundles from a prior build.
     emptyOutDir: true,
     outDir: "dist",
-    // Just above the tabbedapp chunk, which is PDF.js plus the editor, so the
-    // alarm still fires on anything new crossing it. Giving PDF.js its own
-    // manual chunk was tried and reverted: Vite hoisted it into index.html as a
-    // render-blocking stylesheet, putting 232 kB in front of first paint. Check
-    // any future attempt against the built index.html, not the dev server.
+    // Just above the tabbedapp chunk, which is PDF.js plus the editor, so the alarm still fires on anything new crossing it. Giving PDF.js its own manual chunk was tried and reverted: Vite hoisted it into index.html as a render-blocking stylesheet, putting 232 kB in front of first paint. Check any future attempt against the built index.html, not the dev server.
     chunkSizeWarningLimit: 950,
   },
   plugins: [
     react(),
     {
-      // Not build-only: the dev server serves the same index.html, and an
-      // unsubstituted %SITE_URL% or %PRODUCT_NAME% would ship as a literal in
-      // the markup.
+      // Not build-only: the dev server serves the same index.html, and an unsubstituted %SITE_URL% or %PRODUCT_NAME% would ship as a literal in the markup.
       name: "index-html-tokens",
       transformIndexHtml: {
         order: "pre",
@@ -213,33 +201,21 @@ export default defineConfig({
         },
       },
     },
-    // The service worker: `src/sw.js` is the source, and the precache manifest
-    // is derived from the finished build by scripts/precache.mjs.
+    // The service worker: `src/sw.js` is the source, and the precache manifest is derived from the finished build by scripts/precache.mjs.
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",
       filename: "sw.js",
-      // src/browserapp/pwa.ts registers it, guarded on PROD and on the API existing.
-      // Letting the plugin inject a second registration would put that decision in two
-      // places.
+      // src/browserapp/pwa.ts registers it, guarded on PROD and on the API existing. Letting the plugin inject a second registration would put that decision in two places.
       injectRegister: null,
-      // src/browserapp/assets/site.webmanifest is the manifest and
-      // scripts/prepare-renderer-assets.mjs fills its display name from package.json.
-      // Nothing here may write a second one.
+      // src/browserapp/assets/manifest.webmanifest is the manifest and scripts/prepare-renderer-assets.mjs fills its display name from package.json. Nothing here may write a second one.
       manifest: false,
       injectManifest: {
         ...PRECACHE,
-        // A classic worker, not an ES module. Two reasons, and the second is why
-        // this is not cosmetic: src/browserapp/pwa.ts registers it without
-        // `type: "module"`, which is the only form every browser supports; and
-        // the plugin's default "es" path hard-codes rolldown's deprecated
-        // `inlineDynamicImports`, so every build printed a deprecation warning
-        // that no edit in this repository could answer.
+        // A classic worker, not an ES module. Two reasons, and the second is why this is not cosmetic: src/browserapp/pwa.ts registers it without `type: "module"`, which is the only form every browser supports; and the plugin's default "es" path hard-codes rolldown's deprecated `inlineDynamicImports`, so every build printed a deprecation warning that no edit in this repository could answer.
         rollupFormat: "iife",
       },
-      // No skipWaiting and no clientsClaim: a new worker installs, precaches and waits,
-      // which is the behaviour this project already had. Taking over mid-session would
-      // let a page load half of one build and half of the next.
+      // No skipWaiting and no clientsClaim: a new worker installs, precaches and waits, which is the behaviour this project already had. Taking over mid-session would let a page load half of one build and half of the next.
     }),
   ],
   server: {

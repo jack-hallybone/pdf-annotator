@@ -37,9 +37,7 @@ const chrome = {
   toolSettings: defaultToolSettings,
 };
 
-// Composing the two halves of a cached tab spreads the core's session, and a
-// spread does not carry a non-enumerable property - which is exactly what the
-// "never serialize" guard is.
+// Composing the two halves of a cached tab spreads the core's session, and a spread does not carry a non-enumerable property - which is exactly what the "never serialize" guard is.
 test("a composed tabbedapp session still refuses to be serialized", () => {
   const session = composeTabbedAppSession(documentEditorSession(), chrome);
   assert.throws(() => JSON.stringify(session));

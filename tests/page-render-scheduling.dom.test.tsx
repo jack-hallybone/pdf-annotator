@@ -8,10 +8,7 @@ import {
   type PendingPageTask,
 } from "../src/pdfdocumenteditor/pageRenderScheduling";
 
-// The rule this module exists to hold: a page's render priority decides when its
-// work runs, never whether finished work is thrown away, which it did from three
-// of PdfPageView's effect dependency arrays, whose cleanups blanked every
-// visible canvas on a page boundary.
+// The rule this module exists to hold: a page's render priority decides when its work runs, never whether finished work is thrown away, which it did from three of PdfPageView's effect dependency arrays, whose cleanups blanked every visible canvas on a page boundary.
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 5));
 
@@ -76,9 +73,7 @@ test("cancelled work is deregistered, so a later promotion cannot resurrect it",
   assert.equal(runs, 0);
 });
 
-// Putting the priority back into a dependency array is a one-word edit that no
-// type or lint error catches and the pure cases above cannot see, so the arrays
-// are read.
+// Putting the priority back into a dependency array is a one-word edit that no type or lint error catches and the pure cases above cannot see, so the arrays are read.
 const pageViewSource = readFileSync(
   fileURLToPath(
     new URL("../src/pdfdocumenteditor/PdfPageView.tsx", import.meta.url),
@@ -96,9 +91,7 @@ test("no render effect depends on renderPriority", () => {
       .filter(Boolean),
   );
 
-  // A reformat this parser stops matching would make the assertion below pass over
-  // an empty list, so finding fewer arrays than there are effects means the parse
-  // went blind rather than the file got simpler.
+  // A reformat this parser stops matching would make the assertion below pass over an empty list, so finding fewer arrays than there are effects means the parse went blind rather than the file got simpler.
   const effectCount = [...pageViewSource.matchAll(/\buseEffect\(/g)].length;
   assert.ok(
     effectCount >= 8,

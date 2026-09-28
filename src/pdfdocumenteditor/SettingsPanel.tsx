@@ -8,7 +8,6 @@ import {
 } from "./annotationColors";
 import type { RgbColor } from "./annotationColors";
 import { clamp } from "./viewerConfig";
-export type { RgbColor } from "./annotationColors";
 
 export function SettingsPanelShell({ children }: { children: ReactNode }) {
   return <section className="settings-panel">{children}</section>;

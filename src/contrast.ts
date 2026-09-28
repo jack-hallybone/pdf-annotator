@@ -1,10 +1,8 @@
-// Legibility maths for a colour the reader chose at runtime: `--theme-ink`
-// follows the colour scheme, and a reader-chosen fill does not.
+// Legibility maths for a colour the reader chose at runtime: `--theme-ink` follows the colour scheme, and a reader-chosen fill does not.
 
 export type RgbColor = [number, number, number];
 
-// Must be kept in step with --app-ink-on-light and --app-ink-on-dark in
-// src/pdfdocumenteditor/styles.css.
+// Must be kept in step with --app-ink-on-light and --app-ink-on-dark in src/pdfdocumenteditor/styles.css.
 const INK_ON_LIGHT: RgbColor = [0x1c / 255, 0x19 / 255, 0x17 / 255];
 const INK_ON_DARK: RgbColor = [1, 1, 1];
 
@@ -28,20 +26,14 @@ export function prefersDarkForegroundOn(color: RgbColor) {
   );
 }
 
-/**
- * Anything painted on a fill the theme does not control comes through here,
- * never `--theme-ink`.
- */
+/** Anything painted on a fill the theme does not control comes through here, never `--theme-ink`. */
 export function foregroundOn(color: RgbColor) {
   return prefersDarkForegroundOn(color)
     ? "var(--app-ink-on-light)"
     : "var(--app-ink-on-dark)";
 }
 
-/**
- * Flatten a translucent fill against an opaque backdrop: the raw colour
- * inverts `foregroundOn`'s answer at low alpha.
- */
+/** Flatten a translucent fill against an opaque backdrop: the raw colour inverts `foregroundOn`'s answer at low alpha. */
 export function flattenOver(
   color: RgbColor,
   backdrop: RgbColor,

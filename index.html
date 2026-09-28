@@ -2,10 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Referenced from the page, so Vite rewrites these to content-hashed
-         names and scripts/prepare-renderer-assets.mjs keeps them out of the
-         verbatim publicDir copy. The manifest's own install icons are not
-         here: the operating system fetches those, never this page. -->
+    <!-- Referenced from the page, so Vite content-hashes them and prepare-renderer-assets.mjs keeps them out of the verbatim publicDir copy; the manifest's own install icons are fetched by the OS, never this page, so they aren't listed here. -->
     <link rel="icon" href="/src/browserapp/assets/favicon.ico" sizes="32x32" />
     <link
       rel="icon"
@@ -18,17 +15,11 @@
       sizes="180x180"
       href="/src/browserapp/assets/apple-touch-icon.png"
     />
-    <link rel="manifest" href="%BASE_URL%site.webmanifest" />
+    <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
     <link rel="canonical" href="%SITE_URL%" />
     <meta name="application-name" content="%PRODUCT_NAME%" />
     <meta name="referrer" content="no-referrer" />
-    <!-- The browser tints its own chrome with this, so it is the colour the app
-         paints against it: --theme-surface from src/theme.css, which is what
-         the tab strip at the top of the viewport is painted in. Two literals,
-         not derived - the theme is a pasted file that changes rarely and
-         deliberately - and held to the token over what SHIPPED by
-         tests/build/shipped-artefact.test.mjs, so a retint that missed them
-         fails the build rather than leaving the chrome on the old colour. -->
+    <!-- The browser tints its own chrome with this, so it must match --theme-surface (src/theme.css), what the tab strip paints in; two literals, not derived, held to the shipped token by tests/build/shipped-artefact.test.mjs so a missed retint fails the build rather than leaving stale chrome. -->
     <meta
       name="theme-color"
       content="#ffffff"
@@ -73,9 +64,8 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Stamped by scripts/stamp_version.mjs when a release is built; the
-         literal here is what an unstamped build shows. -->
-    <release-version hidden>preview</release-version>
+    <!-- Stamped by deploy.yml's release sed, on this source, before the build. -->
+    <span id="version" hidden>v. dev</span>
     <noscript>
       <div
         style="

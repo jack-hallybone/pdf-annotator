@@ -63,8 +63,7 @@ export function printableName(name: string) {
   return name.replace(/\.pdf$/i, "") + "-print.pdf";
 }
 
-/* A content stream this build cannot read leaves it unsettled which page a
- * description belongs to, and both silent outcomes lose or leak text. */
+/* A content stream this build cannot read leaves it unsettled which page a description belongs to, and both silent outcomes lose or leak text. */
 export const UNPROVEN_PAGE_DELETE_NOTICE =
   "Part of this PDF could not be read. Descriptions of the deleted page may " +
   "remain in the file, and descriptions of pages you kept may have gone.";
@@ -81,8 +80,7 @@ export function preparationErrorNotice(error: unknown, fallback: string) {
   return fallback;
 }
 
-// The save path's own errors are user-facing sentences and shown as-is;
-// anything else falls back rather than leak a stack-shaped string.
+// The save path's own errors are user-facing sentences and shown as-is; anything else falls back rather than leak a stack-shaped string.
 export function inPlaceSaveFailureNotice(error: unknown) {
   const message = error instanceof Error ? error.message.trim() : "";
   const safeMessage =
@@ -156,11 +154,7 @@ function bandEdges(visiblePageRange: VisiblePageRange) {
   };
 }
 
-/**
- * Ranked against the pages this view is displaying, never a scalar active
- * index: a band around one index ranks most of a zoomed-out viewport as idle
- * work, and those pages stay blank.
- */
+/** Ranked against the pages this view is displaying, never a scalar active index: a band around one index ranks most of a zoomed-out viewport as idle work, and those pages stay blank. */
 export function pageRenderPriority(
   pageIndex: number,
   visiblePageRange: VisiblePageRange,
@@ -174,10 +168,7 @@ export function pageRenderPriority(
   return distance <= LAZY_PAGE_BUFFER ? "near" : "idle";
 }
 
-/**
- * Residency, loading and render ranking all read `visiblePageRangeRef`;
- * deriving any of them from the active page leaves displayed pages blank.
- */
+/** Residency, loading and render ranking all read `visiblePageRangeRef`; deriving any of them from the active page leaves displayed pages blank. */
 export function visibleLoadPageIndexes(
   visiblePageRange: VisiblePageRange,
   pageCount: number,
@@ -211,10 +202,7 @@ export function visibleLoadPageIndexes(
   return indexes;
 }
 
-/**
- * The same band as `visibleLoadPageIndexes`, plus the active page, whose proxy
- * a reload's caller needs in hand.
- */
+/** The same band as `visibleLoadPageIndexes`, plus the active page, whose proxy a reload's caller needs in hand. */
 export function initialReloadPageIndexes(
   pageCount: number,
   activePageIndex: number,
@@ -296,8 +284,7 @@ export function measureScrollbarGutter(container: HTMLElement) {
     block: hasHorizontalScrollbar
       ? Math.max(0, container.offsetHeight - container.clientHeight)
       : 0,
-    // `.pdfdocumenteditor-scroll-root` reserves this via `scrollbar-gutter: stable` whether
-    // or not content overflows, so it is read unconditionally.
+    // `.pdfdocumenteditor-scroll-root` reserves this via `scrollbar-gutter: stable` whether or not content overflows, so it is read unconditionally.
     inline: Math.max(0, container.offsetWidth - container.clientWidth),
   };
 }

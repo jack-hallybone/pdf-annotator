@@ -2,8 +2,7 @@ import type { PageViewport, PdfPoint, PdfRect } from "./types";
 import { inkPathCommands } from "./annotationGeometry";
 
 export function pdfRectToViewportRect(rect: PdfRect, viewport: PageViewport) {
-  // The min/abs below keeps the result correct when page rotation flips an
-  // axis.
+  // The min/abs below keeps the result correct when page rotation flips an axis.
   const [x1, y1] = viewport.convertToViewportPoint(rect.x1, rect.y1);
   const [x2, y2] = viewport.convertToViewportPoint(rect.x2, rect.y2);
   const x = Math.min(x1, x2);
@@ -17,16 +16,13 @@ export function pdfRectToViewportRect(rect: PdfRect, viewport: PageViewport) {
   };
 }
 
-// Content with its own visual "up" must spin with the page's rotation, not
-// just slide to the rotated bounding box.
+// Content with its own visual "up" must spin with the page's rotation, not just slide to the rotated bounding box.
 export function annotationContentTransform(
   rect: { height: number; width: number; x: number; y: number },
   viewport: PageViewport,
   extraRotation = 0,
 ) {
-  // `rect` carries only the page's rotation, so recovering the local content
-  // size must undo that alone, not the combined angle, or the content resizes
-  // every time `extraRotation` changes instead of spinning in place.
+  // `rect` carries only the page's rotation, so recovering the local content size must undo that alone, not the combined angle, or the content resizes every time `extraRotation` changes instead of spinning in place.
   const pageRotation = ((viewport.rotation % 360) + 360) % 360;
   const pageSwapped = pageRotation === 90 || pageRotation === 270;
   const localWidth = pageSwapped ? rect.height : rect.width;

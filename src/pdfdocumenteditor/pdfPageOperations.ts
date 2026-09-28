@@ -41,8 +41,9 @@ const MAX_PAGE_TREE_DEPTH = 256;
 // Hitting either content-scan bound is "cannot say", never "not drawn".
 const MAX_CONTENT_SCAN_DEPTH = 16;
 const MAX_CONTENT_SCAN_BYTES = 32 * 1024 * 1024;
-// `/S` is in neither this set nor the carrier set: an element must have one, so
-// it is replaced rather than deleted.
+// Read a content stream in pulls this size rather than one decode() call, so a stream that expands past the remaining budget (a decompression bomb, or simply a lot of legitimate content) is caught as soon as it does, not after the whole thing has already been inflated into memory to find out.
+const CONTENT_SCAN_CHUNK_BYTES = 1024 * 1024;
+// `/S` is in neither this set nor the carrier set: an element must have one, so it is replaced rather than deleted.
 const STRUCTURE_NODE_KEYS: ReadonlySet<PDFName> = new Set([
   PDFName.of("K"),
   PDFName.of("P"),
@@ -50,6 +51,23 @@ const STRUCTURE_NODE_KEYS: ReadonlySet<PDFName> = new Set([
   PDFName.of("R"),
   PDFName.of("Type"),
 ]);
+// A merge source's own action subtypes that run code, leave the document, or touch form/layer state - the same reason a plain hyperlink's /URI or an in-document /GoTo is left alone, and everything else is not.
+const DANGEROUS_MERGE_ACTION_SUBTYPES: ReadonlySet<string> = new Set([
+  "/Launch",
+  "/JavaScript",
+  "/SubmitForm",
+  "/ImportData",
+  "/GoToR",
+  "/GoToE",
+  "/Hide",
+  "/SetOCGState",
+  "/Rendition",
+  "/Sound",
+  "/Movie",
+  "/ResetForm",
+]);
+// An action chains through /Next (one action or an array of them, run in sequence); bounded for the same reason as the tree walks above.
+const MAX_ACTION_CHAIN_STEPS = 64;
 
 const linedPageLineColor = rgb(0.58, 0.66, 0.7);
 const linedPageMarginColor = rgb(0.68, 0.72, 0.74);
@@ -61,8 +79,7 @@ const pdfLoadOptions = {
   updateMetadata: false,
 };
 const pdfSaveOptions = {
-  // pdf-lib yields to the event loop every objectsPerTick objects, and Infinity
-  // disables that, blocking the main thread for the whole save.
+  // pdf-lib yields to the event loop every objectsPerTick objects, and Infinity disables that, blocking the main thread for the whole save.
   objectsPerTick: 500,
   updateFieldAppearances: false,
 };
@@ -81,6 +98,8 @@ export class PdfProtectionSanitizationError extends Error {
 export async function saveEditedPdf(pdfDoc: PDFDocument) {
   stripPdfAConformanceClaims(pdfDoc);
   stripSignatureFields(pdfDoc);
+  // Every edit path ends here, so one full sweep is where a deleted annotation's old /AP, an orphaned popup, or a dropped page's residue actually leaves the file, instead of riding along unreachable.
+  sweepUnreachableObjects(pdfDoc);
   const output = await pdfDoc.save(pdfSaveOptions);
   const protection = await verifyEditedPdfProtectionClaims(output);
   if (!protection.verified) {
@@ -96,13 +115,11 @@ export async function saveEditedPdf(pdfDoc: PDFDocument) {
   return output;
 }
 
-// Deleting a dict entry only removes the pointer: pdf-lib's save() serialises
-// every object it knows about, so the objects go from the context too.
+// Deleting a dict entry only removes the pointer: pdf-lib's save() serialises every object it knows about, so the objects go from the context too.
 function stripPdfAConformanceClaims(pdfDoc: PDFDocument) {
   try {
     const { context } = pdfDoc;
-    // XMP is legal on any object, so every metadata stream is walked; deleting
-    // /Metadata wholesale would take the user's own data with it.
+    // XMP is legal on any object, so every metadata stream is walked; deleting /Metadata wholesale would take the user's own data with it.
     stripPdfAMetadataStreams(context);
 
     // PDF 2.0 allows OutputIntents on a page, not just the catalog.
@@ -131,8 +148,9 @@ function stripPdfAOutputIntents(dict: PDFDict, context: PDFContext) {
       continue;
     }
 
+    // Only unlinked, never force-deleted: an ICC profile can be shared by another OutputIntent or an ICCBased colourspace, and the reachability sweep in saveEditedPdf removes it if this was its last reference.
     if (intent) {
-      deleteCatalogRef(intent, context, PDFName.of("DestOutputProfile"));
+      intent.delete(PDFName.of("DestOutputProfile"));
     }
     if (entryRef instanceof PDFRef) {
       context.delete(entryRef);
@@ -149,8 +167,7 @@ function stripPdfAOutputIntents(dict: PDFDict, context: PDFContext) {
 }
 
 function stripPdfAMetadataStreams(context: PDFContext) {
-  // Must stay the same finder pdfLooksPdfA uses, or a save leaves a claim in or
-  // aborts on one it cannot remove.
+  // Must stay the same finder pdfLooksPdfA uses, or a save leaves a claim in or aborts on one it cannot remove.
   const claimingRefs = pdfAClaimingMetadataRefs(context);
 
   if (claimingRefs.size === 0) {
@@ -182,7 +199,7 @@ function indirectDicts(context: PDFContext) {
   return dicts;
 }
 
-// See CLAUDE.md Learnings on signature stripping.
+// A pruned field's /V value and its /AP appearance are only deleted once nothing else reaches them: the reachability sweep in deleteSignatureObjects below keeps an appearance a surviving field still shares (the crypto alone is not enough to strip - a live appearance stream still renders as a signed stamp, signer's name and scanned signature included).
 function stripSignatureFields(pdfDoc: PDFDocument) {
   try {
     const { catalog } = pdfDoc;
@@ -192,6 +209,8 @@ function stripSignatureFields(pdfDoc: PDFDocument) {
 
     // DocMDP and UR3 signatures hang off /Perms, so pruning fields leaves them.
     stripSignaturePermissions(catalog, owned);
+    // The certificate/VRI store for long-term validation, independent of /AcroForm, so pruning fields leaves this too.
+    stripDocumentSecurityStore(catalog, owned);
 
     const acroFormRef = catalog.get(PDFName.of("AcroForm"));
     const acroForm = resolvedDictEntry(catalog, PDFName.of("AcroForm"));
@@ -210,6 +229,9 @@ function stripSignatureFields(pdfDoc: PDFDocument) {
       } else {
         acroForm.delete(PDFName.of("SigFlags"));
       }
+    } else if (acroForm) {
+      // /Fields missing or not an array: there is nothing here to prune, but a stale /SigFlags would still make this look signed after the strip, fail-closed, and lock a file that never had a signature to remove.
+      acroForm.delete(PDFName.of("SigFlags"));
     }
 
     deleteSignatureObjects(pdfDoc, removed, owned);
@@ -345,6 +367,15 @@ function stripSignaturePermissions(catalog: PDFDict, owned: PDFObject[]) {
   }
 }
 
+// /DSS carries the certificates and VRI a signature was validated against; left in place, a resaved file still looks LTV-signed even with /AcroForm and every /Sig field gone.
+function stripDocumentSecurityStore(catalog: PDFDict, owned: PDFObject[]) {
+  const dssRef = catalog.get(PDFName.of("DSS"));
+  if (dssRef !== undefined) {
+    owned.push(dssRef);
+  }
+  catalog.delete(PDFName.of("DSS"));
+}
+
 function isSignatureField(field: PDFDict) {
   const fieldType = resolvedNameEntry(field, PDFName.of("FT"));
   if (fieldType?.asString() === "/Sig") {
@@ -358,15 +389,100 @@ function isSignatureField(field: PDFDict) {
   return valueType?.asString() === "/Sig";
 }
 
-// pdf-lib's typed lookupMaybe throws when a present entry has another legal PDF
-// type, so resolve first and narrow explicitly.
-
-function deleteCatalogRef(dict: PDFDict, context: PDFContext, key: PDFName) {
-  const ref = dict.get(key);
-  if (ref instanceof PDFRef) {
-    context.delete(ref);
+// Resources/MediaBox/CropBox/Rotate can come from an ancestor /Pages node, so a leaf that changes parent must have them baked in directly or it silently inherits the new parent's values; `skip` lets a page modelled on a template leave out `Rotate` (a neighbour's scan orientation, not a default for a fresh page) while a moved page keeps every entry, rotation included.
+function bakeInheritedPageAttributes(
+  leaf: PDFPageLeaf,
+  from: PDFPageLeaf = leaf,
+  skip: ReadonlySet<string> = EMPTY_INHERITABLE_SKIP_SET,
+) {
+  for (const key of PDFPageLeaf.InheritableEntries) {
+    if (skip.has(key)) {
+      continue;
+    }
+    const name = PDFName.of(key);
+    if (leaf.get(name) !== undefined) {
+      continue;
+    }
+    const inherited = from.getInheritableAttribute(name);
+    if (inherited !== undefined) {
+      leaf.set(name, inherited);
+    }
   }
-  dict.delete(key);
+}
+
+const EMPTY_INHERITABLE_SKIP_SET: ReadonlySet<string> = new Set();
+const TEMPLATE_MODELLED_PAGE_SKIP: ReadonlySet<string> = new Set(["Rotate"]);
+
+// /PageLabels/Nums is a run-length list of (page-index, label-scheme) pairs in ascending order: each entry's scheme covers every page up to the next entry's index. A structural edit changes what index every later page sits at, so without this the label meant for one page keeps showing on whatever page a later insert or delete left at that same index.
+function pageLabelsNums(pdfDoc: PDFDocument) {
+  const pageLabels = resolvedDictEntry(
+    pdfDoc.catalog,
+    PDFName.of("PageLabels"),
+  );
+  return pageLabels
+    ? resolvedArrayEntry(pageLabels, PDFName.of("Nums"))
+    : undefined;
+}
+
+// Rebuilds Nums with every key passed through `remap`; a key mapped to null (its whole range fell inside a deletion, so no surviving page owns it anymore) is dropped rather than collided onto a neighbour.
+function rewritePageLabelNums(
+  nums: PDFArray,
+  remap: (index: number) => number | null,
+) {
+  const entries: Array<[number, PDFObject]> = [];
+  for (let i = 0; i + 1 < nums.size(); i += 2) {
+    const key = nums.lookupMaybe(i, PDFNumber);
+    const value = nums.get(i + 1);
+    if (key === undefined || value === undefined) {
+      continue;
+    }
+    const nextIndex = remap(key.asNumber());
+    if (nextIndex !== null) {
+      entries.push([nextIndex, value]);
+    }
+  }
+  entries.sort((a, b) => a[0] - b[0]);
+
+  for (let i = nums.size() - 1; i >= 0; i -= 1) {
+    nums.remove(i);
+  }
+  for (const [index, value] of entries) {
+    nums.push(PDFNumber.of(index));
+    nums.push(value);
+  }
+}
+
+// A page removed at `startIndex` shifts every later page down by `count`; a label entry that started inside the removed run has no page left to describe and is dropped, letting whatever ran before it take over instead.
+function shiftPageLabelsForRemoval(
+  pdfDoc: PDFDocument,
+  startIndex: number,
+  count: number,
+) {
+  const nums = pageLabelsNums(pdfDoc);
+  if (!nums) {
+    return;
+  }
+  rewritePageLabelNums(nums, (index) => {
+    if (index >= startIndex + count) {
+      return index - count;
+    }
+    return index >= startIndex ? null : index;
+  });
+}
+
+// `count` pages land at `insertAt`, pushing every page already at or past it down by `count`; the new pages carry no entry of their own, so they read as part of whichever scheme already covered that position.
+function shiftPageLabelsForInsertion(
+  pdfDoc: PDFDocument,
+  insertAt: number,
+  count: number,
+) {
+  const nums = pageLabelsNums(pdfDoc);
+  if (!nums) {
+    return;
+  }
+  rewritePageLabelNums(nums, (index) =>
+    index >= insertAt ? index + count : index,
+  );
 }
 
 export async function addBlankPageAt(
@@ -377,7 +493,13 @@ export async function addBlankPageAt(
   const pdfDoc = await loadEditablePdf(bytes);
   const sourcePage = pdfDoc.getPage(templatePageIndex);
   const { width, height } = sourcePage.getSize();
-  pdfDoc.insertPage(pageIndex, [width, height]);
+  const page = pdfDoc.insertPage(pageIndex, [width, height]);
+  bakeInheritedPageAttributes(
+    page.node,
+    sourcePage.node,
+    TEMPLATE_MODELLED_PAGE_SKIP,
+  );
+  shiftPageLabelsForInsertion(pdfDoc, pageIndex, 1);
   return saveEditedPdf(pdfDoc);
 }
 
@@ -390,12 +512,17 @@ export async function addLinedPageAt(
   const sourcePage = pdfDoc.getPage(templatePageIndex);
   const { width, height } = sourcePage.getSize();
   const page = pdfDoc.insertPage(pageIndex, [width, height]);
+  bakeInheritedPageAttributes(
+    page.node,
+    sourcePage.node,
+    TEMPLATE_MODELLED_PAGE_SKIP,
+  );
+  shiftPageLabelsForInsertion(pdfDoc, pageIndex, 1);
   drawLinedPage(page, width, height);
   return saveEditedPdf(pdfDoc);
 }
 
-// `unproven` means a content stream could not be read, so a description may be
-// a deleted page's, or a kept page's already gone.
+// `unproven` means a content stream could not be read, so a description may be a deleted page's, or a kept page's already gone.
 type PageRemoval = {
   bytes: Uint8Array;
   descriptionsUnproven: boolean;
@@ -425,8 +552,7 @@ export async function rotatePageClockwise(
   return saveEditedPdf(pdfDoc);
 }
 
-// pdf-lib has no reorder primitive, so this inserts before removing, and the
-// removal index accounts for the shift the insertion just caused.
+// pdf-lib has no reorder primitive, so this inserts before removing, and the removal index accounts for the shift the insertion just caused.
 export async function movePageBy(
   bytes: Uint8Array,
   pageIndex: number,
@@ -444,11 +570,14 @@ export async function movePageBy(
     throw new Error("This page cannot be moved further in that direction.");
   }
 
-  // Read before removing it, and not through `dropPages`: the same page object
-  // is moved, not copied, and is not leaving the file.
+  // Read before removing it, and not through `dropPages`: the same page object is moved, not copied, and is not leaving the file.
   const movedPage = pdfDoc.getPage(pageIndex);
+  // A move can cross into a different /Pages subtree, so whatever this leaf was inheriting from its old parent is fixed onto it before that parent relationship is gone, or the new parent's values apply instead.
+  bakeInheritedPageAttributes(movedPage.node);
   pdfDoc.removePage(pageIndex);
+  shiftPageLabelsForRemoval(pdfDoc, pageIndex, 1);
   pdfDoc.insertPage(targetIndex, movedPage);
+  shiftPageLabelsForInsertion(pdfDoc, targetIndex, 1);
   return saveEditedPdf(pdfDoc);
 }
 
@@ -460,8 +589,7 @@ export async function mergePdfAfterPage(
   const pdfDoc = await loadEditablePdf(bytes);
   const mergeDoc = await loadEditablePdf(mergeBytes);
   const pageIndexes = mergeDoc.getPageIndices();
-  // These pages come from another file, so a colliding object number must not
-  // rename a live one.
+  // These pages come from another file, so a colliding object number must not rename a live one.
   const insertAt = Math.min(
     Math.max(afterPageIndex + 1, 0),
     pdfDoc.getPageCount(),
@@ -475,6 +603,10 @@ export async function mergePdfAfterPage(
         pdfDoc.insertPage(insertAt + index, page);
       }),
   );
+  // A merge source is someone else's file, brought in unopened: it keeps its marks and drawings, but not anything that runs on open, claims a structure or layer index this document already numbers on its own terms, or carries an embedded file along for the ride.
+  copiedPages.forEach((page) => sanitizeMergedPage(page));
+  // The merged-in pages carry no label scheme of their own here: they read as part of whatever scheme already covers the position they land at, same as a blank page inserted at that spot.
+  shiftPageLabelsForInsertion(pdfDoc, insertAt, copiedPages.length);
 
   return {
     bytes: await saveEditedPdf(pdfDoc),
@@ -482,6 +614,81 @@ export async function mergePdfAfterPage(
     insertedPageCount: copiedPages.length,
     renames: NO_ANNOTATION_RENAMES,
   };
+}
+
+// /OC is a reference, and pdf-lib's copy already gives whatever it points at a fresh object number in the target - checked directly against this app's own merge path, a copied page's /OC keeps pointing at its own layer definition, never the target's - so nothing here needs to touch it. /StructParents does not get that treatment: it is a plain integer, copied byte for byte, so a merged page can carry the exact number a page already in the document uses for something else. The source's own structure tree is not copied in either (only the pages named for the merge are, and /StructTreeRoot is not one of them), so there is no tree here for that number to resolve against even before it collides - deleting it costs nothing a working reader used.
+function sanitizeMergedPage(page: PDFPage) {
+  const node = page.node;
+  node.delete(PDFName.of("AA"));
+  node.delete(PDFName.of("StructParents"));
+
+  const annots = pageNodeAnnots(page);
+  for (let index = (annots?.size() ?? 0) - 1; index >= 0; index -= 1) {
+    const annotation = annots ? resolvedDictAt(annots, index) : undefined;
+    if (!annotation) {
+      continue;
+    }
+
+    const subtype = resolvedNameEntry(annotation, PDFName.of("Subtype"));
+    if (subtype?.asString() === "/FileAttachment") {
+      // An embedded file's usual carrier: dropped whole, not sanitized - there is no display-only remainder of a file attachment worth keeping.
+      annots?.remove(index);
+      continue;
+    }
+
+    // The common case (one widget per field) already puts /K, /V and /C on this same dict; a field with several widgets keeps them on a separate ancestor instead, so the walk goes up, not just this one dict.
+    stripFieldActionsUpward(annotation);
+    annotation.delete(PDFName.of("StructParent"));
+    if (
+      dangerousActionChain(annotation.context, annotation.get(PDFName.of("A")))
+    ) {
+      annotation.delete(PDFName.of("A"));
+    }
+  }
+}
+
+function stripFieldActionsUpward(annotation: PDFDict) {
+  let current: PDFDict | undefined = annotation;
+  for (let depth = 0; current && depth < MAX_FIELD_TREE_DEPTH; depth += 1) {
+    current.delete(PDFName.of("AA"));
+    current = resolvedDictEntry(current, PDFName.of("Parent"));
+  }
+}
+
+// A URI or an in-document GoTo is left alone; only a subtype that runs code, leaves the document, or touches form/layer state is stripped, and the whole action goes rather than trying to splice one link out of a /Next chain that runs in sequence.
+function dangerousActionChain(
+  context: PDFContext,
+  action: PDFObject | undefined,
+  stepsLeft = MAX_ACTION_CHAIN_STEPS,
+): boolean {
+  if (stepsLeft <= 0) {
+    return false;
+  }
+  const dict =
+    action instanceof PDFRef
+      ? context.lookupMaybe(action, PDFDict)
+      : action instanceof PDFDict
+        ? action
+        : undefined;
+  if (!dict) {
+    return false;
+  }
+
+  const subtype = resolvedNameEntry(dict, PDFName.of("S"));
+  if (subtype && DANGEROUS_MERGE_ACTION_SUBTYPES.has(subtype.asString())) {
+    return true;
+  }
+
+  const next = context.lookup(dict.get(PDFName.of("Next")));
+  if (next instanceof PDFArray) {
+    for (let index = 0; index < next.size(); index += 1) {
+      if (dangerousActionChain(context, next.get(index), stepsLeft - 1)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return dangerousActionChain(context, next, stepsLeft - 1);
 }
 
 export async function rotatePageByDelta(
@@ -512,14 +719,14 @@ export async function removePagesRange(
   return { bytes: await saveEditedPdf(pdfDoc), descriptionsUnproven };
 }
 
-// The one place a page leaves the document: `movePageBy` re-links rather than
-// drops and must not come through here.
+// The one place a page leaves the document: `movePageBy` re-links rather than drops and must not come through here.
 function dropPages(pdfDoc: PDFDocument, startIndex: number, count: number) {
   const { context } = pdfDoc;
   const leaving: PDFPage[] = [];
   for (let index = 0; index < count; index += 1) {
     leaving.push(pdfDoc.getPage(startIndex + index));
   }
+  shiftPageLabelsForRemoval(pdfDoc, startIndex, count);
 
   // Read before the removal, which leaves the page cache stale.
   const leavingRefs = refsLeavingWith(pdfDoc, startIndex, count);
@@ -527,8 +734,7 @@ function dropPages(pdfDoc: PDFDocument, startIndex: number, count: number) {
     ...leavingRefs.pages,
     ...leavingRefs.annotations,
   ]);
-  // From the annotations only: a page's own owner is the page tree, and
-  // treating that as a field could take a node the tree still uses.
+  // From the annotations only: a page's own owner is the page tree, and treating that as a field could take a node the tree still uses.
   for (const ref of fieldsWithNoWidgetLeft(context, leavingRefs.annotations)) {
     droppedWithThePage.add(ref);
   }
@@ -569,8 +775,7 @@ function dropPages(pdfDoc: PDFDocument, startIndex: number, count: number) {
   return unproven;
 }
 
-// A button field's `/Opt` is indexed by `/Kids` position, and both `/FT` and
-// `/Opt` are inheritable, so both are read up the parent chain.
+// pdf-lib allocates above the highest object number it has seen, so a deletion that would lower that ceiling leaves an empty object at it instead.
 function deleteObjects(pdfDoc: PDFDocument, refs: Iterable<PDFRef>) {
   const { context } = pdfDoc;
   const ceiling = context.largestObjectNumber;
@@ -584,8 +789,7 @@ function deleteObjects(pdfDoc: PDFDocument, refs: Iterable<PDFRef>) {
     return;
   }
 
-  // Before the ceiling pin, so the walk reads the document with the deleted
-  // objects absent rather than with an empty dictionary standing in.
+  // Before the ceiling pin, so the walk reads the document with the deleted objects absent rather than with an empty dictionary standing in.
   removeDeletedMembers(pdfDoc, deleted);
 
   const stillReaches = context
@@ -596,9 +800,7 @@ function deleteObjects(pdfDoc: PDFDocument, refs: Iterable<PDFRef>) {
   }
 }
 
-// Containers are told apart by shape, not key name: a list of objects holds
-// objects and nothing else, so a dead entry is pruned; a coordinate holds a
-// name or string beside the reference and is positional, so it is left alone.
+// Containers are told apart by shape, not key name: a list of objects holds objects and nothing else, so a dead entry is pruned; a coordinate holds a name or string beside the reference and is positional, so it is left alone.
 function removeDeletedMembers(
   pdfDoc: PDFDocument,
   deleted: ReadonlySet<PDFRef>,
@@ -676,8 +878,7 @@ function removeDeletedFromList(
   }
 }
 
-// pdf-lib allocates above the highest object number it has seen, so a deletion
-// that would lower that ceiling leaves an empty object at it instead.
+// A button field's `/Opt` is indexed by `/Kids` position, and both `/FT` and `/Opt` are inheritable, so both are read up the parent chain.
 function kidPruning(
   owner: PDFDict,
   key: PDFName,
@@ -735,8 +936,7 @@ function resolvedArray(context: PDFContext, value: PDFObject) {
   return resolved instanceof PDFArray ? resolved : undefined;
 }
 
-// Attributes attach through `/A` and by class through `/C` (ISO 32000-1
-// 14.7.5), so both are followed.
+// Attributes attach through `/A` and by class through `/C` (ISO 32000-1 14.7.5), so both are followed.
 function stripDescriptionsOfDroppedPages(
   pdfDoc: PDFDocument,
   droppedPages: ReadonlySet<PDFRef>,
@@ -774,7 +974,8 @@ function stripDescriptionsOfDroppedPages(
   })) {
     detached.add(ref);
   }
-  return { detached, unproven: placement.unproven };
+  // The depth/cycle cap that sets walk.reachedEverything = false means this walk gave up on some element without ever deciding whether it described a dropped page; that element's description was left exactly as it was, so it is just as unproven as placement's own "could not place this" case.
+  return { detached, unproven: placement.unproven || !walk.reachedEverything };
 }
 
 type StructureWalk = {
@@ -840,8 +1041,7 @@ function clearDescriptionsBelow(
   return { keeps, placed };
 }
 
-// `/Type` is optional and `/S` required, so a dictionary with neither is a
-// coordinate into the content rather than an element.
+// `/Type` is optional and `/S` required, so a dictionary with neither is a coordinate into the content rather than an element.
 function isStructureElement(dict: PDFDict) {
   const type = dict.get(PDFName.of("Type"));
   if (type instanceof PDFName) {
@@ -850,8 +1050,7 @@ function isStructureElement(dict: PDFDict) {
   return dict.has(PDFName.of("S"));
 }
 
-// Placement is `/StructParents` into the `/ParentTree`, indexed by `/MCID` (ISO
-// 32000-1 14.7.4.4), not the optional `/Pg`; see CLAUDE.md Learnings.
+// Placement is `/StructParents` into the `/ParentTree`, indexed by `/MCID` (ISO 32000-1 14.7.4.4), not the optional `/Pg`.
 function placementByParentTree(
   pdfDoc: PDFDocument,
   root: PDFDict,
@@ -955,8 +1154,7 @@ function exclusiveKeys(side: SideClaims, other: SideClaims) {
   return keys;
 }
 
-// The keys references alone cannot be trusted on, and the only ones the scan
-// runs for: reaching an XObject is not drawing it.
+// The keys references alone cannot be trusted on, and the only ones the scan runs for: reaching an XObject is not drawing it.
 function keysTheContentMustDecide(
   entries: ReadonlyMap<number, PDFObject>,
   dropped: SideClaims,
@@ -1047,8 +1245,7 @@ type ContentScan = {
   complete: boolean;
 };
 
-// An XObject's marked content is on exactly the pages that draw it, so `Do` is
-// followed transitively.
+// An XObject's marked content is on exactly the pages that draw it, so `Do` is followed transitively.
 function drawnOwners(context: PDFContext, pages: PDFDict[], scan: ContentScan) {
   const drawn = new Set<PDFDict>();
   const walked = new Map<PDFStream, Set<PDFDict | undefined>>();
@@ -1091,24 +1288,23 @@ function followDrawnXObjects(
     under.add(resources);
     walk.walked.set(stream, under);
 
-    const decoded = decodedContent(stream);
-    if (!decoded) {
+    const decoded = decodedContent(stream, walk.scan.budget);
+    if (!decoded.ok) {
       walk.scan.complete = false;
+      // A stream this cannot decode at all is only a gap in this one page's read (continue to the next stream); one that ran past the shared budget ends the whole walk (return) instead - reading on would only spend more of a budget that is already gone.
+      if (decoded.overBudget) {
+        return;
+      }
       continue;
     }
-    walk.scan.budget -= decoded.length;
-    if (walk.scan.budget < 0) {
-      walk.scan.complete = false;
-      return;
-    }
-    bytes.push(decoded);
+    walk.scan.budget -= decoded.bytes.length;
+    bytes.push(decoded.bytes);
   }
   if (bytes.length === 0) {
     return;
   }
 
-  // A page's `/Contents` array is one stream cut into pieces - a token may
-  // straddle the join - so they are read as one.
+  // A page's `/Contents` array is one stream cut into pieces - a token may straddle the join - so they are read as one.
   const read = xObjectNamesDrawnBy(joinedBytes(bytes));
   if (!read.complete) {
     walk.scan.complete = false;
@@ -1173,14 +1369,41 @@ function inheritedResources(page: PDFDict) {
   return undefined;
 }
 
-function decodedContent(stream: PDFStream) {
+type ScannedContent =
+  { ok: true; bytes: Uint8Array } | { ok: false; overBudget: boolean };
+
+// A malicious /FlateDecode stream can claim only a few compressed bytes and still expand to gigabytes; decoding it whole before checking its size would pay for that expansion just to find out. This reads it in bounded pulls instead of one decode() call, so a stream that grows past the remaining budget is caught as soon as it does, not after the whole thing has already been inflated into memory to find out. (A ratio-based check against the compressed size alone was tried and dropped: legitimate, ordinary page content can compress at ratios well past what a fixed "suspicious" cutoff could allow without also catching real pages that are not a threat, and a cutoff loose enough to spare them is too loose to tell a small-and-dangerous stream from a small-and-fine one either.) getBytes() still decodes one whole deflate block per pull with no size cap of its own, so this bounds how OFTEN the budget is checked, not what a single pull can produce - one pathological block can still land past budget in one call.
+function decodedContent(stream: PDFStream, budget: number): ScannedContent {
   if (!(stream instanceof PDFRawStream)) {
-    return undefined;
+    return { ok: false, overBudget: false };
   }
+
   try {
-    return decodePDFRawStream(stream).decode();
+    const source = decodePDFRawStream(stream);
+    // Never actually a Uint8ClampedArray here - forceClamped is left at its default false - but getBytes' own type covers both.
+    const pieces: (Uint8Array | Uint8ClampedArray)[] = [];
+    let total = 0;
+    while (!source.isEmpty) {
+      const chunk = source.getBytes(CONTENT_SCAN_CHUNK_BYTES);
+      if (chunk.length === 0) {
+        break;
+      }
+      total += chunk.length;
+      if (total > budget) {
+        return { ok: false, overBudget: true };
+      }
+      // Copied out: a decode stream's own buffer can be reallocated by a later pull, which would silently invalidate an earlier subarray.
+      pieces.push(chunk.slice());
+    }
+    const joined = new Uint8Array(total);
+    let offset = 0;
+    for (const piece of pieces) {
+      joined.set(piece, offset);
+      offset += piece.length;
+    }
+    return { ok: true, bytes: joined };
   } catch {
-    return undefined;
+    return { ok: false, overBudget: false };
   }
 }
 
@@ -1212,8 +1435,7 @@ function isRegularContentByte(byte: number) {
   return !CONTENT_WHITESPACE.has(byte) && !CONTENT_DELIMITERS.has(byte);
 }
 
-// Not an interpreter, but it must tell a name from a comment, a string or an
-// inline image's bytes: a `(/Fm0 Do)` inside a string is not a draw.
+// Not an interpreter, but it must tell a name from a comment, a string or an inline image's bytes: a `(/Fm0 Do)` inside a string is not a draw.
 function xObjectNamesDrawnBy(bytes: Uint8Array) {
   const names: string[] = [];
   let complete = true;
@@ -1525,8 +1747,7 @@ function classNames(context: PDFContext, element: PDFDict) {
   return names;
 }
 
-// Only when the walk reached every element the tree names: taking a class still
-// in use loses a kept element its attributes.
+// Only when the walk reached every element the tree names: taking a class still in use loses a kept element its attributes.
 function removeUnusedClasses(root: PDFDict, walk: StructureWalk) {
   const classMap = resolvedDictEntry(root, PDFName.of("ClassMap"));
   if (!classMap || !reachedEveryElement(walk)) {
@@ -1561,8 +1782,7 @@ function reachedEveryElement(walk: StructureWalk) {
   return true;
 }
 
-// `/S` is the exception the complement rule cannot cover: an element must have
-// a structure type, so it becomes `/NonStruct` and `/NS` goes with it.
+// `/S` is the exception the complement rule cannot cover: an element must have a structure type, so it becomes `/NonStruct` and `/NS` goes with it.
 function clearDescription(
   context: PDFContext,
   element: PDFDict,
@@ -1583,8 +1803,7 @@ function clearDescription(
   element.set(PDFName.of("S"), PDFName.of("NonStruct"));
 }
 
-// The `/IDTree` is keyed by the identifier and every node's `/Limits` copies
-// keys below it, so the pairs go and each `/Limits` is rewritten bottom up.
+// The `/IDTree` is keyed by the identifier and every node's `/Limits` copies keys below it, so the pairs go and each `/Limits` is rewritten bottom up.
 function removeStructureIdentifiers(
   context: PDFContext,
   root: PDFDict,
@@ -1751,8 +1970,7 @@ function refsLeavingWith(
   return { annotations: going(annotations), pages: going(pages) };
 }
 
-// A field's value hangs off the field, not the widget, so taking only the
-// widget leaves the reader's typed text in the AcroForm.
+// A field's value hangs off the field, not the widget, so taking only the widget leaves the reader's typed text in the AcroForm.
 function fieldsWithNoWidgetLeft(
   context: PDFContext,
   droppedAnnotations: ReadonlySet<PDFRef>,
@@ -1878,8 +2096,20 @@ function referencesFrom(
   return reached;
 }
 
-// Keyed by the object in the copy and valued by the one in the source, so two
-// copies compose.
+// The general case of deleteObjectsTheCopyLeftBehind's own sweep, run over the whole document rather than one copy's object range: a bounded walk from the roots, same as every other reachability check here, so it cannot cost more than one full graph traversal per save.
+function sweepUnreachableObjects(pdfDoc: PDFDocument) {
+  const { context } = pdfDoc;
+  const reachable = referencesFrom(context, documentRoots(pdfDoc));
+  deleteObjects(
+    pdfDoc,
+    context
+      .enumerateIndirectObjects()
+      .map(([ref]) => ref)
+      .filter((ref) => !reachable.has(ref)),
+  );
+}
+
+// Keyed by the object in the copy and valued by the one in the source, so two copies compose.
 type CopiedAnnotationNames = ReadonlyMap<string, string>;
 
 const NO_COPIED_NAMES: CopiedAnnotationNames = new Map();
@@ -1932,9 +2162,7 @@ async function copyPagesInto(
   return { copiedNames, pages };
 }
 
-// pdf-lib's copier follows `/P` and `/Dest` back out of the page and copies
-// those pages too, so `/P` is restated and anything this copy created that the
-// finished document does not reach is deleted.
+// pdf-lib's copier follows `/P` and `/Dest` back out of the page and copies those pages too, so `/P` is restated and anything this copy created that the finished document does not reach is deleted.
 function restatePageOfCopiedAnnotations(pages: PDFPage[]) {
   for (const page of pages) {
     const annots = pageNodeAnnots(page);
@@ -1991,11 +2219,11 @@ function pageAnnots(pdfDoc: PDFDocument, pageIndex: number) {
   return pageNodeAnnots(pdfDoc.getPage(pageIndex));
 }
 
-function pageNodeAnnots(page: PDFPage) {
+// Shared with pdfWriter.ts: every reader of a page's /Annots array, there or here, must treat a present-but-wrong-typed value the same as a missing one rather than let pdf-lib's raw type error escape past whatever the caller was already guarding against.
+export function pageNodeAnnots(page: PDFPage) {
   try {
     return page.node.Annots();
   } catch {
-    // A present-but-wrong-typed /Annots: nothing on this page can be paired.
     return undefined;
   }
 }
@@ -2070,6 +2298,7 @@ export async function insertPagesFromBytes(
         pdfDoc.insertPage(atIndex + index, page);
       }),
   );
+  shiftPageLabelsForInsertion(pdfDoc, atIndex, pageIndexes.length);
   return {
     bytes: await saveEditedPdf(pdfDoc),
     descriptionsUnproven: false,
@@ -2096,8 +2325,7 @@ export async function extractPagesBytes(
   );
   return {
     bytes: await saveEditedPdf(extractedDoc),
-    // The caller must carry this to the insert, or the pages come back under
-    // names nothing holds.
+    // The caller must carry this to the insert, or the pages come back under names nothing holds.
     copiedNames,
     pageCount: pages.length,
   };
@@ -2110,11 +2338,16 @@ export type PdfStructuralOperation =
       atIndex: number;
       pageCount: number;
       pagesBytes: Uint8Array;
-      // Required, not optional: an insert cannot relink, so a caller with no
-      // answer says so with an empty map.
+      // Required, not optional: an insert cannot relink, so a caller with no answer says so with an empty map.
       copiedNames: CopiedAnnotationNames;
     }
-  | { type: "removePages"; startIndex: number; count: number }
+  | {
+      type: "removePages";
+      startIndex: number;
+      count: number;
+      // Accounting only - applyStructuralOperation below never reads it, and a plain page delete leaves it undefined. A merge's own undo is a removePages (deleting the pages it just inserted needs no bytes), so without this its entry would look free no matter how large the file merged in was; this lets it still count against the same per-entry history budget an insert's own pagesBytes does.
+      mergedSourceByteLength?: number;
+    }
   | { type: "movePage"; pageIndex: number; direction: 1 | -1 };
 
 type StructuralOperationResult = {
@@ -2164,8 +2397,7 @@ function relinked(bytes: Uint8Array): StructuralOperationResult {
   return { bytes, descriptionsUnproven: false, renames: NO_ANNOTATION_RENAMES };
 }
 
-// removePages -> insertPages is the only inversion that copies, and so the only
-// one that renames: the pages are read out now, while their objects have names.
+// removePages -> insertPages is the only inversion that copies, and so the only one that renames: the pages are read out now, while their objects have names.
 export async function invertStructuralOperation(
   operation: PdfStructuralOperation,
   currentBytes: Uint8Array,
@@ -2198,8 +2430,7 @@ export async function invertStructuralOperation(
       };
     }
     case "movePage":
-      // A swap with a neighbor undoes itself: swap the page back from its
-      // new slot (pageIndex + direction) in the opposite direction.
+      // A swap with a neighbor undoes itself: swap the page back from its new slot (pageIndex + direction) in the opposite direction.
       return {
         type: "movePage",
         pageIndex: operation.pageIndex + operation.direction,

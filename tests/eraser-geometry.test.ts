@@ -56,6 +56,23 @@ test("buildEraserAnnotationIndex skips annotations with non-finite bounds", () =
   assert.equal(index.grid.size, 0);
 });
 
+// A file's coordinates are clamped only to ±1,000,000, and gridding a stroke across that range ran for seconds and gigabytes before the Map overflowed.
+test("an annotation spanning a hostile file's coordinate range is still found, without gridding it", () => {
+  const huge = drawAt("huge", 0, 0);
+  (huge as { paths: { x: number; y: number }[][] }).paths = [
+    [
+      { x: -1_000_000, y: -1_000_000 },
+      { x: 1_000_000, y: 1_000_000 },
+    ],
+  ];
+  const index = buildEraserAnnotationIndex(
+    [huge, drawAt("near", 100, 100)],
+    1,
+    10,
+  );
+  assert.deepEqual(idsNear(index, 100, 100), ["huge", "near"]);
+});
+
 test("a query point near two overlapping annotations returns both, deduped", () => {
   const annotations = [drawAt("a", 100, 100), drawAt("b", 101, 101)];
   const index = buildEraserAnnotationIndex(annotations, 1, 10);

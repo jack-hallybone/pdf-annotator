@@ -17,7 +17,6 @@ import {
   resolvedNameEntry,
   resolvedNumberEntry,
 } from "./pdfLookup";
-import { clamp } from "./viewerConfig";
 
 const pdfProtectionLoadOptions = {
   ignoreEncryption: true,
@@ -26,8 +25,7 @@ const pdfProtectionLoadOptions = {
 };
 
 const MAX_PROTECTION_FIELD_ENTRIES = 10_000;
-// pdfPageOperations.ts strips exactly the streams these are found in, so the
-// two must agree: a claim one side cannot see is left in the output.
+// pdfPageOperations.ts strips exactly the streams these are found in, so the two must agree: a claim one side cannot see is left in the output.
 const pdfaXmpMarkers = ["pdfaid:part", "pdfaid:conformance"];
 
 export type PdfDocumentEditorReadOnlyReason =
@@ -102,17 +100,21 @@ export async function pdfLooksPdfA(
 }
 
 export function pdfLooksSignedOrCertified(bytes: Uint8Array) {
+  // A page's drawn content, an embedded image or a form field's appearance can legitimately spell out any of these marker strings - a manual, or an annotation quoting one of these key names - without the file actually being signed. Only a match outside every stream's own data can fail this file closed.
+  const skip = contentStreamSpans(bytes);
   return (
-    bytesContainPdfMarker(bytes, "/ByteRange") ||
-    bytesContainPdfMarker(bytes, "/DocMDP") ||
-    bytesContainPdfMarker(bytes, "/Perms") ||
-    bytesContainPdfMarker(bytes, "/SigFlags") ||
-    bytesContainPdfMarker(bytes, "/Type /Sig") ||
+    bytesContainPdfMarker(bytes, "/ByteRange", { skip }) ||
+    bytesContainPdfMarker(bytes, "/DocMDP", { skip }) ||
+    bytesContainPdfMarker(bytes, "/Perms", { skip }) ||
+    bytesContainPdfMarker(bytes, "/SigFlags", { skip }) ||
+    bytesContainPdfMarker(bytes, "/Type /Sig", { skip }) ||
     bytesContainPdfMarker(bytes, "/SubFilter /adbe.pkcs7", {
       caseInsensitive: true,
+      skip,
     }) ||
     bytesContainPdfMarker(bytes, "/SubFilter /ETSI.", {
       caseInsensitive: true,
+      skip,
     })
   );
 }
@@ -122,8 +124,7 @@ export async function pdfLooksStructurallySignedOrCertified(bytes: Uint8Array) {
     const pdfDoc = await PDFDocument.load(bytes, pdfProtectionLoadOptions);
     return pdfDocumentLooksSignedOrCertified(pdfDoc);
   } catch {
-    // Fail-closed: an unparseable form structure is treated as protected
-    // rather than assumed to hold no signature.
+    // Fail-closed: an unparseable form structure is treated as protected rather than assumed to hold no signature.
     return true;
   }
 }
@@ -174,16 +175,11 @@ function pdfDocumentLooksPdfA(pdfDoc: PDFDocument) {
     return true;
   }
 
-  // Neither cheaper check sees a claim in an undeclared, compressed packet:
-  // pdf.js surfaces metadata only when the stream declares /Type /Metadata.
+  // Neither cheaper check sees a claim in an undeclared, compressed packet: pdf.js surfaces metadata only when the stream declares /Type /Metadata.
   return pdfAClaimingMetadataRefs(pdfDoc.context).size > 0;
 }
 
-/*
- * A stream counts as metadata when it says so or when a dictionary points at it
- * through /Metadata: without the second half, a compressed packet declaring
- * neither is invisible to the strip.
- */
+/* A stream counts as metadata when it says so or when a dictionary points at it through /Metadata: without the second half, a compressed packet declaring neither is invisible to the strip. */
 export function pdfAClaimingMetadataRefs(context: PDFContext) {
   const metadataKey = PDFName.of("Metadata");
   const referencedAsMetadata = new Set<string>();
@@ -236,8 +232,7 @@ function bytesClaimPdfA(bytes: Uint8Array | null) {
   );
 }
 
-// PDF/A requires an unfiltered metadata stream, so the raw scan covers
-// conforming files; this catches a claim made from a compressed packet.
+// PDF/A requires an unfiltered metadata stream, so the raw scan covers conforming files; this catches a claim made from a compressed packet.
 function decodedStreamContents(stream: PDFRawStream) {
   if (!stream.dict.get(PDFName.of("Filter"))) {
     return null;
@@ -254,6 +249,11 @@ function pdfDocumentLooksSignedOrCertified(pdfDoc: PDFDocument) {
   const { catalog } = pdfDoc;
   const perms = resolvedDictEntry(catalog, PDFName.of("Perms"));
   if (perms?.get(PDFName.of("DocMDP")) || perms?.get(PDFName.of("UR3"))) {
+    return true;
+  }
+
+  // The long-term-validation certificate/VRI store: present only alongside a signature, and pdfPageOperations.ts strips it in the same pass as /Sig.
+  if (catalog.has(PDFName.of("DSS"))) {
     return true;
   }
 
@@ -292,8 +292,7 @@ function fieldTreeContainsSignature(fields: PDFArray) {
     for (let index = 0; index < current.size(); index += 1) {
       inspectedEntries += 1;
       if (inspectedEntries > MAX_PROTECTION_FIELD_ENTRIES) {
-        // An attacker-controlled field tree must not create an unbounded walk
-        // or leave a partially inspected document declared unsigned.
+        // An attacker-controlled field tree must not create an unbounded walk or leave a partially inspected document declared unsigned.
         return true;
       }
 
@@ -328,8 +327,7 @@ function fieldTreeContainsSignature(fields: PDFArray) {
           stack.push(kids);
         }
       } catch {
-        // A malformed field entry leaves signature status unknowable, so the
-        // source is preserved rather than made editable.
+        // A malformed field entry leaves signature status unknowable, so the source is preserved rather than made editable.
         return true;
       }
     }
@@ -337,9 +335,7 @@ function fieldTreeContainsSignature(fields: PDFArray) {
   return false;
 }
 
-// lookupMaybe throws when an entry exists with a different legal PDF type,
-// which is common for form values, so these checks resolve without a requested
-// type and narrow afterwards rather than call a healthy document unverifiable.
+// lookupMaybe throws when an entry exists with a different legal PDF type, which is common for form values, so these checks resolve without a requested type and narrow afterwards rather than call a healthy document unverifiable.
 
 function allIndirectDicts(pdfDoc: PDFDocument) {
   const dicts: PDFDict[] = [pdfDoc.catalog];
@@ -356,26 +352,32 @@ function allIndirectDicts(pdfDoc: PDFDocument) {
 function bytesContainPdfMarker(
   bytes: Uint8Array,
   pattern: string,
-  options: { caseInsensitive?: boolean } = {},
-) {
-  return bytesContainAscii(bytes, pattern, options);
-}
-
-function bytesContainAscii(
-  bytes: Uint8Array,
-  pattern: string,
-  { caseInsensitive = false }: { caseInsensitive?: boolean } = {},
-  start = 0,
-  end = bytes.length,
+  {
+    caseInsensitive = false,
+    skip,
+  }: {
+    caseInsensitive?: boolean;
+    skip?: ReadonlyArray<readonly [number, number]>;
+  } = {},
 ) {
   const needle = Array.from(pattern, (char) => char.charCodeAt(0));
-  const safeStart = clamp(Math.floor(start), 0, bytes.length);
-  const safeEnd = clamp(Math.floor(end), safeStart, bytes.length);
-  if (needle.length === 0 || safeEnd - safeStart < needle.length) {
+  if (needle.length === 0 || bytes.length < needle.length) {
     return false;
   }
 
-  for (let index = safeStart; index <= safeEnd - needle.length; index += 1) {
+  // `skip` is produced in ascending, non-overlapping order, so one forward pointer keeps this in step with `index` instead of rescanning it per byte.
+  let skipIndex = 0;
+  let index = 0;
+  while (index <= bytes.length - needle.length) {
+    while (skip && skipIndex < skip.length && index >= skip[skipIndex][1]) {
+      skipIndex += 1;
+    }
+    const span = skip?.[skipIndex];
+    if (span && index >= span[0]) {
+      index = span[1];
+      continue;
+    }
+
     let matched = true;
     for (let offset = 0; offset < needle.length; offset += 1) {
       const byte = bytes[index + offset];
@@ -391,6 +393,7 @@ function bytesContainAscii(
     if (matched) {
       return true;
     }
+    index += 1;
   }
 
   return false;
@@ -398,4 +401,56 @@ function bytesContainAscii(
 
 function asciiLower(value: number) {
   return value >= 65 && value <= 90 ? value + 32 : value;
+}
+
+// The byte ranges between a `stream` keyword and its `endstream`: a page's drawn content, an embedded image, a font program, a form field's appearance. Structural PDF syntax - the dictionaries a marker scan is actually meant to see - never sits inside one.
+function contentStreamSpans(bytes: Uint8Array): Array<[number, number]> {
+  const spans: Array<[number, number]> = [];
+  let searchFrom = 0;
+  while (searchFrom < bytes.length) {
+    const streamAt = indexOfAscii(bytes, "stream", searchFrom);
+    if (streamAt === -1) {
+      break;
+    }
+
+    // "endstream" ends in "stream"; that occurrence starts no content of its own.
+    if (
+      streamAt >= 3 &&
+      bytes[streamAt - 3] === 0x65 && // e
+      bytes[streamAt - 2] === 0x6e && // n
+      bytes[streamAt - 1] === 0x64 // d
+    ) {
+      searchFrom = streamAt + "stream".length;
+      continue;
+    }
+
+    const contentStart = streamAt + "stream".length;
+    const endAt = indexOfAscii(bytes, "endstream", contentStart);
+    if (endAt === -1) {
+      // Unterminated at the end of a truncated file: everything after it is still stream data, not a dictionary.
+      spans.push([contentStart, bytes.length]);
+      break;
+    }
+
+    spans.push([contentStart, endAt]);
+    searchFrom = endAt + "endstream".length;
+  }
+  return spans;
+}
+
+function indexOfAscii(bytes: Uint8Array, pattern: string, start: number) {
+  const needle = Array.from(pattern, (char) => char.charCodeAt(0));
+  for (let index = start; index <= bytes.length - needle.length; index += 1) {
+    let matched = true;
+    for (let offset = 0; offset < needle.length; offset += 1) {
+      if (bytes[index + offset] !== needle[offset]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) {
+      return index;
+    }
+  }
+  return -1;
 }

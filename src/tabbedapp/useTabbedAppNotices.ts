@@ -25,8 +25,7 @@ type TabbedAppNoticesApi = {
   resumeNoticeTimers: () => void;
 };
 
-// Danger notices stay until dismissed: WCAG 2.2.1's exceptions do not cover
-// error messages, and a save failure is the only record there is.
+// Danger notices stay until dismissed: WCAG 2.2.1's exceptions do not cover error messages, and a save failure is the only record there is.
 function defaultDurationFor(
   tone: PdfDocumentEditorNoticeTone | undefined,
   fallbackMs: number,
@@ -133,8 +132,7 @@ export function useTabbedAppNotices({
       window.clearTimeout(timer.handle);
       timersRef.current.set(id, {
         handle: null,
-        // Never below zero, so a notice hovered past its deadline still gets
-        // a moment on screen after the pointer leaves.
+        // Never below zero, so a notice hovered past its deadline still gets a moment on screen after the pointer leaves.
         remainingMs: Math.max(
           0,
           timer.remainingMs - (Date.now() - timer.startedAt),
@@ -155,8 +153,7 @@ export function useTabbedAppNotices({
     }
   }, [startTimer]);
 
-  // Such an annotation is left untouched in the file but cannot be shown, so
-  // say so rather than let it vanish.
+  // Such an annotation is left untouched in the file but cannot be shown, so say so rather than let it vanish.
   const reportMalformedAnnotations = useCallback(
     (count: number) => {
       if (count <= 0) {

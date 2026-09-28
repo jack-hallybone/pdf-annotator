@@ -10,8 +10,7 @@ import type {
 } from "../src/pdfdocumenteditor/types";
 import "./rendererAssetStubs";
 
-// The hook reaches pdfRender through inkRendering, so this import has to be
-// dynamic: it must run after the stubs the side-effect import above registers.
+// The hook reaches pdfRender through inkRendering, so this import has to be dynamic: it must run after the stubs the side-effect import above registers.
 const { useEraserGesture } =
   await import("../src/pdfdocumenteditor/useEraserGesture");
 
@@ -20,8 +19,7 @@ type EraseChanges = {
   pathUpdates: { annotationId: string; paths: PdfPoint[][] }[];
 };
 
-// An identity viewport: PDF and viewport coordinates coincide, so the
-// drag-distance threshold below is 5 PDF units, matching the 5px it is defined as.
+// An identity viewport: PDF and viewport coordinates coincide, so the drag-distance threshold below is 5 PDF units, matching the 5px it is defined as.
 const viewport = {
   convertToPdfPoint: (x: number, y: number) => [x, y],
   userUnit: 1,
@@ -70,8 +68,7 @@ type HarnessOptions = {
   showSynchronizedAnnotations?: boolean;
 };
 
-// Canvases are never attached, so every paint path bails at its own null-canvas
-// guard: what these pin down is the gesture state machine and its batching.
+// Canvases are never attached, so every paint path bails at its own null-canvas guard: what these pin down is the gesture state machine and its batching.
 function renderEraser(options: HarnessOptions = {}) {
   const annotations = options.annotations ?? [];
   return renderHook(
@@ -364,8 +361,7 @@ test("unmounting mid-gesture flushes the queued erases to the newest handler", (
   );
   assert.deepEqual(first, []);
 
-  // The cleanup effect never re-subscribes, so without a mirror it would hold the
-  // first render's flush and send the queued erase to `first`.
+  // The cleanup effect never re-subscribes, so without a mirror it would hold the first render's flush and send the queued erase to `first`.
   rerender({
     ...options,
     onEraseAnnotations: (change: EraseChanges) => second.push(change),

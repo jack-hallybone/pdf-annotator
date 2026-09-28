@@ -1,5 +1,4 @@
-// Every distance is derived from real millimetres via pdfUnits, so it holds
-// across zoom levels and /UserUnit.
+// Every distance is derived from real millimetres via pdfUnits, so it holds across zoom levels and /UserUnit.
 import { resampleInkPath, simplifyInkPath } from "./annotationGeometry";
 import { millimetresToPdfUnits } from "./pdfUnits";
 import type { PageViewport, PdfPoint } from "./types";

@@ -20,10 +20,7 @@ import type { SensitivePdfDocumentEditorSession } from "../src/pdfdocumenteditor
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf } from "./pdfTestUtils";
 
-// A save is also an import it never did: this app's own writer moves the
-// positions that identify a direct dictionary and then makes the bytes it wrote
-// the baseline without re-importing them, so a second save resolved positions
-// recorded against the first save's input.
+// A save is also an import it never did: this app's own writer moves the positions that identify a direct dictionary and then makes the bytes it wrote the baseline without re-importing them, so a second save resolved positions recorded against the first save's input.
 
 class FakeDOMMatrix {}
 class FakeImageData {}
@@ -233,8 +230,7 @@ test("the undo history is restated against the file that was written", async () 
   ]);
 });
 
-// Emptying a note drops it from the output, so the annotation the session still
-// holds is the app's own again and typing into it writes a new one.
+// Emptying a note drops it from the output, so the annotation the session still holds is the app's own again and typing into it writes a new one.
 test("an emptied note typed into again is written fresh", async () => {
   const bytes = await directNotesPdf(["A", "B"]);
   const imported = await importPageAnnotations(bytes);
@@ -286,10 +282,7 @@ test("a position past the end of the array still stops the save", async () => {
   );
 });
 
-// The remap's contract without a PDF in the way: reported gone drops the
-// identity and the annotation is the app's own to write fresh; unfollowable, or
-// never seen, comes back as an identity nothing matches; and a removal the write
-// applied is dropped rather than carried forward.
+// The remap's contract without a PDF in the way: reported gone drops the identity and the annotation is the app's own to write fresh; unfollowable, or never seen, comes back as an identity nothing matches; and a removal the write applied is dropped rather than carried forward.
 test("the writer's report is applied without inventing a fallback", () => {
   const sources: WrittenAnnotationSources = new Map([
     ["direct:0:0", { kind: "removed" }],

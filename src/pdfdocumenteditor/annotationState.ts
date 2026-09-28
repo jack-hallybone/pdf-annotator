@@ -9,8 +9,7 @@ export function hasAnnotationContent(annotation: PdfAnnotation) {
   return true;
 }
 
-// Reuses a page's previous bucket array by reference when nothing on that page
-// changed, so unaffected pages do not re-render downstream.
+// Reuses a page's previous bucket array by reference when nothing on that page changed, so unaffected pages do not re-render downstream.
 export function groupAnnotationsByPageStable(
   annotations: PdfAnnotation[],
   previousByPage: Map<number, PdfAnnotation[]>,
@@ -116,8 +115,7 @@ export function annotationFingerprint(annotation: PdfAnnotation) {
 
 function annotationSignature(annotation: PdfAnnotation) {
   const base = {
-    // `coveredText` is left out because it is re-derived and never written, and
-    // including it would make merely reopening a file look like an edit.
+    // `coveredText` is left out because it is re-derived and never written, and including it would make merely reopening a file look like an edit.
     bookmarked: annotation.bookmarked ?? false,
     id: annotation.id,
     kind: annotation.kind,
@@ -264,8 +262,7 @@ export function byteFingerprint(bytes: Uint8Array) {
 }
 
 function annotationReplacementKeys(annotation: PdfAnnotation) {
-  // The source identity is the authoritative key: adding the display id as an
-  // equal alias would let one edit match two PDF objects.
+  // The source identity is the authoritative key: adding the display id as an equal alias would let one edit match two PDF objects.
   return [annotation.sourceId ?? annotation.id];
 }
 

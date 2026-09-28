@@ -13,18 +13,13 @@ export function safePdfFileName(name: string, fallback = "annotated.pdf") {
   );
 }
 
-/*
- * A user-typed stem, or null when nothing legal is left: unlike
- * `safePdfFileName`, this one may reject rather than fall back.
- */
+/* A user-typed stem, or null when nothing legal is left: unlike `safePdfFileName`, this one may reject rather than fall back. */
 export function pdfFileNameFromStem(stem: string): string | null {
   const cleaned = stripUnsafeFileNameChars(stem, " ").replace(/\.pdf$/i, "");
   return cleaned ? `${cleaned}.pdf` : null;
 }
 
-/*
- * A file's name as text a reader is shown, not as a path, and possibly empty.
- */
+/* A file's name as text a reader is shown, not as a path, and possibly empty. */
 export function displayableFileName(name: string) {
   return stripHiddenCharacters(name).replace(/\s+/g, " ").trim();
 }
@@ -35,10 +30,7 @@ function cleanFileName(name: string) {
   return /^_+$/.test(cleaned) ? "" : cleaned;
 }
 
-/*
- * Two classes, only one about the filesystem: `<>:"/\|?*` are what a path
- * cannot hold, and the rest is what a person cannot see.
- */
+/* Two classes, only one about the filesystem: `<>:"/\|?*` are what a path cannot hold, and the rest is what a person cannot see. */
 const UNSAFE_FILE_NAME_CHARS = new RegExp(
   `[${HIDDEN_CHARACTER_CLASS_BODY}<>:"/\\\\|?*]+`,
   "gu",

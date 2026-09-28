@@ -1,5 +1,4 @@
-// The document owner, mounted on its own with a stub viewport, shared by
-// use-document-model.dom.test.tsx and history-invariant.dom.test.tsx.
+// The document owner, mounted on its own with a stub viewport, shared by use-document-model.dom.test.tsx and history-invariant.dom.test.tsx.
 import assert from "node:assert/strict";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -14,8 +13,7 @@ import type { SensitivePdfDocumentEditorSession } from "../src/pdfdocumenteditor
 import type { PdfDocumentEditorViewBridge } from "../src/pdfdocumenteditor/useDocumentModel";
 import type { PdfDocumentEditorViewSnapshot } from "../src/pdfdocumenteditor/viewSnapshot";
 
-// pdf.js's browser entry touches DOMMatrix/ImageData/Path2D while it is
-// evaluated, even with nothing rendering to a canvas.
+// pdf.js's browser entry touches DOMMatrix/ImageData/Path2D while it is evaluated, even with nothing rendering to a canvas.
 class FakeDOMMatrix {}
 class FakeImageData {}
 class FakePath2D {}
@@ -31,9 +29,7 @@ globals.Path2D ??= FakePath2D;
 const { useDocumentModel } =
   await import("../src/pdfdocumenteditor/useDocumentModel");
 
-// pdfRender sets GlobalWorkerOptions.workerSrc as a module side effect, from the
-// Vite `?url` asset rendererAssetStubs has to stub away, so by the time the
-// import above returns workerSrc names a stub module.
+// pdfRender sets GlobalWorkerOptions.workerSrc as a module side effect, from the Vite `?url` asset rendererAssetStubs has to stub away, so by the time the import above returns workerSrc names a stub module.
 const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 GlobalWorkerOptions.workerSrc = new URL(
   "../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
@@ -164,11 +160,9 @@ export async function mountLoadedModel(
   name?: string,
   bytes?: Uint8Array,
   notices: string[] = [],
-  // A parked tab being put back: the restore is a separate push path into the
-  // history stacks, the one place a stack arrives from outside this hook.
+  // A parked tab being put back: the restore is a separate push path into the history stacks, the one place a stack arrives from outside this hook.
   initialSession: SensitivePdfDocumentEditorSession | null = null,
-  // The host's own file picker for a merge: the one await inside any of the five
-  // page operations that a test can hold open.
+  // The host's own file picker for a merge: the one await inside any of the five page operations that a test can hold open.
   pickMergePdfFile: PdfMergeFilePicker | undefined = undefined,
 ) {
   const loaded = bytes ?? (await onePagePdf());

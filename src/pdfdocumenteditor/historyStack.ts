@@ -1,5 +1,4 @@
-// The history entry types are imported type-only, which the compiler erases,
-// so there is no runtime import cycle with PdfDocumentEditor.
+// The history entry types are imported type-only, which the compiler erases, so there is no runtime import cycle with PdfDocumentEditor.
 import { createWorkSignature } from "./annotationState";
 import {
   UNCHANGED_PAGE_ORDER,
@@ -21,13 +20,11 @@ import type {
   PdfDocumentEditorHistoryEntry,
 } from "./PdfDocumentEditor";
 
-/* An undo stack is the one place data the reader deleted lives, so it is
- * bounded: past these, the oldest entry goes and what only it held goes too. */
+/* An undo stack is the one place data the reader deleted lives, so it is bounded: past these, the oldest entry goes and what only it held goes too. */
 export const MAX_HISTORY_ENTRIES = 20;
 export const MAX_DOCUMENT_HISTORY_ENTRIES = 5;
 const MAX_DOCUMENT_HISTORY_TOTAL_BYTES = 128 * 1024 * 1024;
-/* The one bound that reads an annotation's payload: an image stamp carries its
- * PNG as base64, which a count of versions cannot see. */
+/* The one bound that reads an annotation's payload: an image stamp carries its PNG as base64, which a count of versions cannot see. */
 export const MAX_IMAGE_HISTORY_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export function annotationHistorySignature(annotations: PdfAnnotation[]) {
@@ -43,10 +40,7 @@ export function annotationHistoryEntry(
   };
 }
 
-/*
- * A save that shifts positions leaves the stacks describing a file that no
- * longer exists, so the save's report is applied to them too.
- */
+/* A save that shifts positions leaves the stacks describing a file that no longer exists, so the save's report is applied to them too. */
 export function remapHistoryAnnotationSources(
   entries: PdfDocumentEditorHistoryEntry[],
   sources: WrittenAnnotationSources,
@@ -105,8 +99,7 @@ function remapHistoryEntry(
     snapshot.removedAnnotationSourceIds,
     sources,
     pageMapping,
-    // Which page this entry's document holds each removal on; the clean
-    // baseline is where that is known.
+    // Which page this entry's document holds each removal on; the clean baseline is where that is known.
     pageOfSourceKey(snapshot.cleanAnnotations),
   );
   if (
@@ -133,11 +126,7 @@ function remapHistoryEntry(
   };
 }
 
-/*
- * The same stacks, against the object numbers a page operation produced: a copy
- * re-creates every annotation dictionary on the page, in every entry that names
- * one.
- */
+/* The same stacks, against the object numbers a page operation produced: a copy re-creates every annotation dictionary on the page, in every entry that names one. */
 export function renameHistoryAnnotationSources(
   entries: PdfDocumentEditorHistoryEntry[],
   renames: PdfAnnotationRenames,
@@ -247,8 +236,7 @@ export function trimHistoryStack(entries: PdfDocumentEditorHistoryEntry[]) {
     trimmed.splice(removeIndex, 1);
   }
 
-  /* Oldest first, any entry rather than only ones holding an image: dropping
-   * from the middle would leave an undo that skips a step. */
+  /* Oldest first, any entry rather than only ones holding an image: dropping from the middle would leave an undo that skips a step. */
   while (
     trimmed.length > 0 &&
     historyStackImageByteSize(trimmed) > MAX_IMAGE_HISTORY_TOTAL_BYTES
@@ -259,11 +247,7 @@ export function trimHistoryStack(entries: PdfDocumentEditorHistoryEntry[]) {
   return trimmed;
 }
 
-/**
- * The image bytes these entries hold, counted once per image: entries share one
- * array by reference, so counting occurrences would evict undo steps to free
- * nothing.
- */
+/** The image bytes these entries hold, counted once per image: entries share one array by reference, so counting occurrences would evict undo steps to free nothing. */
 export function historyStackImageByteSize(
   entries: PdfDocumentEditorHistoryEntry[],
 ) {
@@ -310,8 +294,14 @@ export function documentHistorySnapshotByteSize(
   if (snapshot.cleanPdfBytes) {
     byteArrays.add(snapshot.cleanPdfBytes);
   }
-  return Array.from(byteArrays).reduce(
+  const arrayBytes = Array.from(byteArrays).reduce(
     (total, bytes) => total + bytes.byteLength,
     0,
   );
+  // A merge's undo is a removePages carrying no bytes of its own (deleting the pages it just inserted needs none), so without this a merge's entry would look free no matter how large the file merged in was.
+  const mergedSourceBytes =
+    snapshot.operation.type === "removePages"
+      ? (snapshot.operation.mergedSourceByteLength ?? 0)
+      : 0;
+  return arrayBytes + mergedSourceBytes;
 }

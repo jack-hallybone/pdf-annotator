@@ -1,8 +1,5 @@
 {
-  // The other two projects cover src and vite.config.ts only, and tsx strips
-  // types without checking them - so without this a type error in a test
-  // survives and can leave an assertion silently inert. Standalone rather than
-  // a project reference, which would need the noEmit app project to emit.
+  // The other two projects cover src and vite.config.ts only, and tsx strips types without checking them - so without this a type error in a test survives and can leave an assertion silently inert. Standalone rather than a project reference, which would need the noEmit app project to emit.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

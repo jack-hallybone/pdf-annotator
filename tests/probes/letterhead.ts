@@ -1,6 +1,4 @@
-// The probes for a form XObject more than one page can reach: a letterhead in
-// every page's own /Resources, and one an inherited /Resources holds two Do
-// levels down.
+// The probes for a form XObject more than one page can reach: a letterhead in every page's own /Resources, and one an inherited /Resources holds two Do levels down.
 import {
   PDFDict,
   PDFDocument,
@@ -11,8 +9,7 @@ import {
 } from "pdf-lib";
 import { markedContent } from "./parts";
 
-// Every page can reach the one form XObject, so reachability says nothing and
-// which pages draw it - in the content streams - is the answer.
+// Every page can reach the one form XObject, so reachability says nothing and which pages draw it - in the content streams - is the answer.
 export const LETTERHEAD_ENTRIES = [
   "LETTERHEAD-ACTUAL",
   "LETTERHEAD-ALT",
@@ -86,8 +83,7 @@ export async function letterheadProbePdf(
     const draws =
       drawnBy === "every page" ||
       (drawnBy === "only the page that goes") === goes;
-    // Its own `/Resources` dictionary: what is shared is the XObject, which is what
-    // makes this different from the shared-dictionary case.
+    // Its own `/Resources` dictionary: what is shared is the XObject, which is what makes this different from the shared-dictionary case.
     page.node.set(
       PDFName.of("Resources"),
       context.register(
@@ -157,10 +153,7 @@ export async function letterheadProbePdf(
   return doc.save({ updateFieldAppearances: false, useObjectStreams: false });
 }
 
-// A page inherits `/Resources` from its ancestor node, so no page's own
-// reference closure reaches an XObject held there. The probe puts the key one
-// level further down as well, so nothing is answered unless the walk both climbs
-// `/Parent` for the resources and follows the `Do` inside a form XObject.
+// A page inherits `/Resources` from its ancestor node, so no page's own reference closure reaches an XObject held there. The probe puts the key one level further down as well, so nothing is answered unless the walk both climbs `/Parent` for the resources and follows the `Do` inside a form XObject.
 export const INHERITED_RESOURCE_ENTRIES = ["alt", "actualtext", "title"];
 
 export async function inheritedResourcesProbePdf(
@@ -220,8 +213,7 @@ export async function inheritedResourcesProbePdf(
     );
   }
   if (otherPageReachesIt) {
-    // The page that does not draw it can still reach it: its own `/Resources` names
-    // the same inner XObject, and reaching is not drawing.
+    // The page that does not draw it can still reach it: its own `/Resources` names the same inner XObject, and reaching is not drawing.
     const other = drawing === gone ? kept : gone;
     other.node.set(
       PDFName.of("Resources"),

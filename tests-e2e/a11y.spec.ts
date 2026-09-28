@@ -1,8 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
-// Run in both colour schemes and with and without a document open, because the
-// dock, sidebar and page controls mount only once a PDF is loaded.
+// Run in both colour schemes and with and without a document open, because the dock, sidebar and page controls mount only once a PDF is loaded.
 
 const fixture = (name: string) =>
   fileURLToPath(new URL(`../tests/fixtures/${name}`, import.meta.url));
@@ -11,13 +10,10 @@ const fixturePath = fixture("test-annotated.pdf");
 
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
-// WCAG 2.2 SC 2.5.8 sets 24x24 CSS px. Its spacing exception needs every
-// neighbour's geometry, so exempt targets are listed with their reason.
+// WCAG 2.2 SC 2.5.8 sets 24x24 CSS px. Its spacing exception needs every neighbour's geometry, so exempt targets are listed with their reason.
 const TARGET_SIZE_EXEMPT: { selector: string; why: string }[] = [];
 
-// PDF.js's text layer is a transparent copy of the page's text over the canvas,
-// so its 1:1 contrast is the point. Skipped wholesale rather than listed,
-// because it is one element per text run.
+// PDF.js's text layer is a transparent copy of the page's text over the canvas, so its 1:1 contrast is the point. Skipped wholesale rather than listed, because it is one element per text run.
 const PDF_DOCUMENT_CONTENT = ".textLayer";
 
 type Finding = { what: string; where: string; detail: string };
@@ -27,8 +23,7 @@ async function openHome(page: Page) {
   await expect(page.locator(".browserapp-home-card")).toBeVisible();
 }
 
-// Waits for the tabbedapp chrome, not just for a canvas: a canvas exists well
-// before the dock, controls and sidebar toggle mount.
+// Waits for the tabbedapp chrome, not just for a canvas: a canvas exists well before the dock, controls and sidebar toggle mount.
 async function openDocument(page: Page, file = fixturePath) {
   await page.goto("/");
   await page.locator(HIDDEN_FILE_INPUT).setInputFiles(file);
@@ -36,9 +31,7 @@ async function openDocument(page: Page, file = fixturePath) {
   await expect(page.locator(".zoom-controls")).toBeVisible();
 }
 
-// None of these are mounted until something opens them, so a state missing here
-// is a state nobody checks. The tab and page menus use role="menuitem", where
-// getByRole('button') matches nothing and the step passes by doing nothing.
+// None of these are mounted until something opens them, so a state missing here is a state nobody checks. The tab and page menus use role="menuitem", where getByRole('button') matches nothing and the step passes by doing nothing.
 const DOCUMENT_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
   [
     {
@@ -253,8 +246,7 @@ async function linkedPdf() {
   return linkedPdfBytes;
 }
 
-// Everything below runs inside the page: pulling nodes across the boundary one
-// at a time is far slower.
+// Everything below runs inside the page: pulling nodes across the boundary one at a time is far slower.
 async function audit(page: Page, exempt: string[]) {
   return page.evaluate(
     ({ exemptSelectors, documentContent }) => {
@@ -306,10 +298,7 @@ async function audit(page: Page, exempt: string[]) {
         }
       }
 
-      // A control covered by something else fails every other criterion at once, and a
-      // full-width transparent container is invisible to a check that looks at
-      // elements one at a time. While an overlay is open only its own contents are
-      // checked: an overlay is meant to cover what is behind it.
+      // A control covered by something else fails every other criterion at once, and a full-width transparent container is invisible to a check that looks at elements one at a time. While an overlay is open only its own contents are checked: an overlay is meant to cover what is behind it.
       const overlays = [
         ...document.querySelectorAll(
           '[aria-modal="true"], [role="menu"], .menu, .floating-popover',
@@ -378,8 +367,7 @@ async function audit(page: Page, exempt: string[]) {
   );
 }
 
-// Focus has to be moved for real: :focus-visible is a browser heuristic rather
-// than something a stylesheet can be read for.
+// Focus has to be moved for real: :focus-visible is a browser heuristic rather than something a stylesheet can be read for.
 async function auditFocus(page: Page) {
   return page.evaluate(() => {
     const findings: { what: string; where: string; detail: string }[] = [];
@@ -442,8 +430,7 @@ function report(findings: Finding[]) {
     .join("\n");
 }
 
-// Every part of the audit is one edit away from quietly matching nothing, so
-// each kind of check is broken on purpose here and required to be caught.
+// Every part of the audit is one edit away from quietly matching nothing, so each kind of check is broken on purpose here and required to be caught.
 test("the audit catches the things it claims to check", async ({ page }) => {
   await openDocument(page);
 
@@ -451,8 +438,7 @@ test("the audit catches the things it claims to check", async ({ page }) => {
     content: `
       .zoom-controls { color: #d8d8d8 !important; }
       .tool-button { height: 16px !important; width: 16px !important; }
-      /* A transparent sheet over everything - the shape of the real defect, where a
-         notice stack's empty area swallowed clicks on the chrome beneath it. */
+      /* A transparent sheet over everything - the shape of the real defect, where a notice stack's empty area swallowed clicks on the chrome beneath it. */
       body::after {
         content: ''; position: fixed; inset: 0; z-index: 9999;
       }
@@ -478,8 +464,7 @@ test("the audit catches the things it claims to check", async ({ page }) => {
   ]);
 });
 
-// 1.4.10 names 320 CSS px as the width content has to survive, and the app has
-// @media rules there that nothing else exercises. One scheme is enough.
+// 1.4.10 names 320 CSS px as the width content has to survive, and the app has @media rules there that nothing else exercises. One scheme is enough.
 test.describe("at a 320px viewport", () => {
   test.use({ viewport: { width: 320, height: 640 } });
 
@@ -503,16 +488,14 @@ test.describe("at a 320px viewport", () => {
     expect(findings, `\n${report(findings)}\n`).toEqual([]);
   });
 
-  // Below 700px the notice stack is docked in flow, and at 320px a floating notice
-  // lands on the sidebar toggle, the tool dock and the document controls.
+  // Below 700px the notice stack is docked in flow, and at 320px a floating notice lands on the sidebar toggle, the tool dock and the document controls.
   test("the tabbedapp shell still passes, notices included", async ({
     page,
   }) => {
     const findings: Finding[] = [];
 
     await openDocument(page);
-    // Undo/redo and zoom would otherwise collide at this width; page jumping
-    // stays reachable through the sidebar and scrolling, so it drops instead.
+    // Undo/redo and zoom would otherwise collide at this width; page jumping stays reachable through the sidebar and scrolling, so it drops instead.
     await expect(page.locator(".page-jump-control")).toBeHidden();
     const editable = await audit(
       page,
@@ -558,8 +541,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         TARGET_SIZE_EXEMPT.map((entry) => entry.selector),
       );
 
-      // A green audit that examined nothing looks exactly like one that examined
-      // everything, so the counts are asserted too.
+      // A green audit that examined nothing looks exactly like one that examined everything, so the counts are asserted too.
       expect(interactiveChecked).toBeGreaterThan(5);
       expect(findings, `\n${report(findings)}\n`).toEqual([]);
     });

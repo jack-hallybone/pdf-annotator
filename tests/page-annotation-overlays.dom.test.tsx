@@ -8,10 +8,7 @@ import type {
   Tool,
 } from "../src/pdfdocumenteditor/types";
 
-// Both the overlay's jobs fail silently: drawing each annotation over the pixels
-// of its page (PDF space is bottom-up and in points, the SVG top-down and in CSS
-// pixels), and deciding whether a pointer-down belongs to the annotation or to
-// the page underneath.
+// Both the overlay's jobs fail silently: drawing each annotation over the pixels of its page (PDF space is bottom-up and in points, the SVG top-down and in CSS pixels), and deciding whether a pointer-down belongs to the annotation or to the page underneath.
 
 const PAGE_HEIGHT_PT = 792;
 
@@ -30,8 +27,7 @@ function viewportAtZoom(zoom: number) {
 
 const viewport = viewportAtZoom(1);
 
-// A 60x60pt note whose lower-left corner is 100pt in and 600pt up the page, so
-// its top edge is 792 - 660 = 132 CSS px down from the top of the page.
+// A 60x60pt note whose lower-left corner is 100pt in and 600pt up the page, so its top edge is 792 - 660 = 132 CSS px down from the top of the page.
 const note = {
   id: "note-1",
   kind: "stickyNote",
@@ -137,8 +133,7 @@ test("an image stamp spins about its own centre, not the page origin", () => {
   const { shape } = renderShape({ ...stamp, rotation: 90 } as PdfAnnotation);
   const image = shape.querySelector("image");
 
-  // Centre of the 60x60 box at (100, 132): rotating about anything else would
-  // fling the stamp off its own footprint.
+  // Centre of the 60x60 box at (100, 132): rotating about anything else would fling the stamp off its own footprint.
   assert.equal(
     image?.getAttribute("transform"),
     "translate(130 162) rotate(90) translate(-30 -30)",

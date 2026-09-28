@@ -1,5 +1,4 @@
-// The probes are in tests/probes/; the readers in tests/pdf-inspect.ts measure
-// the written bytes rather than agreeing with the implementation.
+// The probes are in tests/probes/; the readers in tests/pdf-inspect.ts measure the written bytes rather than agreeing with the implementation.
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import {
@@ -68,8 +67,7 @@ import {
   taggedProbePdf,
 } from "./probes/tagging";
 
-// Both storage spellings: a save's spelling decides whether residue is a plain
-// object or one compressed into an object stream.
+// Both storage spellings: a save's spelling decides whether residue is a plain object or one compressed into an object stream.
 const droppingOperations: {
   drop: (bytes: Uint8Array, pageIndex: number) => Promise<Uint8Array>;
   name: string;
@@ -120,8 +118,7 @@ describe("objects a deleted page owned", () => {
         const bytes = await probePdf(useObjectStreams);
         const before = await markersIn(bytes);
         const after = await markersIn(await drop(bytes, 0));
-        // Every non-SECRET marker is a control; excluding any by prefix would swallow
-        // a later marker.
+        // Every non-SECRET marker is a control; excluding any by prefix would swallow a later marker.
         const controls = [...before].filter((marker) => !SECRET.test(marker));
         for (const marker of controls) {
           assert.ok(after.has(marker), `${marker} was lost`);
@@ -183,8 +180,7 @@ describe("objects a deleted page owned", () => {
       const before = await markersIn(bytes);
       const secrets = [...before]
         .filter((marker) => SECRET.test(marker))
-        // Not one of the page's objects: it lives on the catalog's structure tree,
-        // so no copy of the page carries it.
+        // Not one of the page's objects: it lives on the catalog's structure tree, so no copy of the page carries it.
         .filter((marker) => marker !== "SECRET-struct-alt-on-deleted-page")
         .sort();
 
@@ -324,8 +320,7 @@ describe("objects a deleted page owned", () => {
     assert.ok(after.has("KEEP-typed-into-both-pages"));
   });
 
-  // pdf-lib allocates above the highest number it has seen, and the orphans the
-  // removal above now deletes were what kept that ceiling up.
+  // pdf-lib allocates above the highest number it has seen, and the orphans the removal above now deletes were what kept that ceiling up.
   test("no page operation gives one annotation's number to another", async () => {
     const doc = await PDFDocument.create();
     const { context } = doc;
@@ -381,8 +376,7 @@ describe("objects a deleted page owned", () => {
       }
     };
 
-    // The order that makes a collision reachable: each undo re-creates objects
-    // while the other delete's entry still names the numbers it took.
+    // The order that makes a collision reachable: each undo re-creates objects while the other delete's entry still names the numbers it took.
     await record("start");
     const deleteLast: PdfStructuralOperation = {
       count: 1,
@@ -410,8 +404,7 @@ describe("objects a deleted page owned", () => {
   });
 });
 
-// A pointer left naming a deleted object is invisible to the markers above, so
-// these read the written bytes back through both readers instead.
+// A pointer left naming a deleted object is invisible to the markers above, so these read the written bytes back through both readers instead.
 
 describe("pointers to what a delete removed", () => {
   for (const useObjectStreams of [false, true]) {
@@ -453,8 +446,7 @@ describe("pointers to what a delete removed", () => {
         const dangling = await danglingPointers(after);
         assert.deepEqual(dangling.inLists, []);
 
-        // Coordinates are left dangling deliberately: their entries are positional,
-        // so pruning one would corrupt it.
+        // Coordinates are left dangling deliberately: their entries are positional, so pruning one would corrupt it.
         assert.deepEqual(dangling.coordinates.sort(), [
           "/Root/Names/Dests/Names[3][0]",
           "/Root/OpenAction[0]",
@@ -586,8 +578,7 @@ describe("what a tagged PDF says about the page", () => {
     "/T SECRET-title",
   ];
 
-  // The document's own vocabulary and attachments: declared once for the file,
-  // named by no page, and asserted as a list so a tenth survivor fails by name.
+  // The document's own vocabulary and attachments: declared once for the file, named by no page, and asserted as a list so a tenth survivor fails by name.
   const TAGGED_PROBE_VOCABULARY = [
     "/AF SECRET-tree-root-associated-file-bytes",
     "/AF SECRET-tree-root-associated-file-description",
@@ -698,8 +689,7 @@ describe("what a tagged PDF says about the page", () => {
       }
     });
 
-    // Recorded, not fixed: the undo restores the page under a new number while the
-    // elements' /Pg still names the object that left, so nothing reconnects.
+    // Recorded, not fixed: the undo restores the page under a new number while the elements' /Pg still names the object that left, so nothing reconnects.
     test(`the undo of a delete cannot bring the descriptions back (object streams: ${useObjectStreams})`, async () => {
       const bytes = await taggedProbePdf(useObjectStreams);
       const deletion: PdfStructuralOperation = {
@@ -748,8 +738,7 @@ describe("what a tagged PDF says about the page", () => {
     });
   }
 
-  // The fixture's own producer emits StructTreeRoot -> /Document -> /P with the
-  // /Document naming no page, which a gate asking each element for its /Pg skips.
+  // The fixture's own producer emits StructTreeRoot -> /Document -> /P with the /Document naming no page, which a gate asking each element for its /Pg skips.
   test("a description on a /Document element the fixture's own producer emits goes with the page", async () => {
     const pdfDoc = await loadTestPdf(await readFixture("test-annotated.pdf"));
     pdfDoc.addPage([612, 792]);
@@ -801,8 +790,7 @@ describe("what a tagged PDF says about the page", () => {
 });
 
 describe("what places a structure element", () => {
-  // A shared /Resources has the XObject's key claimed from both sides and no page
-  // here draws it, so nothing places the element and its own /Pg decides.
+  // A shared /Resources has the XObject's key claimed from both sides and no page here draws it, so nothing places the element and its own /Pg decides.
   const AMBIGUOUS_KEY_RESIDUE = ["/Alt SECRET-placed-by-a-form-xobject-key"];
 
   for (const spelling of ["kids", "nums"] as const) {
@@ -914,8 +902,7 @@ describe("an object two pages share", () => {
     "popup",
   ]);
 
-  // Recorded, not fixed: these holders are listed by no /Annots, drawn by no
-  // content and reachable from both sides, so nothing says whose page they are.
+  // Recorded, not fixed: these holders are listed by no /Annots, drawn by no content and reachable from both sides, so nothing says whose page they are.
   const ROUTES_NOTHING_PLACES: ReadonlySet<SharedRoute> = new Set([
     "bead",
     "ocmd",
@@ -949,8 +936,7 @@ describe("an object two pages share", () => {
       }
     });
 
-    // Asserted exactly, so growing the residue and clearing it - which destroys
-    // text on a page the reader kept - both fail here.
+    // Asserted exactly, so growing the residue and clearing it - which destroys text on a page the reader kept - both fail here.
     const decidedWithNoPage =
       ANNOTATION_HELD_ROUTES.has(route) || route === "resources-drawn";
     test(`a reference through ${route} ${decidedWithNoPage ? "takes" : "keeps"} an element that names no page at all`, async () => {
@@ -1116,8 +1102,7 @@ describe("a form XObject more than one page reaches", () => {
   }
 });
 
-// The scan reads bytes, so a `Do` inside a string, a comment or inline-image data
-// must not read as a drawing, and an XObject that draws itself must terminate.
+// The scan reads bytes, so a `Do` inside a string, a comment or inline-image data must not read as a drawing, and an XObject that draws itself must terminate.
 
 describe("reading what a page draws", () => {
   test("a page whose /Contents names nothing is reported rather than answered", async () => {
@@ -1187,8 +1172,7 @@ describe("reading what a page draws", () => {
     assert.equal(removal.descriptionsUnproven, false);
   });
 
-  // Neither silent fallback may ship - one leaves the deleted page's description,
-  // the other takes a kept page's - so removePage reports what it could not read.
+  // Neither silent fallback may ship - one leaves the deleted page's description, the other takes a kept page's - so removePage reports what it could not read.
   test("a delete that cannot read the content it needs says so", async () => {
     const unreadable = await removePage(
       await letterheadProbePdf("only the page that goes", true, true),
@@ -1234,11 +1218,39 @@ describe("reading what a page draws", () => {
     });
     assert.equal(moved.descriptionsUnproven, false);
   });
+
+  // The byte-budget and Do-nesting caps above are the content-reading half of "cannot say"; this is the structure-tree walk's own depth/cycle cap (clearDescriptionsBelow's `walk.visited.has(element)` check), which used to set walk.reachedEverything = false without that ever reaching the caller - so a page removed alongside a cyclic structure tree looked as certain as one with no structure tree at all.
+  test("a cycle in the structure tree is reported rather than silently resolved", async () => {
+    const doc = await PDFDocument.create();
+    doc.addPage([612, 792]);
+    doc.addPage([612, 792]);
+    const { context } = doc;
+
+    // Two elements naming each other as a child: the walk revisits the first one on its second pass and cannot finish deciding what it describes.
+    const elementA = PDFRef.of(9001, 0);
+    const elementB = PDFRef.of(9002, 0);
+    context.assign(
+      elementA,
+      context.obj({ K: [elementB], S: "P", Type: "StructElem" }),
+    );
+    context.assign(
+      elementB,
+      context.obj({ K: [elementA], S: "P", Type: "StructElem" }),
+    );
+    doc.catalog.set(
+      PDFName.of("StructTreeRoot"),
+      context.register(context.obj({ K: [elementA], Type: "StructTreeRoot" })),
+    );
+    doc.catalog.set(PDFName.of("MarkInfo"), context.obj({ Marked: true }));
+
+    const bytes = await doc.save({ updateFieldAppearances: false });
+    const removal = await removePage(bytes, 0);
+    assert.equal(removal.descriptionsUnproven, true);
+  });
 });
 
 describe("a /ClassMap entry", () => {
-  // "No surviving element names this class" is a claim about the whole document,
-  // so the walk may only make it having reached every element the /ParentTree names.
+  // "No surviving element names this class" is a claim about the whole document, so the walk may only make it having reached every element the /ParentTree names.
   test("a class an element under an ambiguous key names is not pruned", async () => {
     const doc = await PDFDocument.create();
     const { context } = doc;
@@ -1524,8 +1536,7 @@ describe("a button's /Opt and its /Kids", () => {
 });
 
 describe("the object number a delete pins", () => {
-  // deleteObjects pins the highest object number rather than lowering it, so a
-  // number never means two objects and coordinates land on an empty dictionary.
+  // deleteObjects pins the highest object number rather than lowering it, so a number never means two objects and coordinates land on an empty dictionary.
   test("a coordinate naming the pinned object reads as a destination that goes nowhere", async () => {
     const doc = await PDFDocument.create();
     const { context } = doc;

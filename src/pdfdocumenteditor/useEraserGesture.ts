@@ -56,17 +56,14 @@ type EraserGestureParams = {
     deleteIds: string[];
     pathUpdates: AnnotationPathUpdate[];
   }) => void;
-  // Owned by the ink canvas render effect: a prepainted stroke tells it to
-  // skip repainting that one.
+  // Owned by the ink canvas render effect: a prepainted stroke tells it to skip repainting that one.
   prepaintedInkAnnotationIdsRef: RefObject<Set<string>>;
-  // "Resolves" is load-bearing: a theme token can hold a `light-dark(...)`
-  // literal, which canvas cannot parse and drops silently.
+  // "Resolves" is load-bearing: a theme token can hold a `light-dark(...)` literal, which canvas cannot parse and drops silently.
   previewColor: () => string;
   readOnly: boolean;
   scale: number;
   showSynchronizedAnnotations: boolean;
-  // Armed once a right-drag passes the minimum distance; read by the page's
-  // own contextmenu handler.
+  // Armed once a right-drag passes the minimum distance; read by the page's own contextmenu handler.
   suppressNextContextMenuRef: RefObject<boolean>;
   toolSettings: ToolSettings;
   viewport: PageViewport;
@@ -89,10 +86,7 @@ type EraserGestureApi = {
 
 const TYPE_ERASER_MIN_DISTANCE_PX = 5;
 
-/*
- * The functions are plain closures over the current render's props; only the
- * unmount cleanup needs a ref, because its effect never re-subscribes.
- */
+/* The functions are plain closures over the current render's props; only the unmount cleanup needs a ref, because its effect never re-subscribes. */
 export function useEraserGesture({
   annotations,
   canvasInkAnnotations,
@@ -147,8 +141,7 @@ export function useEraserGesture({
     }
 
     const scope = eraserScopeRef.current;
-    // Ink edits are deferred to gesture-end: one stroke is hundreds of samples
-    // and committing state on each forces expensive re-renders.
+    // Ink edits are deferred to gesture-end: one stroke is hundreds of samples and committing state on each forces expensive re-renders.
     const deleteIds: string[] = [];
     const pathUpdates: AnnotationPathUpdate[] = [];
     const immediateDeleteIds: string[] = [];
@@ -341,8 +334,7 @@ export function useEraserGesture({
     eraserGestureRef.current = {
       pendingUntilDrag: requireMovement,
     };
-    // Reset here rather than derived from `requireMovement`, which is also true
-    // for the left-click eraser tool.
+    // Reset here rather than derived from `requireMovement`, which is also true for the left-click eraser tool.
     suppressNextContextMenuRef.current = false;
     scheduleEraserPreviewRender();
 
@@ -430,15 +422,13 @@ export function useEraserGesture({
     });
   }
 
-  // The unmount cleanup never re-subscribes, so it would otherwise hold the
-  // first render's flush and drop erases queued later.
+  // The unmount cleanup never re-subscribes, so it would otherwise hold the first render's flush and drop erases queued later.
   const flushPendingEraseChangesRef = useRenderLatestRef(
     flushPendingEraseChanges,
   );
 
   useEffect(
-    // Queued erases are already painted out of the ink canvases, so dropping
-    // them would put the strokes back on the next render.
+    // Queued erases are already painted out of the ink canvases, so dropping them would put the strokes back on the next render.
     () => () => {
       const frame = eraserPreviewFrameRef.current;
       if (frame !== null) {

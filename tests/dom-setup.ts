@@ -1,5 +1,4 @@
-// Loaded via `node --import` before any test module, so jsdom's globals exist
-// before React DOM is imported.
+// Loaded via `node --import` before any test module, so jsdom's globals exist before React DOM is imported.
 import "global-jsdom/register";
 import { afterEach } from "node:test";
 import { cleanup } from "@testing-library/react";

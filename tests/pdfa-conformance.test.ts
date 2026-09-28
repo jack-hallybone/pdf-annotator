@@ -16,9 +16,7 @@ import { writePdfAnnotations } from "../src/pdfdocumenteditor/pdfWriter";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf, readFixture } from "./pdfTestUtils";
 
-// This app never tries to preserve PDF/A conformance while editing, so anything
-// it writes must stop claiming it - including the round trip that matters most
-// in practice: reopening our own output must not flag it read-only.
+// This app never tries to preserve PDF/A conformance while editing, so anything it writes must stop claiming it - including the round trip that matters most in practice: reopening our own output must not flag it read-only.
 
 const note: PdfAnnotation = {
   color: [1, 0.996, 0.306],
@@ -111,10 +109,7 @@ test("a PDF/A claim in a compressed XMP packet is stripped", async () => {
   assert.equal(await pdfLooksPdfA(output), false);
 });
 
-// An XMP packet that declares neither /Type /Metadata nor /Subtype /XML is still
-// the document's metadata to anything following the catalog's /Metadata key, and
-// compressing it hides the marker from the byte scan saveEditedPdf verifies its
-// output with.
+// An XMP packet that declares neither /Type /Metadata nor /Subtype /XML is still the document's metadata to anything following the catalog's /Metadata key, and compressing it hides the marker from the byte scan saveEditedPdf verifies its output with.
 test("a PDF/A claim in an untyped compressed XMP packet is stripped", async () => {
   const bytes = await attachMetadataStream(
     await readFixture("test-annotated.pdf"),
@@ -172,8 +167,7 @@ test("catalog XMP without a PDF/A claim survives an edit", async () => {
   );
 });
 
-// Checked structurally rather than through pdfLooksPdfA: an output intent is a
-// plain dict, which pdf-lib packs into a compressed object stream.
+// Checked structurally rather than through pdfLooksPdfA: an output intent is a plain dict, which pdf-lib packs into a compressed object stream.
 test("a GTS_PDFA output intent outside the catalog is stripped", async () => {
   const bytes = await attachPageOutputIntent(
     await readFixture("test-annotated.pdf"),
@@ -277,8 +271,7 @@ async function attachPageOutputIntent(bytes: Uint8Array) {
 }
 
 function savedBytes(pdfDoc: Awaited<ReturnType<typeof loadEditablePdf>>) {
-  // pdf-lib's own save, not saveEditedPdf: these fixtures are built to still carry
-  // the claim the code under test is meant to remove.
+  // pdf-lib's own save, not saveEditedPdf: these fixtures are built to still carry the claim the code under test is meant to remove.
   return pdfDoc.save({ objectsPerTick: 500, updateFieldAppearances: false });
 }
 

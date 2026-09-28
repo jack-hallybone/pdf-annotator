@@ -1,5 +1,4 @@
-// The readers the deleted-page suites assert over, written independently of the
-// source so they measure the file rather than agree with the implementation.
+// The readers the deleted-page suites assert over, written independently of the source so they measure the file rather than agree with the implementation.
 import assert from "node:assert/strict";
 import {
   PDFArray,
@@ -25,8 +24,7 @@ export const SECRET = /^SECRET-/;
 
 export const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
-// `LETTERHEAD-` is its own prefix because the letterhead probe asserts the same
-// entries kept in one arrangement and taken in another.
+// `LETTERHEAD-` is its own prefix because the letterhead probe asserts the same entries kept in one arrangement and taken in another.
 const MARKER = /(?:SECRET|KEEP|SHARED|LETTERHEAD)-[A-Za-z0-9-]+/;
 
 const matches = (text: string) => matchesPattern(text, MARKER);
@@ -75,8 +73,7 @@ export async function readBack(
       .sort(),
   );
 
-  // isEvalSupported is inert on PDF.js 6 and absent from its types; hoisted so an
-  // inline literal does not trip excess-property checking.
+  // isEvalSupported is inert on PDF.js 6 and absent from its types; hoisted so an inline literal does not trip excess-property checking.
   const options = {
     data: bytes.slice(),
     disableFontFace: true,
@@ -135,10 +132,7 @@ function structTreeAlts(node: unknown): string[] {
   ];
 }
 
-// Every pointer the document still reaches that resolves to nothing, split by
-// container: a list of objects cannot hold a member that resolves to nothing,
-// while a coordinate holds a name or string beside the reference and a reference
-// to a non-existent object is null.
+// Every pointer the document still reaches that resolves to nothing, split by container: a list of objects cannot hold a member that resolves to nothing, while a coordinate holds a name or string beside the reference and a reference to a non-existent object is null.
 export async function danglingPointers(bytes: Uint8Array) {
   const pdfDoc = await loadTestPdf(bytes);
   const { context } = pdfDoc;
@@ -208,10 +202,7 @@ export function fieldNamed(pdfDoc: PDFDocument, name: string) {
   return undefined;
 }
 
-// Names no key: for each entry an element turns out to have it collects every
-// marker under it, so a carrier the strip does not know about is visible here
-// under its own name. It stops by type - a page is not walked, so `/Pg` drags no
-// content in, and another element is not, so `/P` cannot climb back out.
+// Names no key: for each entry an element turns out to have it collects every marker under it, so a carrier the strip does not know about is visible here under its own name. It stops by type - a page is not walked, so `/Pg` drags no content in, and another element is not, so `/P` cannot climb back out.
 export async function structureTexts(bytes: Uint8Array) {
   const pdfDoc = await loadTestPdf(bytes);
   const { context } = pdfDoc;
@@ -324,8 +315,7 @@ export async function structTreeOfKeptPage(
   }
 }
 
-// The keys each node holds and the /Limits of every node, because an identifier
-// is repeated in the limits above its key.
+// The keys each node holds and the /Limits of every node, because an identifier is repeated in the limits above its key.
 export async function structureIdentifiers(bytes: Uint8Array) {
   const pdfDoc = await loadTestPdf(bytes);
   const root = pdfDoc.catalog.lookupMaybe(

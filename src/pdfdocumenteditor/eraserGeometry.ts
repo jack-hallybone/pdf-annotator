@@ -1,5 +1,4 @@
-// A uniform spatial grid of annotation bounds, built once per gesture and
-// queried per pointer move.
+// A uniform spatial grid of annotation bounds, built once per gesture and queried per pointer move.
 import { annotationBounds } from "./annotationGeometry";
 import type { PdfAnnotation, PdfPoint, PdfRect } from "./types";
 
@@ -14,7 +13,11 @@ export type EraserAnnotationIndex = {
   cellSize: number;
   grid: Map<string, EraserAnnotationIndexEntry[]>;
   queryPadding: number;
+  ungridded: EraserAnnotationIndexEntry[];
 };
+
+// Past this, an entry is a candidate for every query instead: a file's coordinates reach ±1,000,000, and gridding one stroke spanning ±100,000 took 28 s and 3 GB before the Map overflowed.
+const MAX_GRID_CELLS_PER_ENTRY = 4096;
 
 export function buildEraserAnnotationIndex(
   annotations: PdfAnnotation[],
@@ -36,9 +39,19 @@ export function buildEraserAnnotationIndex(
   const queryPadding = Math.max(eraserRadius, maxInkPadding, 6 / scale);
   const cellSize = Math.max(32 / scale, queryPadding * 2, 16);
   const grid = new Map<string, EraserAnnotationIndexEntry[]>();
+  const ungridded: EraserAnnotationIndexEntry[] = [];
 
   for (const entry of entries) {
     if (!isFiniteRect(entry.bounds)) {
+      continue;
+    }
+
+    const { x1, y1, x2, y2 } = entry.bounds;
+    const cells =
+      ((Math.abs(x2 - x1) + 2 * queryPadding) / cellSize + 2) *
+      ((Math.abs(y2 - y1) + 2 * queryPadding) / cellSize + 2);
+    if (cells > MAX_GRID_CELLS_PER_ENTRY) {
+      ungridded.push(entry);
       continue;
     }
 
@@ -52,14 +65,16 @@ export function buildEraserAnnotationIndex(
     });
   }
 
-  return { cellSize, grid, queryPadding };
+  return { cellSize, grid, queryPadding, ungridded };
 }
 
 export function queryEraserAnnotationIndex(
   index: EraserAnnotationIndex,
   point: PdfPoint,
 ) {
-  const candidates = new Map<string, EraserAnnotationIndexEntry>();
+  const candidates = new Map<string, EraserAnnotationIndexEntry>(
+    index.ungridded.map((entry) => [entry.annotation.id, entry]),
+  );
   const queryBounds = {
     x1: point.x,
     y1: point.y,

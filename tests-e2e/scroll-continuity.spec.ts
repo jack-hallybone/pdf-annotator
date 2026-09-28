@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { PDFDocument, rgb } from "pdf-lib";
 
-// A screenshot cannot see the two-frame flash when the current page changes, so
-// this scrolls in small steps and reads every on-screen page's base canvas on
-// every animation frame.
+// A screenshot cannot see the two-frame flash when the current page changes, so this scrolls in small steps and reads every on-screen page's base canvas on every animation frame.
 
 const PAGE_COUNT = 8;
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
@@ -17,8 +15,7 @@ async function multiPageFixture() {
   const doc = await PDFDocument.create();
   for (let index = 0; index < PAGE_COUNT; index += 1) {
     const page = doc.addPage([595, 842]);
-    // A block covering most of the page, so "painted" and "blank" are not a
-    // judgement call at any sample point.
+    // A block covering most of the page, so "painted" and "blank" are not a judgement call at any sample point.
     page.drawRectangle({
       color: rgb(0.1, 0.1 + index * 0.1, 0.6),
       height: 762,
@@ -39,8 +36,7 @@ test("scrolling past a page boundary never blanks a rendered page", async ({
   await page.goto("/");
   await page.locator(HIDDEN_FILE_INPUT).setInputFiles(await multiPageFixture());
   await expect(page.locator("canvas").first()).toBeVisible({ timeout: 60_000 });
-  // The pages either side of the first render lazily, and the defect is about
-  // pages already on screen, so let them arrive first.
+  // The pages either side of the first render lazily, and the defect is about pages already on screen, so let them arrive first.
   await page.waitForTimeout(6_000);
 
   const measurement = await page.evaluate(async (pageCount) => {
@@ -54,8 +50,7 @@ test("scrolling past a page boundary never blanks a rendered page", async ({
         `.pdfdocumenteditor-page-slot[data-page-index="${index}"]`,
       );
 
-    // The page raster, not the overlays: a slot also holds default-sized ink,
-    // appearance and annotation canvases.
+    // The page raster, not the overlays: a slot also holds default-sized ink, appearance and annotation canvases.
     const baseCanvasFor = (index: number) =>
       slotFor(index)?.querySelector<HTMLCanvasElement>(
         ".canvasWrapper canvas",
@@ -142,8 +137,7 @@ test("scrolling past a page boundary never blanks a rendered page", async ({
     return { blanks, boundaries, paintedBefore: paintedBefore.length };
   }, PAGE_COUNT);
 
-  // A run that never crossed a boundary, or that had nothing painted to lose,
-  // would report zero flashes without proving anything.
+  // A run that never crossed a boundary, or that had nothing painted to lose, would report zero flashes without proving anything.
   expect(measurement.paintedBefore).toBeGreaterThan(1);
   expect(measurement.boundaries.length).toBeGreaterThan(1);
 

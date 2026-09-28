@@ -9,23 +9,19 @@ const fixturePath = fileURLToPath(
 
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
-// Ink in the canvas, not just a visible canvas with a non-zero box: an empty
-// canvas the app laid out satisfied that while every page came up blank.
+// Ink in the canvas, not just a visible canvas with a non-zero box: an empty canvas the app laid out satisfied that while every page came up blank.
 const SAMPLE_WIDTH = 400;
 const MIN_DISTINCT_COLOURS = 8;
 const MIN_INK_PIXELS = 200;
 
-// Playwright cannot drive the File System Access picker; the shell's hidden
-// <input type="file"> fires the same open path.
+// Playwright cannot drive the File System Access picker; the shell's hidden <input type="file"> fires the same open path.
 async function openFixture(page: Page) {
   await page.goto("/");
   await page.locator(HIDDEN_FILE_INPUT).setInputFiles(fixturePath);
   await expect(page.locator("canvas").first()).toBeVisible();
 }
 
-// Copied into a smaller canvas of our own first: a full backing-store readback
-// is slow and makes Chromium warn, and the page canvas is transparent where
-// nothing was painted, so compositing onto white makes blank a single colour.
+// Copied into a smaller canvas of our own first: a full backing-store readback is slow and makes Chromium warn, and the page canvas is transparent where nothing was painted, so compositing onto white makes blank a single colour.
 async function pageCanvasInk(canvas: Locator) {
   return canvas.evaluate(
     (element: HTMLCanvasElement, { sampleWidth }) => {
@@ -111,9 +107,7 @@ test("boots, opens a PDF, and renders its first page", async ({ page }) => {
   ).toBeVisible();
 });
 
-// A custom property carries its value through verbatim, so anything the theme
-// composes reaches a canvas 2D context as a string it silently drops; without
-// PdfPageView's probe span the reading answers for another element's palette.
+// A custom property carries its value through verbatim, so anything the theme composes reaches a canvas 2D context as a string it silently drops; without PdfPageView's probe span the reading answers for another element's palette.
 test("the accent probe's anchor is mounted, and resolves to a paintable colour", async ({
   page,
 }) => {

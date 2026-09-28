@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   PDFArray,
   PDFDict,
+  PDFDocument,
   PDFHexString,
   PDFName,
   PDFNumber,
@@ -17,14 +18,20 @@ import {
 } from "../src/pdfdocumenteditor/pdfProtection";
 import {
   UnsupportedAnnotationTextError,
+  writeAnnotatedPdf,
   writePdfAnnotations,
 } from "../src/pdfdocumenteditor/pdfWriter";
 import {
   addBlankPageAt,
+  addLinedPageAt,
   mergePdfAfterPage,
   removePage,
   rotatePageClockwise,
 } from "../src/pdfdocumenteditor/pdfPageOperations";
+import {
+  MAX_PDF_COORDINATE_MAGNITUDE,
+  clampPdfCoordinateMagnitude,
+} from "../src/pdfdocumenteditor/annotationSourceKey";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import {
   annotationContentsByName,
@@ -241,9 +248,7 @@ test("text annotations normalize decomposed western accents before saving", asyn
 
 test("rotated freeText content is laid out against the local (un-rotated) width, not the on-page footprint", async () => {
   const bytes = await readFixture("test-annotated.pdf");
-  // `annotation.rect` always stores the on-page footprint, so a 300x50 local box
-  // rotated 90 degrees is stored 50 wide and 300 tall, and a writer measuring
-  // layout against the footprint would clamp the requested 280pt to ~50pt.
+  // `annotation.rect` always stores the on-page footprint, so a 300x50 local box rotated 90 degrees is stored 50 wide and 300 tall, and a writer measuring layout against the footprint would clamp the requested 280pt to ~50pt.
   const text: PdfAnnotation = {
     color: [0, 0, 0],
     fontSize: 12,
@@ -290,8 +295,7 @@ test("sticky notes preserve unicode contents", async () => {
 
 test("sticky note contents with parentheses/backslashes round-trip intact", async () => {
   const bytes = await readFixture("test-annotated.pdf");
-  // Ordinary inputs whose unbalanced parens and backslashes used to break the PDF
-  // string literal, truncating the text and corrupting the surrounding object.
+  // Ordinary inputs whose unbalanced parens and backslashes used to break the PDF string literal, truncating the text and corrupting the surrounding object.
   const cases = [
     ":)",
     ":(",
@@ -416,6 +420,210 @@ test("page mutation helpers keep expected page counts and rotations", async () =
   assert.equal((await loadTestPdf(rotated)).getPage(0).getRotation().angle, 90);
 });
 
+// bakeInheritedPageAttributes lets a new page model a template's size, but modelling on a rotated neighbour must not turn the new blank page too - rotation is that neighbour's own content, not a default for a blank page.
+test("a blank or lined page added after a rotated page starts upright, not turned to match it", async () => {
+  const bytes = await readFixture("test-annotated.pdf");
+  const rotated = await rotatePageClockwise(bytes, 0);
+  assert.equal((await loadTestPdf(rotated)).getPage(0).getRotation().angle, 90);
+
+  const withBlank = await addBlankPageAt(rotated, 1, 0);
+  const blankDoc = await loadTestPdf(withBlank);
+  assert.equal(blankDoc.getPage(0).getRotation().angle, 90);
+  assert.equal(blankDoc.getPage(1).getRotation().angle, 0);
+
+  const withLined = await addLinedPageAt(rotated, 1, 0);
+  const linedDoc = await loadTestPdf(withLined);
+  assert.equal(linedDoc.getPage(0).getRotation().angle, 90);
+  assert.equal(linedDoc.getPage(1).getRotation().angle, 0);
+});
+
+// A merge source is another file's own content: it keeps its marks, but not a page-open script or a structure index that collides with numbering the target document already uses for its own, unrelated pages.
+test("merging in a file drops its page-level /AA and /StructParents, not just leaves them to collide", async () => {
+  const target = await PDFDocument.create();
+  target.addPage([612, 792]);
+  const targetBytes = await target.save({ useObjectStreams: false });
+
+  const source = await PDFDocument.create();
+  const sourcePage = source.addPage([612, 792]);
+  sourcePage.node.set(PDFName.of("StructParents"), PDFNumber.of(0));
+  sourcePage.node.set(
+    PDFName.of("AA"),
+    source.context.obj({ O: { S: "JavaScript", JS: "app.alert(1)" } }),
+  );
+  const sourceBytes = await source.save({ useObjectStreams: false });
+
+  const { bytes: merged } = await mergePdfAfterPage(
+    targetBytes,
+    sourceBytes,
+    0,
+  );
+  const mergedDoc = await loadTestPdf(merged);
+  assert.equal(mergedDoc.getPageCount(), 2);
+  const mergedPage = mergedDoc.getPage(1).node;
+  assert.equal(mergedPage.get(PDFName.of("AA")), undefined);
+  assert.equal(mergedPage.get(PDFName.of("StructParents")), undefined);
+});
+
+// A Link's /A is ordinarily just a URI or an in-document GoTo, which stays; only a subtype that runs code, leaves the document, or touches form/layer state is stripped, including one reached only through a /Next chain.
+test("merging in a file strips a dangerous action from a copied annotation but keeps an ordinary link", async () => {
+  const target = await PDFDocument.create();
+  target.addPage([612, 792]);
+  const targetBytes = await target.save({ useObjectStreams: false });
+
+  const source = await PDFDocument.create();
+  const { context } = source;
+  const sourcePage = source.addPage([612, 792]);
+  const launchLink = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [0, 0, 10, 10],
+      A: { S: "Launch", F: { Type: "Filespec", F: "calc.exe" } },
+    }),
+  );
+  const chainedDangerousLink = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [0, 20, 10, 30],
+      A: {
+        S: "Named",
+        N: "NextPage",
+        Next: [{ S: "JavaScript", JS: "app.alert(2)" }],
+      },
+    }),
+  );
+  const safeLink = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [0, 40, 10, 50],
+      A: { S: "URI", URI: "https://example.com" },
+    }),
+  );
+  const scriptedWidget = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Widget",
+      Rect: [0, 60, 10, 70],
+      FT: "Tx",
+      T: "field1",
+      AA: { K: { S: "JavaScript", JS: "app.alert(3)" } },
+    }),
+  );
+  sourcePage.node.set(
+    PDFName.of("Annots"),
+    context.obj([launchLink, chainedDangerousLink, safeLink, scriptedWidget]),
+  );
+  const sourceBytes = await source.save({ useObjectStreams: false });
+
+  const { bytes: merged } = await mergePdfAfterPage(
+    targetBytes,
+    sourceBytes,
+    0,
+  );
+  const mergedDoc = await loadTestPdf(merged);
+  const annots = mergedDoc.getPage(1).node.Annots();
+  assert.equal(annots?.size(), 4);
+
+  const actionSubtypes: (string | undefined)[] = [];
+  const aaValues: unknown[] = [];
+  for (let index = 0; index < (annots?.size() ?? 0); index += 1) {
+    const annotation = annots?.lookupMaybe(index, PDFDict);
+    const action = annotation?.lookupMaybe(PDFName.of("A"), PDFDict);
+    actionSubtypes.push(
+      action?.lookupMaybe(PDFName.of("S"), PDFName)?.decodeText(),
+    );
+    aaValues.push(annotation?.get(PDFName.of("AA")));
+  }
+
+  // launchLink and chainedDangerousLink both lose their /A; safeLink keeps its ordinary URI action; scriptedWidget loses its /AA.
+  assert.deepEqual(actionSubtypes, [undefined, undefined, "URI", undefined]);
+  assert.deepEqual(aaValues, [undefined, undefined, undefined, undefined]);
+});
+
+// The classic carrier for an embedded executable: dropped whole on merge rather than carried into a document that never chose to hold it.
+test("merging in a file drops its file-attachment annotations rather than carrying an embedded file over", async () => {
+  const target = await PDFDocument.create();
+  target.addPage([612, 792]);
+  const targetBytes = await target.save({ useObjectStreams: false });
+
+  const source = await PDFDocument.create();
+  const { context } = source;
+  const sourcePage = source.addPage([612, 792]);
+  const attachment = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "FileAttachment",
+      Rect: [0, 0, 20, 20],
+      FS: { Type: "Filespec", F: "payload.exe" },
+    }),
+  );
+  const note = context.register(
+    context.obj({
+      Type: "Annot",
+      Subtype: "Text",
+      Rect: [0, 40, 20, 60],
+      Contents: PDFString.of("a plain note"),
+    }),
+  );
+  sourcePage.node.set(PDFName.of("Annots"), context.obj([attachment, note]));
+  const sourceBytes = await source.save({ useObjectStreams: false });
+
+  const { bytes: merged } = await mergePdfAfterPage(
+    targetBytes,
+    sourceBytes,
+    0,
+  );
+  const mergedDoc = await loadTestPdf(merged);
+  const annots = mergedDoc.getPage(1).node.Annots();
+  assert.equal(annots?.size(), 1);
+  const survivor = annots?.lookupMaybe(0, PDFDict);
+  assert.equal(
+    survivor?.lookupMaybe(PDFName.of("Subtype"), PDFName)?.decodeText(),
+    "Text",
+  );
+
+  // Not merely detached from /Annots: gone from the saved file entirely.
+  const rawBytes = Buffer.from(merged).toString("latin1");
+  assert.ok(!rawBytes.includes("payload.exe"));
+});
+
+// /PageLabels/Nums is keyed by page index, so a page insert or delete has to carry those keys along or a label meant for one page starts showing on whatever page a later edit left sitting at that same index.
+test("page labels shift with pages instead of drifting onto the wrong one", async () => {
+  const pdfDoc = await PDFDocument.create();
+  for (let index = 0; index < 4; index += 1) {
+    pdfDoc.addPage([612, 792]);
+  }
+  pdfDoc.catalog.set(
+    PDFName.of("PageLabels"),
+    pdfDoc.context.obj({ Nums: [0, { S: "r" }, 2, { S: "D" }] }),
+  );
+  const bytes = await pdfDoc.save({ useObjectStreams: false });
+
+  async function pageLabelKeys(pdfBytes: Uint8Array) {
+    const doc = await loadTestPdf(pdfBytes);
+    const nums = doc.catalog
+      .lookup(PDFName.of("PageLabels"), PDFDict)
+      .lookup(PDFName.of("Nums"), PDFArray);
+    const keys: number[] = [];
+    for (let index = 0; index + 1 < nums.size(); index += 2) {
+      keys.push(nums.lookup(index, PDFNumber).asNumber());
+    }
+    return keys;
+  }
+
+  assert.deepEqual(await pageLabelKeys(bytes), [0, 2]);
+
+  // Removing the page at index 1 pulls the entry that started at 2 down to 1; the entry at 0 already precedes the removed page and stays put.
+  const removed = (await removePage(bytes, 1)).bytes;
+  assert.deepEqual(await pageLabelKeys(removed), [0, 1]);
+
+  // Inserting a page at index 1 pushes the entry at 2 up to 3, so the labels that already existed keep describing the same surviving pages.
+  const inserted = await addBlankPageAt(bytes, 1, 0);
+  assert.deepEqual(await pageLabelKeys(inserted), [0, 3]);
+});
+
 test("a malformed pre-existing annotation is skipped (not aborting the save) and reported via the callback", async () => {
   const bytes = await readFixture("test-annotated.pdf");
   const pdfDoc = await loadTestPdf(bytes);
@@ -428,8 +636,7 @@ test("a malformed pre-existing annotation is skipped (not aborting the save) and
   const firstRef = annots.get(0);
   assert.ok(firstRef instanceof PDFRef);
   const annotationDict = pdfDoc.context.lookup(firstRef, PDFDict);
-  // A /Subtype present but wrong-typed makes pdf-lib's lookupMaybe throw instead
-  // of returning undefined.
+  // A /Subtype present but wrong-typed makes pdf-lib's lookupMaybe throw instead of returning undefined.
   annotationDict.set(PDFName.of("Subtype"), PDFString.of("Highlight"));
   const corruptedBytes = await pdfDoc.save();
   const annotationCountBefore = annots.size();
@@ -448,6 +655,134 @@ test("a malformed pre-existing annotation is skipped (not aborting the save) and
   const outputDoc = await loadTestPdf(output);
   const outputAnnots = outputDoc.getPage(0).node.Annots();
   assert.equal(outputAnnots?.size(), annotationCountBefore);
+});
+
+// A page delete elsewhere can outrun an in-flight edit and leave an annotation naming a page this document no longer has. Writing must not silently drop it and let the caller believe everything was saved - it is left out and counted, the same posture the copy path already takes for an annotation it cannot identify.
+test("an annotation whose page no longer exists in the file is skipped and counted, not silently dropped", async () => {
+  const bytes = await readFixture("test-annotated.pdf");
+  const validNote: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: "test-valid-note",
+    kind: "stickyNote",
+    pageIndex: 0,
+    rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+    text: "valid note",
+  };
+  const staleNote: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: "test-stale-note",
+    kind: "stickyNote",
+    pageIndex: 5,
+    rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+    text: "orphaned by a page delete elsewhere",
+  };
+
+  let reportedCount = -1;
+  const { bytes: output } = await writeAnnotatedPdf(
+    bytes,
+    [validNote, staleNote],
+    {
+      onUnwritablePageIndex: (count) => {
+        reportedCount = count;
+      },
+    },
+  );
+
+  assert.equal(reportedCount, 1);
+  assert.equal(await annotationContentsByName(output, staleNote.id), null);
+  assert.equal(
+    await annotationContentsByName(output, validNote.id),
+    validNote.text,
+  );
+});
+
+test("writing only annotations with valid pages never calls the unwritable-page-index callback", async () => {
+  const bytes = await readFixture("test-annotated.pdf");
+  const validNote: PdfAnnotation = {
+    color: [1, 0.996, 0.306],
+    id: "test-only-valid-note",
+    kind: "stickyNote",
+    pageIndex: 0,
+    rect: { x1: 72, x2: 92, y1: 72, y2: 92 },
+    text: "valid note",
+  };
+
+  let called = false;
+  await writeAnnotatedPdf(bytes, [validNote], {
+    onUnwritablePageIndex: () => {
+      called = true;
+    },
+  });
+
+  assert.equal(called, false);
+});
+
+// The scan that looks for an edit's target has to walk every annotation on the page, not just the one it is looking for, so a neighbour's bad /Rect, /NM or /Contents must not throw past the scan and abort the whole save.
+test("a malformed neighbouring annotation does not block editing another one on the same page", async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([200, 200]);
+  const { context } = pdfDoc;
+
+  const good = context.obj({
+    C: [1, 1, 0],
+    QuadPoints: [10, 50, 50, 50, 10, 10, 50, 10],
+    Rect: [10, 10, 50, 50],
+    Subtype: "Highlight",
+    Type: "Annot",
+  }) as PDFDict;
+  // context.obj() turns a JS string into a /Name, not a /NM string value.
+  good.set(PDFName.of("NM"), PDFString.of("good-nm"));
+  const goodRef = context.register(good);
+
+  // A /Rect pdf-lib cannot resolve as an array: reading this neighbour's geometry throws rather than returning undefined.
+  const badNeighbour = context.obj({
+    Subtype: "Highlight",
+    Type: "Annot",
+  }) as PDFDict;
+  badNeighbour.set(PDFName.of("NM"), PDFString.of("bad-neighbour"));
+  badNeighbour.set(PDFName.of("Rect"), PDFString.of("not-an-array"));
+  const badRef = context.register(badNeighbour);
+
+  page.node.set(PDFName.of("Annots"), context.obj([goodRef, badRef]));
+  const bytes = await pdfDoc.save({ useObjectStreams: false });
+
+  const edit: PdfAnnotation = {
+    color: [1, 0, 0],
+    comment: "edited",
+    id: "good-nm",
+    kind: "textHighlight",
+    opacity: 0.5,
+    pageIndex: 0,
+    quadPoints: [[10, 50, 50, 50, 10, 10, 50, 10]],
+    rects: [{ x1: 10, x2: 50, y1: 10, y2: 50 }],
+  };
+
+  const output = await writePdfAnnotations(bytes, [edit], {
+    replaceAnnotationSourceIds: ["good-nm"],
+    replacePageIndexes: [0],
+  });
+
+  // The edit landed on the right dictionary, and the malformed neighbour (unreadable, so untouched) is still there rather than having taken the whole save down with it.
+  assert.equal(await annotationContentsByName(output, "good-nm"), "edited");
+  const outputAnnots = (await loadTestPdf(output)).getPage(0).node.Annots();
+  assert.equal(outputAnnots?.size(), 2);
+});
+
+// pdfWriter.ts rounds a coordinate to its on-disk precision by dividing by that precision, rounding, then multiplying back; an import-time value this large overflows that division to Infinity unless it was clamped first.
+test("an import-time coordinate this large is clamped before it can overflow a later save", () => {
+  const huge = 1e308;
+  const clamped = clampPdfCoordinateMagnitude(huge);
+  assert.equal(clamped, MAX_PDF_COORDINATE_MAGNITUDE);
+
+  const precision = 0.01;
+  assert.equal(
+    Number.isFinite(Math.round(huge / precision) * precision),
+    false,
+  );
+  assert.equal(
+    Number.isFinite(Math.round(clamped / precision) * precision),
+    true,
+  );
 });
 
 test("print-with-hidden-annotations removes all PDF annotations from output copy only", async () => {

@@ -45,6 +45,7 @@ import type { PreparedImageStamp } from "./imageImport";
 import type { PdfDocumentEditorReadOnlyReason } from "./pdfProtection";
 import type {
   PdfDocumentEditorCapabilities,
+  PdfSaveTargetChange,
   PdfSaveWithResult,
   PdfDocumentEditorSource,
 } from "./host";
@@ -108,8 +109,7 @@ import {
   visibleLoadPageIndexes,
 } from "./pdfDocumentEditorHelpers";
 
-// One view of a document useDocumentModel owns: every field this file declares
-// is one a second viewport over the same document would need its own copy of.
+// One view of a document useDocumentModel owns: every field this file declares is one a second viewport over the same document would need its own copy of.
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const DEFAULT_FULLSCREEN_CLASS = "document-shell--fullscreen";
 
@@ -133,8 +133,7 @@ export type PdfDocumentEditorReadOnlyState = {
   ready: boolean;
 };
 
-// There is deliberately no way to put a button into the core; the `children`
-// slot on PdfDocumentEditorProps is the one exception.
+// There is deliberately no way to put a button into the core; the `children` slot on PdfDocumentEditorProps is the one exception.
 export type PdfDocumentEditorHandle = {
   // A sensitive in-memory session: hosts keep it short-lived and private.
   captureSessionForTabCache: () => SensitivePdfDocumentEditorSession | null;
@@ -149,8 +148,7 @@ export type PdfDocumentEditorHandle = {
     write: (bytes: Uint8Array) => Promise<PdfSaveWithResult | void>,
   ) => Promise<boolean>;
 
-  // Page surgery: these rewrite the document and its annotation and undo state
-  // together.
+  // Page surgery: these rewrite the document and its annotation and undo state together.
   appendDocument: () => Promise<void>;
   deletePage: (pageIndex?: number) => Promise<void>;
   insertPage: (
@@ -166,8 +164,7 @@ export type PdfDocumentEditorHandle = {
   addImageFromSystemClipboard: () => Promise<void>;
   clearAnnotationSelection: () => void;
   finishAnnotationEdit: () => void;
-  // Reads every page's annotations without loading those pages into the
-  // viewport, leaving the lazy window and its eviction untouched.
+  // Reads every page's annotations without loading those pages into the viewport, leaving the lazy window and its eviction untouched.
   importAllAnnotations: () => Promise<void>;
   revealAnnotation: (annotationId: string) => void;
   setAnnotationBookmarked: (annotationId: string, bookmarked: boolean) => void;
@@ -176,8 +173,7 @@ export type PdfDocumentEditorHandle = {
   redo: () => Promise<void>;
   undo: () => Promise<void>;
 
-  // `remeasureViewport` is how host chrome whose geometry changed asks for the
-  // gutters to be measured again.
+  // `remeasureViewport` is how host chrome whose geometry changed asks for the gutters to be measured again.
   ensurePageLoaded: (page: PDFPageProxy, pageIndex: number) => void;
   fitHeight: () => void;
   fitWidth: () => void;
@@ -198,8 +194,7 @@ export type PdfDocumentEditorHandle = {
 export type PdfDocumentEditorViewState = {
   activePageIndex: number;
   annotationsByPage: Map<number, PdfAnnotation[]>;
-  // False until the host calls `importAllAnnotations`, and a page the pass
-  // could not read raises a notice rather than holding it false for ever.
+  // False until the host calls `importAllAnnotations`, and a page the pass could not read raises a notice rather than holding it false for ever.
   annotationsComplete: boolean;
   busy: boolean;
   canRedo: boolean;
@@ -228,28 +223,23 @@ export type PdfDocumentEditorViewState = {
   selectedAnnotationIds: string[];
 };
 
-// A host mounting two views over one document passes these twice and the
-// document options once.
+// A host mounting two views over one document passes these twice and the document options once.
 export type PdfDocumentEditorViewportProps = {
-  // The one place a host may put its own UI inside the core, for chrome that
-  // needs viewport coordinates.
+  // The one place a host may put its own UI inside the core, for chrome that needs viewport coordinates.
   children?: (view: PdfDocumentEditorViewState) => ReactNode;
   className?: string;
-  // Several viewports may name one document: they share its annotations,
-  // history and bytes, and keep their own scroll position, zoom and selection.
+  // Several viewports may name one document: they share its annotations, history and bytes, and keep their own scroll position, zoom and selection.
   document: PdfDocumentEditorModel;
   // Absent, `document.title` is left alone until a document is loaded.
   emptyTitle?: string;
-  // Exactly one viewport answers each window-level gesture, or two views both
-  // zoom on one wheel tick.
+  // Exactly one viewport answers each window-level gesture, or two views both zoom on one wheel tick.
   enableGlobalShortcuts?: boolean;
   enableWheelZoom?: boolean;
   manageDocumentTitle?: boolean;
   onDocumentTitleChange?: (title: string) => void;
   // The host confirms and opens it; see safePdfExternalUrl.
   onExternalLinkRequest?: (url: string) => void;
-  // Reported as well as exposed on the view state: the host draws this
-  // outside the overlay slot.
+  // Reported as well as exposed on the view state: the host draws this outside the overlay slot.
   onReadOnlyChange?: (state: PdfDocumentEditorReadOnlyState) => void;
   onShowAnnotationsChange?: (showAnnotations: boolean) => void;
   /** The core asking for a different tool - after placing text, on Escape. */
@@ -279,11 +269,11 @@ export type PdfDocumentEditorSharedProps = PdfDocumentEditorCapabilities & {
   onDocumentReplaced?: () => void;
   /** Pre-existing annotations in the file that could not be displayed. */
   onMalformedAnnotations?: (count: number) => void;
-  // Required, not optional: the core draws no banner of its own, so a host
-  // that forgets this swallows every failure the save path raises.
+  // Required, not optional: the core draws no banner of its own, so a host that forgets this swallows every failure the save path raises.
   onNotice: PdfDocumentEditorNoticeReporter;
-  // Fires after onDocumentReset, so a host can re-apply its own parked chrome
-  // state without being reset afterwards.
+  // Fires whenever a save (or leaving read-only for an in-memory copy) changes this document's own file identity or write target, so a host mirroring them on the source does not fall behind the mounted core.
+  onSaveTargetChange?: (change: PdfSaveTargetChange) => void;
+  // Fires after onDocumentReset, so a host can re-apply its own parked chrome state without being reset afterwards.
   onSessionRestore?: () => void;
   onShowAnnotationsChange?: (showAnnotations: boolean) => void;
   /** The core asking for a different tool - after placing text, on Escape. */
@@ -292,17 +282,13 @@ export type PdfDocumentEditorSharedProps = PdfDocumentEditorCapabilities & {
   source: PdfDocumentEditorSource;
 };
 
-// Two views over one document is usePdfDocumentEditor plus two
-// PdfDocumentEditorViewports; `secondView` below is that pairing done here.
+// Two views over one document is usePdfDocumentEditor plus two PdfDocumentEditorViewports; `secondView` below is that pairing done here.
 export type PdfDocumentEditorProps = PdfDocumentEditorSharedProps &
   Omit<PdfDocumentEditorViewportProps, "document"> & {
-    // Two views, never two copies: one document holds the bytes, annotations
-    // and history.
+    // Two views, never two copies: one document holds the bytes, annotations and history.
     secondView?: boolean;
     splitDirection?: SplitAxis;
-    // Uncontrolled by default (the divider keeps its own ratio), but a host
-    // that lays out chrome alongside this split - a tab bar sharing the row
-    // above it, say - can pass both to keep that chrome in step with drags.
+    // Uncontrolled by default (the divider keeps its own ratio), but a host that lays out chrome alongside this split - a tab bar sharing the row above it, say - can pass both to keep that chrome in step with drags.
     splitRatio?: number;
     onSplitRatioChange?: Dispatch<SetStateAction<number>>;
   };
@@ -335,8 +321,7 @@ export const PdfDocumentEditorViewport = forwardRef<
   const documentEditorRootRef = useRef<HTMLDivElement | null>(null);
   const pagesLayerRef = useRef<HTMLDivElement | null>(null);
   const activePageIndexRef = useRef(0);
-  // Measured off this view's own scroll box every scroll frame and handed to
-  // page residency; see `attachView`.
+  // Measured off this view's own scroll box every scroll frame and handed to page residency; see `attachView`.
   const visiblePageRangeRef = useRef<VisiblePageRange>({ end: 0, start: 0 });
   // The same measurement as a render input, since a ref re-renders nothing.
   const [visiblePageRange, setVisiblePageRange] = useState<VisiblePageRange>({
@@ -358,8 +343,7 @@ export const PdfDocumentEditorViewport = forwardRef<
   );
   // The core cannot see the host's geometry, so the host says when it moved.
   const [chromeGeometryVersion, setChromeGeometryVersion] = useState(0);
-  // A ref, not a plain argument: usePdfDocumentEditorZoom below is built from the
-  // model's output, so passing its setScale in directly would be a cycle.
+  // A ref, not a plain argument: usePdfDocumentEditorZoom below is built from the model's output, so passing its setScale in directly would be a cycle.
   const viewBridge: PdfDocumentEditorViewBridge = {
     activePageIndex,
     activePageIndexRef,
@@ -441,12 +425,9 @@ export const PdfDocumentEditorViewport = forwardRef<
     undoHistory,
     undoStack,
   } = documentModel;
-  // A layout effect on purpose: React runs a child's before its parent's, so
-  // the viewport is attached before the document's load effect and cannot miss
-  // the first reset.
+  // A layout effect on purpose: React runs a child's before its parent's, so the viewport is attached before the document's load effect and cannot miss the first reset.
   useLayoutEffect(() => attachView(viewBridgeRef), [attachView]);
-  // Window-level, because these must work before the reader has clicked into
-  // the page.
+  // Window-level, because these must work before the reader has clicked into the page.
   useLayoutEffect(() => {
     const root = documentEditorRootRef.current;
     return root ? attachGestureRoot(root) : undefined;
@@ -493,8 +474,7 @@ export const PdfDocumentEditorViewport = forwardRef<
   const handleGlobalKeyDownEvent = useEventCallback(handleGlobalKeyDown);
   const handleWheelEvent = useEventCallback(handleWheel);
   const ensurePageLoadedEvent = useEventCallback(ensurePageLoaded);
-  // Reads `visiblePageRangeRef` rather than deriving a second band from the
-  // active page; see CLAUDE.md Learnings.
+  // Reads `visiblePageRangeRef` rather than deriving a second band from the active page.
   function loadVisiblePageBand() {
     if (
       !initialVisualReadyRef.current ||
@@ -566,14 +546,12 @@ export const PdfDocumentEditorViewport = forwardRef<
     afterInitialVisualReadyRef.current.push(callback);
   }
 
-  // A function declaration, so the view bridge above can name it before
-  // usePdfDocumentEditorZoom has run.
+  // A function declaration, so the view bridge above can name it before usePdfDocumentEditorZoom has run.
   function setViewScale(nextScale: number) {
     setScale(nextScale);
   }
 
-  // Unlike resetInitialVisualReadiness, this leaves initialVisualPageIndexRef
-  // alone.
+  // Unlike resetInitialVisualReadiness, this leaves initialVisualPageIndexRef alone.
   function clearInitialVisualReadiness(commitState: boolean) {
     afterInitialVisualReadyRef.current = [];
     initialBaseLayerReadyRef.current = false;
@@ -584,8 +562,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     }
   }
 
-  // Both the position's page index and `activePageIndex` are recorded, so a
-  // restore that cannot find the page element still knows which page to open.
+  // Both the position's page index and `activePageIndex` are recorded, so a restore that cannot find the page element still knows which page to open.
   function captureViewSnapshot(): PdfDocumentEditorViewSnapshot {
     return {
       activePageIndex: activePageIndexRef.current,
@@ -720,8 +697,7 @@ export const PdfDocumentEditorViewport = forwardRef<
 
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-    // busyRef comes off the document model, so it is listed; it is the same
-    // stable object every render.
+    // busyRef comes off the document model, so it is listed; it is the same stable object every render.
   }, [busyRef, handleClipboardPasteEvent, imageAnnotationsVisible, readOnly]);
 
   useEffect(() => {
@@ -733,8 +709,7 @@ export const PdfDocumentEditorViewport = forwardRef<
         return;
       }
 
-      // Writes only its own type, so this and PdfPageView never contend for
-      // `text/plain` and neither depends on which listener runs first.
+      // Writes only its own type, so this and PdfPageView never contend for `text/plain` and neither depends on which listener runs first.
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) {
         return;
@@ -777,8 +752,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
-    // Measured once rather than reactively, so a recalculation cannot remap an
-    // in-progress scrollbar thumb drag.
+    // Measured once rather than reactively, so a recalculation cannot remap an in-progress scrollbar thumb drag.
     const updateInline = () => {
       setScrollbarGutterInline((current) => {
         const next = measureScrollbarGutter(container).inline;
@@ -835,8 +809,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     }
 
     function handleKeyDown(event: KeyboardEvent) {
-      // One viewport answers a window-level shortcut, or two views undo the
-      // same edit twice on one Ctrl+Z.
+      // One viewport answers a window-level shortcut, or two views undo the same edit twice on one Ctrl+Z.
       if (!viewOwnsWindowGesture(documentEditorRootRef.current, event.target)) {
         return;
       }
@@ -900,8 +873,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       return bestPage;
     };
 
-    // The real extent, first and last inclusive, not the active page and a
-    // buffer; see CLAUDE.md Learnings.
+    // The real extent, first and last inclusive, not the active page and a buffer, which leaves visible pages blank when zoomed out.
     const measureVisiblePageRange = (
       anchorPageIndex: number,
     ): VisiblePageRange => {
@@ -943,8 +915,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     };
 
     const updateActivePage = () => {
-      // A small window keeps this handler's layout work constant regardless of
-      // document length.
+      // A small window keeps this handler's layout work constant regardless of document length.
       const searchRadius = LAZY_PAGE_BUFFER + 2;
       const start = Math.max(0, activePageIndexRef.current - searchRadius);
       const end = Math.min(
@@ -962,8 +933,7 @@ export const PdfDocumentEditorViewport = forwardRef<
           )
         : -1;
 
-      // A match at the window's edge means the best page could lie beyond it,
-      // so re-check against every page.
+      // A match at the window's edge means the best page could lie beyond it, so re-check against every page.
       const windowMissedEdge =
         (bestPage === start && start > 0) ||
         (bestPage === end && end < pageCount - 1);
@@ -987,8 +957,7 @@ export const PdfDocumentEditorViewport = forwardRef<
         });
       }
 
-      // Page residency, the load band and the render ranking all read this one
-      // measurement; see CLAUDE.md Learnings.
+      // Page residency, the load band and the render ranking all read this one measurement.
       const measured = measureVisiblePageRange(
         bestPage >= 0 ? bestPage : activePageIndexRef.current,
       );
@@ -1010,8 +979,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     scheduleUpdate();
     container.addEventListener("scroll", scheduleUpdate, { passive: true });
     window.addEventListener("resize", scheduleUpdate);
-    // The page column changing shape moves what is on screen and fires no
-    // scroll event.
+    // The page column changing shape moves what is on screen and fires no scroll event.
     const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(container);
     if (pagesLayerRef.current) {
@@ -1026,8 +994,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     };
   }, [loadVisiblePageBandEvent, pageCount, scale]);
 
-  // Keyed on `documentVersion`: without the swap counter, a reload that leaves
-  // the page count and the active page alone never re-primes the band.
+  // Keyed on `documentVersion`: without the swap counter, a reload that leaves the page count and the active page alone never re-primes the band.
   useEffect(() => {
     loadVisiblePageBandEvent();
   }, [
@@ -1115,8 +1082,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
-    // Ctrl+Y and Ctrl/Cmd+Shift+Z are both conventional for redo, so both work
-    // regardless of platform, rather than picking one per OS.
+    // Ctrl+Y and Ctrl/Cmd+Shift+Z are both conventional for redo, so both work regardless of platform, rather than picking one per OS.
     if (
       !readOnly &&
       (event.ctrlKey || event.metaKey) &&
@@ -1179,8 +1145,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     finishCurrentAnnotationEditWithValidation();
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
-    // The image tool never becomes active, so the current tool is deactivated
-    // up front or the dock keeps it highlighted until the picker settles.
+    // The image tool never becomes active, so the current tool is deactivated up front or the dock keeps it highlighted until the picker settles.
     onToolChange?.("select");
     try {
       const file = await pickImageFile();
@@ -1237,20 +1202,28 @@ export const PdfDocumentEditorViewport = forwardRef<
     }
 
     if (imageAnnotationsVisible) {
-      const image = await prepareImageStampFromClipboardItems(
-        clipboardData.items,
-      ).catch((error) => {
-        showNotice(
-          error instanceof Error
-            ? error.message
-            : "Could not paste this image.",
-          { tone: "danger" },
-        );
-        return null;
-      });
-      if (image) {
-        addPreparedImageAnnotationFromData(image);
+      // Held across the prepare, matching addPreparedImageAnnotation: without it, an operation that starts during the await below could commit while this paste's own commit lands on top of it.
+      if (!beginBusyOperation()) {
         return;
+      }
+      try {
+        const image = await prepareImageStampFromClipboardItems(
+          clipboardData.items,
+        ).catch((error) => {
+          showNotice(
+            error instanceof Error
+              ? error.message
+              : "Could not paste this image.",
+            { tone: "danger" },
+          );
+          return null;
+        });
+        if (image) {
+          addPreparedImageAnnotationFromData(image);
+          return;
+        }
+      } finally {
+        finishBusyOperation();
       }
     }
 
@@ -1297,8 +1270,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     onToolChange?.("select");
   }
 
-  // Pasted annotations arrive with a new identity from annotationClipboard.ts,
-  // so a paste is an addition like any other.
+  // Pasted annotations arrive with a new identity from annotationClipboard.ts, so a paste is an addition like any other.
   function pasteAnnotationClipboard(clipboardData: DataTransfer) {
     const token = clipboardData.getData(ANNOTATION_CLIPBOARD_TYPE);
     if (!hasAnnotationClipboard(token)) {
@@ -1313,8 +1285,7 @@ export const PdfDocumentEditorViewport = forwardRef<
 
     const pageBounds = pagePdfBounds(page.getViewport({ scale: 1 }));
     const pasted = readAnnotationPaste(token, { pageBounds, pageIndex }).filter(
-      // Without a host that can hold one, the stamp would be committed and
-      // never drawn.
+      // Without a host that can hold one, the stamp would be committed and never drawn.
       (annotation) =>
         imageAnnotationsVisible || annotation.kind !== "imageStamp",
     );
@@ -1492,8 +1463,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     );
   }
 
-  // Deliberately does not select: selecting opens the in-viewport popover,
-  // which a host list may be sitting on top of.
+  // Deliberately does not select: selecting opens the in-viewport popover, which a host list may be sitting on top of.
   function revealAnnotation(annotationId: string) {
     const annotation = annotationsRef.current.find(
       (candidate) => candidate.id === annotationId,
@@ -1546,8 +1516,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     }
 
     deleteAnnotations(selectedAnnotationIds);
-    // deleteAnnotations only clears focus when the focused annotation was
-    // deleted, and focus can sit outside the selection.
+    // deleteAnnotations only clears focus when the focused annotation was deleted, and focus can sit outside the selection.
     setFocusedAnnotationId(null);
   }
 
@@ -1687,8 +1656,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     setFocusedAnnotationId(null);
   }
 
-  // True when it deliberately left an annotation selected, so a caller that
-  // would otherwise clear the selection knows not to.
+  // True when it deliberately left an annotation selected, so a caller that would otherwise clear the selection knows not to.
   function finishCurrentAnnotationEditWithValidation() {
     if (focusedAnnotationId) {
       return handleFocusAnnotationConsumed(focusedAnnotationId);
@@ -1850,8 +1818,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     );
   }
 
-  // A command, so host chrome can drop the selection without reaching into
-  // core state.
+  // A command, so host chrome can drop the selection without reaching into core state.
   function clearAnnotationSelection() {
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
@@ -1958,8 +1925,7 @@ export const PdfDocumentEditorViewport = forwardRef<
 
           if (movedBetweenPages && movedAnnotation.sourceId) {
             rememberRemovedAnnotationSource(annotation);
-            // After a cross-page move, save a fresh annotation on the target
-            // page, or deleting the source page drops the moved annotation.
+            // After a cross-page move, save a fresh annotation on the target page, or deleting the source page drops the moved annotation.
             return normalizeAnnotationLayout({
               ...movedAnnotation,
               sourceId: undefined,
@@ -1979,8 +1945,7 @@ export const PdfDocumentEditorViewport = forwardRef<
   }
 
   async function handlePdfDestination(destination: unknown) {
-    // Untrusted: only pdf.js interprets it, and anything it cannot resolve is
-    // a no-op rather than a throw.
+    // Untrusted: only pdf.js interprets it, and anything it cannot resolve is a no-op rather than a throw.
     if (
       !pdfDoc ||
       (typeof destination !== "string" && !Array.isArray(destination))
@@ -2189,8 +2154,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       ref={documentEditorRootRef}
       style={rootStyle}
     >
-      {/* The overlay slot and the viewport share this box, and the slot is
-          the positioning context for everything a host puts in it. */}
+      {/* The overlay slot and the viewport share this box, and the slot is the positioning context for everything a host puts in it. */}
       <div className="pdfdocumenteditor-body grow">
         {children?.(view)}
 
@@ -2285,6 +2249,7 @@ export const PdfDocumentEditor = forwardRef<
     onDocumentReplaced,
     onMalformedAnnotations,
     onNotice,
+    onSaveTargetChange,
     onSessionRestore,
     pickImageFile,
     pickMergePdfFile,
@@ -2320,6 +2285,7 @@ export const PdfDocumentEditor = forwardRef<
     onDocumentReset,
     onMalformedAnnotations,
     onNotice,
+    onSaveTargetChange,
     onSessionRestore,
     onShowAnnotationsChange: viewport.onShowAnnotationsChange,
     onToolChange: viewport.onToolChange,
@@ -2330,9 +2296,7 @@ export const PdfDocumentEditor = forwardRef<
     source,
   });
 
-  // The row is here whether or not a second view is: removing it would change
-  // the element type at this position, remounting the first viewport and
-  // losing the reader's place.
+  // The row is here whether or not a second view is: removing it would change the element type at this position, remounting the first viewport and losing the reader's place.
   const { className = DEFAULT_FULLSCREEN_CLASS, ...viewportProps } = viewport;
   const splitClassName = [
     SPLIT_VIEW_CLASS,
@@ -2372,8 +2336,7 @@ export const PdfDocumentEditor = forwardRef<
           />
           <PdfDocumentEditorViewport
             {...viewportProps}
-            // The host's chrome, the tab title and the handle all belong to
-            // the first view.
+            // The host's chrome, the tab title and the handle all belong to the first view.
             children={undefined}
             className=""
             document={documentModel}

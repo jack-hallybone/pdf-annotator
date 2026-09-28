@@ -4,8 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { usePageCache } from "../src/pdfdocumenteditor/usePageCache";
 import type { LoadedPage } from "../src/pdfdocumenteditor/types";
 
-// With EAGER_PAGE_LIMIT = 25, MAX_LOADED_MAIN_PAGES = 100 and LAZY_PAGE_BUFFER =
-// 2, eviction only kicks in past both the array-length and loaded-count limits.
+// With EAGER_PAGE_LIMIT = 25, MAX_LOADED_MAIN_PAGES = 100 and LAZY_PAGE_BUFFER = 2, eviction only kicks in past both the array-length and loaded-count limits.
 
 function fakePage(): LoadedPage {
   // Only cleanup() is exercised by the cache; cast through unknown for the rest.
@@ -16,9 +15,7 @@ function allLoaded(count: number): LoadedPage[] {
   return Array.from({ length: count }, fakePage);
 }
 
-// One viewport's hold on the cache, as the document model registers it: a range
-// per view rather than an index, because a claim that could only ever describe
-// five pages said nothing about the sixth a taller pane was showing.
+// One viewport's hold on the cache, as the document model registers it: a range per view rather than an index, because a claim that could only ever describe five pages said nothing about the sixth a taller pane was showing.
 function useCacheHarness(...visiblePageRanges: Array<[number, number]>) {
   const cache = usePageCache();
   for (const [start, end] of visiblePageRanges) {
@@ -71,8 +68,7 @@ test("evicts least-recently-accessed pages first", () => {
   const { result } = renderHook(() => useCacheHarness(onePage(0)));
   const pages = allLoaded(130);
 
-  // Touch the mid-range pages so they rank as most-recently used; the
-  // never-touched low pages should be the ones dropped.
+  // Touch the mid-range pages so they rank as most-recently used; the never-touched low pages should be the ones dropped.
   act(() => {
     for (let index = 40; index < 130; index += 1) {
       result.current.markPageAccess(index);
@@ -99,9 +95,7 @@ test("resetPageCache clears access ordering", () => {
   assert.ok(next[45]);
 });
 
-// The defect these four exist for: a proxy belongs to the document, so a second
-// viewport scrolled elsewhere lost the page it was displaying the moment the
-// first one's eviction ran.
+// The defect these four exist for: a proxy belongs to the document, so a second viewport scrolled elsewhere lost the page it was displaying the moment the first one's eviction ran.
 test("a second viewport's page is protected from the first one's eviction", () => {
   const { result } = renderHook(() => useCacheHarness(onePage(0), onePage(90)));
   const pages = allLoaded(130);
@@ -125,16 +119,13 @@ test("a second viewport's page is protected from the first one's eviction", () =
   }
 });
 
-// The half a one-page-per-view test cannot see: a view's claim covers what that
-// view displays, and protection built from an active page and LAZY_PAGE_BUFFER
-// either side describes five pages while a tall pane shows a dozen.
+// The half a one-page-per-view test cannot see: a view's claim covers what that view displays, and protection built from an active page and LAZY_PAGE_BUFFER either side describes five pages while a tall pane shows a dozen.
 test("a viewport displaying a dozen pages keeps every one of them", () => {
   const { result } = renderHook(() =>
     useCacheHarness(onePage(0), [40, 51] as [number, number]),
   );
 
-  // Make view B's pages the least recently used in the document, so only the claim
-  // stands between them and eviction.
+  // Make view B's pages the least recently used in the document, so only the claim stands between them and eviction.
   act(() => {
     for (let index = 40; index <= 51; index += 1) {
       result.current.markPageAccess(index);
@@ -155,8 +146,7 @@ test("a viewport displaying a dozen pages keeps every one of them", () => {
     );
   }
 
-  // A claim that protected the whole document would pass the loop above and
-  // protect nothing in particular; the buffer either side is deliberate.
+  // A claim that protected the whole document would pass the loop above and protect nothing in particular; the buffer either side is deliberate.
   assert.ok(next[38], "the buffer either side of the visible range is kept");
   assert.equal(
     next[10],
@@ -185,9 +175,7 @@ test("releasing a viewport's claim gives its pages back to the LRU", () => {
     }
   });
 
-  // Page 90 is the least-recently-used page here and the test above says the claim
-  // protects it; an eviction pass rewrites the access order it reads, so looking
-  // again here would change the answer. The second viewport now unmounts.
+  // Page 90 is the least-recently-used page here and the test above says the claim protects it; an eviction pass rewrites the access order it reads, so looking again here would change the answer. The second viewport now unmounts.
   claims[1].release();
   const next = result.current.evictOldLoadedPages(allLoaded(130), 0);
   assert.equal(

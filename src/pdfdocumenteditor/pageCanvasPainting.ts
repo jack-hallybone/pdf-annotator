@@ -1,6 +1,4 @@
-// Masking the appearance overlay to the pixels an annotation changed, the
-// read-only text-markup decorations pdf.js does not draw, and the raster
-// fallback for when the pdf.js page view cannot be used.
+// Masking the appearance overlay to the pixels an annotation changed, the read-only text-markup decorations pdf.js does not draw, and the raster fallback for when the pdf.js page view cannot be used.
 import { AnnotationType } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PDFPageProxy } from "pdfjs-dist";
 import { rgbToCss } from "./annotationColors";

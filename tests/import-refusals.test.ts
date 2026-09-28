@@ -3,9 +3,7 @@ import test from "node:test";
 import { prepareImageStampFromFile } from "../src/pdfdocumenteditor/imageImport";
 import { readPdfFile } from "../src/pdfdocumenteditor/pdfFile";
 
-// The sizes are literals rather than imported from the modules they guard,
-// because a test built from the constant it checks stays green when somebody
-// raises the limit.
+// The sizes are literals rather than imported from the modules they guard, because a test built from the constant it checks stays green when somebody raises the limit.
 
 /** A File of a declared size without allocating it: only `size` is read. */
 function pretendSizedFile(name: string, type: string, size: number) {
@@ -41,8 +39,7 @@ test("a PDF over the size limit is refused before it is read", async () => {
 });
 
 test("a file that is not a PDF is refused however it is named", async () => {
-  // The realistic case: a saved web page, or an HTML error body a server returned
-  // with a .pdf name.
+  // The realistic case: a saved web page, or an HTML error body a server returned with a .pdf name.
   const message = await refusal(() =>
     readPdfFile(
       new File(["<!doctype html><title>not a pdf</title>"], "invoice.pdf", {
@@ -72,8 +69,7 @@ test("an image over the size limit is refused before it is decoded", async () =>
 });
 
 test("an image whose own header declares impossible dimensions is refused", async () => {
-  // A 20000x20000 PNG is 44 bytes on disk and 1.6 GB decoded, so the refusal has
-  // to come from the header, before createImageBitmap is handed the blob.
+  // A 20000x20000 PNG is 44 bytes on disk and 1.6 GB decoded, so the refusal has to come from the header, before createImageBitmap is handed the blob.
   const header = new Uint8Array(24);
   header.set([0x89, 0x50, 0x4e, 0x47], 0);
   header.set([0x49, 0x48, 0x44, 0x52], 12); // IHDR

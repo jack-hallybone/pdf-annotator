@@ -11,23 +11,19 @@ import {
   boundedDocumentLine,
   boundedDocumentText,
   strippedDocumentText,
+  strippedLiveText,
 } from "../src/pdfdocumenteditor/untrustedText";
 
-// A sweep, because the defect was a list: a test that enumerates the characters
-// it thinks are dangerous is that defect wearing a test's clothes, so this one
-// lists none and asks the engine about every code point.
+// A sweep, because the defect was a list: a test that enumerates the characters it thinks are dangerous is that defect wearing a test's clothes, so this one lists none and asks the engine about every code point.
 const INVISIBLE =
   /^[\p{Bidi_Control}\p{Join_Control}\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}]$/u;
 
-// The one code point no property reaches: a sweep over all 0x110000 found
-// exactly one that paints nothing and is in none of them, and it is not
-// whitespace either, so nothing that trims or collapses `\s` touches it.
+// The one code point no property reaches: a sweep over all 0x110000 found exactly one that paints nothing and is in none of them, and it is not whitespace either, so nothing that trims or collapses `\s` touches it.
 const BLANK_GLYPH = "\u2800";
 
 const LAST_CODE_POINT = 0x10ffff;
 
-// A line break is content in a note, and a carriage return is normalised to one
-// before the strip runs.
+// A line break is content in a note, and a carriage return is normalised to one before the strip runs.
 const KEPT_IN_NOTE_TEXT = new Map([
   ["\n", "a\nb"],
   ["\r", "a\nb"],
@@ -51,8 +47,7 @@ function name(char: string) {
 const INVISIBLE_CHARACTERS = invisibleCodePoints();
 
 test("the sweep sees the whole class, or it proves nothing", () => {
-  // A sweep that matched nothing would pass every assertion below on an
-  // implementation that strips nothing at all.
+  // A sweep that matched nothing would pass every assertion below on an implementation that strips nothing at all.
   assert.ok(
     INVISIBLE_CHARACTERS.length > 5000,
     `expected Unicode's invisibles, saw ${INVISIBLE_CHARACTERS.length}`,
@@ -85,6 +80,7 @@ test("no invisible code point reaches a string a reader sees", () => {
     const expected = kept ?? "ab";
     if (
       strippedDocumentText(`a${char}b`) !== expected ||
+      strippedLiveText(`a${char}b`) !== expected ||
       boundedDocumentText(`a${char}b`, 100) !== expected ||
       boundedDocumentLine(`a${char}b`, 100) !== (kept ? "a b" : "ab")
     ) {
@@ -96,6 +92,16 @@ test("no invisible code point reaches a string a reader sees", () => {
     [],
     "an invisible code point reached the annotations sidebar",
   );
+});
+
+// strippedLiveText backs a controlled textarea's onChange (the sticky note popover): it must strip the same characters as strippedDocumentText, but never trim, or a space or newline the reader just typed at the end of the text would disappear before a next word or line could follow it.
+test("the live variant strips the same characters but never trims", () => {
+  assert.equal(strippedLiveText("  hello  "), "  hello  ");
+  assert.equal(
+    strippedLiveText("line one\nline two\n"),
+    "line one\nline two\n",
+  );
+  assert.equal(strippedLiveText(42), "");
 });
 
 test("no invisible code point reaches a filename or a title a reader sees", () => {

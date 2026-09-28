@@ -4,9 +4,7 @@ import { useRef } from "react";
 import { act, render, cleanup } from "@testing-library/react";
 import { useFocusTrap } from "../src/tabbedapp/useFocusTrap";
 
-// The hook filters its focusable list by getBoundingClientRect, and jsdom has no
-// layout, so an all-zero rect for everything would leave the list empty and make
-// every test here pass for the wrong reason.
+// The hook filters its focusable list by getBoundingClientRect, and jsdom has no layout, so an all-zero rect for everything would leave the list empty and make every test here pass for the wrong reason.
 const realRect = Element.prototype.getBoundingClientRect;
 
 beforeEach(() => {
@@ -34,9 +32,7 @@ afterEach(() => {
   cleanup();
 });
 
-// `mounted` is deliberately separate from `active`: a dialog on screen but not
-// trapping is the only arrangement that tells "the hook respects the active
-// flag" apart from "the container ref happens to be null".
+// `mounted` is deliberately separate from `active`: a dialog on screen but not trapping is the only arrangement that tells "the hook respects the active flag" apart from "the container ref happens to be null".
 function Dialog({
   active,
   mounted = active,
@@ -142,9 +138,7 @@ test("Tab between interior controls is not intercepted", () => {
   assert.equal(event.defaultPrevented, false);
 });
 
-// The zero-sized control goes at the edge of the list, not the middle: in the
-// middle the wrap targets are the first and last visible controls either way, so
-// it would pass against a hook with no visibility filter at all.
+// The zero-sized control goes at the edge of the list, not the middle: in the middle the wrap targets are the first and last visible controls either way, so it would pass against a hook with no visibility filter at all.
 test("a control with no layout is not a place Tab can land", () => {
   const { getByTestId } = render(
     <Dialog
@@ -175,8 +169,7 @@ test("focus returns to whatever had it when the dialog closes", () => {
   assert.equal(testId(), "outside");
 });
 
-// The control that opened the dialog is gone by the time it closes - a menu item
-// whose menu closed with it - and without the fallback focus lands on <body>.
+// The control that opened the dialog is gone by the time it closes - a menu item whose menu closed with it - and without the fallback focus lands on <body>.
 test("focus falls back when the opener has left the document", () => {
   const { rerender } = render(<Dialog active={false} withFallback />);
 

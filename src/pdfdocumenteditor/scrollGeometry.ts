@@ -1,5 +1,4 @@
-// DOM geometry for the page scroll container, shared by the zoom logic and the
-// scroll-restoration code.
+// DOM geometry for the page scroll container, shared by the zoom logic and the scroll-restoration code.
 
 export function pageElementForIndex(container: HTMLElement, pageIndex: number) {
   return container.querySelector<HTMLElement>(

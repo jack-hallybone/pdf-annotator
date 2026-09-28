@@ -8,10 +8,7 @@ import {
 import { annotationBounds } from "../src/pdfdocumenteditor/annotationGeometry";
 import type { PdfAnnotation, PdfRect } from "../src/pdfdocumenteditor/types";
 
-// A paste mints an annotation rather than making a second reference to one:
-// `sourceId` names one dictionary in the file, so two annotations carrying the
-// same one means an edit landing on two objects, or a removal taking the copy
-// with the original.
+// A paste mints an annotation rather than making a second reference to one: `sourceId` names one dictionary in the file, so two annotations carrying the same one means an edit landing on two objects, or a removal taking the copy with the original.
 
 const A4: PdfRect = { x1: 0, x2: 595, y1: 0, y2: 842 };
 const POSTCARD: PdfRect = { x1: 0, x2: 288, y1: 0, y2: 432 };

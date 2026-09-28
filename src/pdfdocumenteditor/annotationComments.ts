@@ -1,12 +1,8 @@
-/*
- * Comment text is user input on its way into a PDF string, so it is bounded and
- * stripped here once.
- */
+/* Comment text is user input on its way into a PDF string, so it is stripped here once, but never cut short: it is the reader's own writing. */
 import type { PdfAnnotation } from "./types";
-import { boundedDocumentText } from "./untrustedText";
+import { boundedDocumentText, strippedDocumentText } from "./untrustedText";
 
-/* Applies to text arriving from a file as much as to text typed in: a
- * /Contents string in an untrusted document has no size limit at all. */
+/* Applies to text arriving from a file as much as to text typed in: a /Contents string in an untrusted document has no size limit at all. */
 export const MAX_ANNOTATION_COMMENT_LENGTH = 2000;
 
 /** Free text and sticky notes do not: their /Contents is their own text. */
@@ -34,10 +30,7 @@ export function annotationCoveredText(annotation: PdfAnnotation) {
     : undefined;
 }
 
-/**
- * Trim, bound, and drop the control characters bar newlines: bidi overrides and
- * a lone \r make one string read differently here and in another reader.
- */
+/** Trim, bound, and drop the control characters bar newlines: bidi overrides and a lone \r make one string read differently here and in another reader. */
 export function normalizeAnnotationComment(text: string) {
   return boundedDocumentText(text, MAX_ANNOTATION_COMMENT_LENGTH);
 }
@@ -46,7 +39,7 @@ export function withAnnotationComment(
   annotation: PdfAnnotation,
   comment: string,
 ): PdfAnnotation {
-  const next = normalizeAnnotationComment(comment);
+  const next = strippedDocumentText(comment);
 
   if (annotation.kind === "freeText" || annotation.kind === "stickyNote") {
     return annotation.text === next
@@ -67,8 +60,7 @@ export function withAnnotationBookmark(
     return annotation;
   }
 
-  // Absent rather than false: "no key" is how an unstarred annotation looks
-  // both in the dictionary and in a work signature.
+  // Absent rather than false: "no key" is how an unstarred annotation looks both in the dictionary and in a work signature.
   return bookmarked
     ? { ...annotation, bookmarked: true }
     : { ...annotation, bookmarked: undefined };

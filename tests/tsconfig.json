@@ -1,5 +1,4 @@
-// The transform config tsx uses at test time (TSX_TSCONFIG_PATH in
-// package.json), NOT the type check - that is tsconfig.test.json at the root.
+// The transform config tsx uses at test time (TSX_TSCONFIG_PATH in package.json), NOT the type check - that is tsconfig.test.json at the root.
 {
   "compilerOptions": {
     "jsx": "react-jsx",
@@ -13,10 +12,6 @@
     "verbatimModuleSyntax": false,
     "noEmit": true
   },
-  // `src` is here because tsx applies these options only to the files a
-  // tsconfig matches, and everything else falls back to esbuild's defaults -
-  // which compile JSX to the classic `React.createElement`. A test that
-  // *renders* a component out of src (rather than only importing it) crashes
-  // on an undefined `React` without this.
+  // `src` is here because tsx applies these options only to files a tsconfig matches; the rest get esbuild's classic `React.createElement` JSX, and a test rendering a src component crashes on an undefined `React`.
   "include": ["**/*.ts", "**/*.tsx", "../src/**/*.ts", "../src/**/*.tsx"]
 }

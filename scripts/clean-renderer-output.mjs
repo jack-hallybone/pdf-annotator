@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const rendererOutput = join(root, "dist");
 
-// Removing this one exact build directory first keeps obsolete hashed bundles
-// out of a later precache manifest.
+// Removing this one exact build directory first keeps obsolete hashed bundles out of a later precache manifest.
 rmSync(rendererOutput, {
   force: true,
   maxRetries: 5,

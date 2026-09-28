@@ -142,7 +142,7 @@ export function FloatingToolDock({
               </button>
             ) : null}
             {!disabled && hasSettings && settingsToolKey === key ? (
-              <div className={`${POPOVER_CLASS} tool-settings-popover`}>
+              <div className={`${POPOVER_CLASS} menu tool-settings-popover`}>
                 <ToolSettingsEditor
                   settings={settings}
                   tool={tool}
@@ -227,11 +227,7 @@ function ToolIndicator({
   return null;
 }
 
-// Lucide's Highlighter/StickyNote redrawn with one path split out from the
-// rest: the mark left by the highlighter, and the note's own body, are each
-// a closed shape a reader's colour can fill - the icon otherwise stays a
-// plain ink outline, like every other tool. SVG fill treats an open path as
-// implicitly closed, so the highlighter's mark needs no explicit "Z".
+// Lucide's Highlighter/StickyNote redrawn with one path split out from the rest: the mark left by the highlighter, and the note's own body, are each a closed shape a reader's colour can fill - the icon otherwise stays a plain ink outline, like every other tool. SVG fill treats an open path as implicitly closed, so the highlighter's mark needs no explicit "Z".
 function HighlighterFillIcon({
   fill,
   size,

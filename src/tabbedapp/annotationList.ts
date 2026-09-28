@@ -73,8 +73,7 @@ function annotationListRow(
   };
 }
 
-// A bound on the render alone: annotation text carries no length rule, and the
-// annotation itself keeps every character.
+// A bound on the render alone: annotation text carries no length rule, and the annotation itself keeps every character.
 function annotationRowQuote(annotation: PdfAnnotation) {
   const text =
     annotationCoveredText(annotation) || annotationCommentText(annotation);
@@ -151,10 +150,7 @@ export function toggleColorFilter(
   return { ...filter, colorKeys: next };
 }
 
-/**
- * Or deleting the last of a colour leaves the list empty behind a swatch
- * nobody can see to switch off.
- */
+/** Or deleting the last of a colour leaves the list empty behind a swatch nobody can see to switch off. */
 export function prunedAnnotationFilter(
   filter: AnnotationListFilter,
   rows: AnnotationListRow[],

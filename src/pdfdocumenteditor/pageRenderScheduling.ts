@@ -1,10 +1,6 @@
 import type { PageRenderPriority } from "./types";
 
-/*
- * Priority is a scheduling hint and must never be a render-effect dependency:
- * crossing a page boundary re-ranks three pages, and the cleanups that follow
- * blank every visible canvas for two frames.
- */
+/* Priority is a scheduling hint and must never be a render-effect dependency: crossing a page boundary re-ranks three pages, and the cleanups that follow blank every visible canvas for two frames. */
 
 /** `run` is a no-op once started or cancelled, so promotion is safe. */
 export type PendingPageTask = {
@@ -37,10 +33,7 @@ function schedulePriorityTask(
   return () => window.clearTimeout(timeout);
 }
 
-/**
- * A cancelled task is deregistered, so a later promotion cannot resurrect
- * torn-down work.
- */
+/** A cancelled task is deregistered, so a later promotion cannot resurrect torn-down work. */
 export function schedulePromotableTask(
   pending: Set<PendingPageTask>,
   priority: PageRenderPriority,

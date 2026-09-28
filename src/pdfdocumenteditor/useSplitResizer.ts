@@ -4,20 +4,16 @@ import type { PointerEvent as ReactPointerEvent } from "react";
 
 export type SplitAxis = "row" | "column";
 
-// Keeps either side of a split from being dragged down to a sliver too
-// narrow to read.
-export const MIN_SPLIT_RATIO = 0.2;
-export const MAX_SPLIT_RATIO = 0.8;
+// Keeps either side of a split from being dragged down to a sliver too narrow to read.
+const MIN_SPLIT_RATIO = 0.2;
+const MAX_SPLIT_RATIO = 0.8;
 const SPLIT_RATIO_KEYBOARD_STEP = 0.05;
 
-export function clampSplitRatio(ratio: number) {
+function clampSplitRatio(ratio: number) {
   return Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
 }
 
-// Drives the draggable, keyboard-operable divider between two panes sharing
-// a split - the primary pane's share is `ratio`, the other takes the rest.
-// Shared because a host splitting two different documents and the core
-// mirroring one document into two views both need the identical control.
+// Drives the draggable, keyboard-operable divider between two panes sharing a split - the primary pane's share is `ratio`, the other takes the rest. Shared because a host splitting two different documents and the core mirroring one document into two views both need the identical control.
 export function useSplitResizer({
   axis,
   disabled = false,

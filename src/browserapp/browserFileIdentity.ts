@@ -8,8 +8,7 @@ const trackedFileHandles: Array<{
 }> = [];
 let nextFileHandleKey = 0;
 
-// De-duplication must use the underlying file entry, never name, size or
-// mtime: two files in different folders can share all three.
+// De-duplication must use the underlying file entry, never name, size or mtime: two files in different folders can share all three.
 export async function browserFileHandleKey(handle: LocalPdfFileHandle) {
   const existingKey = fileHandleKeys.get(handle);
   if (existingKey) {
@@ -24,8 +23,7 @@ export async function browserFileHandleKey(handle: LocalPdfFileHandle) {
           return tracked.key;
         }
       } catch {
-        // A failed comparison only disables de-duplication; it must never
-        // prevent the file from opening.
+        // A failed comparison only disables de-duplication; it must never prevent the file from opening.
       }
     }
   }

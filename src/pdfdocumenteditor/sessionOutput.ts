@@ -1,7 +1,4 @@
-/*
- * Serialising a document that is not mounted, in the same steps PdfDocumentEditor's
- * own save takes, or a tab saved parked differs from one saved while open.
- */
+/* Serialising a document that is not mounted, in the same steps PdfDocumentEditor's own save takes, or a tab saved parked differs from one saved while open. */
 import {
   annotationReplacementPageIndexes,
   annotationSourceIdsForReplacement,
@@ -28,11 +25,7 @@ type DocumentEditorSessionOutput = {
   sources: WrittenAnnotationSources | null;
 };
 
-/**
- * The bytes this session would write and what the writer did to the source
- * identities: a baseline describing the previous file lands the next save's
- * edit on whichever annotation moved into the slot.
- */
+/** The bytes this session would write and what the writer did to the source identities: a baseline describing the previous file lands the next save's edit on whichever annotation moved into the slot. */
 export async function documentEditorSessionOutput(
   session: SensitivePdfDocumentEditorSession,
 ): Promise<DocumentEditorSessionOutput> {
@@ -73,10 +66,7 @@ export async function documentEditorSessionOutput(
   });
 }
 
-/**
- * The undo history is restated as well as the baseline, so undoing past this
- * save does not bring the previous file's positions back.
- */
+/** The undo history is restated as well as the baseline, so undoing past this save does not bring the previous file's positions back. */
 export function documentEditorSessionAfterSave(
   session: SensitivePdfDocumentEditorSession,
   output: DocumentEditorSessionOutput,
@@ -88,8 +78,7 @@ export function documentEditorSessionAfterSave(
         annotations: remapAnnotationSources(
           session.annotations,
           sources,
-          // These identities describe the file just written; only the history
-          // stacks reach past it.
+          // These identities describe the file just written; only the history stacks reach past it.
           UNCHANGED_PAGE_ORDER,
         ),
         redoStack: remapHistoryAnnotationSources(session.redoStack, sources),

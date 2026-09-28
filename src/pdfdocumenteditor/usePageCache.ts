@@ -7,21 +7,13 @@ import {
 } from "./viewerConfig";
 import type { LoadedPage, VisiblePageRange } from "./types";
 
-/**
- * pdf.js hands every caller of `getPage(n)` the same proxy, so `cleanup()`
- * releases the resources of every view showing that page: residency is
- * refcounted, not owned.
- */
+/** pdf.js hands every caller of `getPage(n)` the same proxy, so `cleanup()` releases the resources of every view showing that page: residency is refcounted, not owned. */
 type PageResidencyClaim = {
   release: () => void;
 };
 
 type PageCacheApi = {
-  /**
-   * A range, not an active page: a band around one index under-claims any
-   * taller or zoomed-out pane, whose surplus pages another view then evicts
-   * and blanks.
-   */
+  /** A range, not an active page: a band around one index under-claims any taller or zoomed-out pane, whose surplus pages another view then evicts and blanks. */
   claimPageResidency: (
     visiblePageRange: () => VisiblePageRange,
   ) => PageResidencyClaim;
@@ -35,9 +27,7 @@ type PageCacheApi = {
   resetPageCache: () => void;
 };
 
-// The union of every attached viewport's claims is protected, not one view's
-// range: the proxy underneath is shared, so evicting it takes the page away
-// from every view at once.
+// The union of every attached viewport's claims is protected, not one view's range: the proxy underneath is shared, so evicting it takes the page away from every view at once.
 export function usePageCache(): PageCacheApi {
   const pageAccessClockRef = useRef(0);
   const pageAccessOrderRef = useRef<Map<number, number>>(new Map());
@@ -102,8 +92,7 @@ export function usePageCache(): PageCacheApi {
         return candidatePages;
       }
 
-      /* Every page any attached view displays, plus LAZY_PAGE_BUFFER either
-       * side, and never a band around one index inside that range. */
+      /* Every page any attached view displays, plus LAZY_PAGE_BUFFER either side, and never a band around one index inside that range. */
       const lastPageIndex = candidatePages.length - 1;
       const protectedIndexes = new Set<number>([protectedPageIndex]);
       for (const visiblePageRange of claimsRef.current) {

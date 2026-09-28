@@ -3,8 +3,7 @@
 
 *.png binary
 
-# The binary types this project ships. Git's own NUL-byte heuristic would catch most of
-# them; naming them means a new one is a deliberate line rather than a lucky detection.
+# The binary types this project ships, named so a new one is a deliberate line rather than a lucky catch by Git's NUL-byte heuristic.
 *.bcmap binary
 *.icc binary
 *.ico binary

@@ -2,19 +2,14 @@ import type { PdfPrintTarget } from "../tabbedapp";
 import { uint8ArrayToArrayBuffer } from "../bytes";
 import { downloadPdfBytes } from "./localFileAccess";
 
-// Exported so the e2e print test can wait past this rather than racing a
-// separate, hand-picked window against real (and machine-dependent) PDF
-// render time in the iframe.
-export const PRINT_FRAME_FALLBACK_MS = 4000;
+const PRINT_FRAME_FALLBACK_MS = 4000;
 const PRINT_BLOB_REVOKE_MS = 10 * 60 * 1000;
 
 export function browserPrintTarget(): PdfPrintTarget {
   return printPdfInFrame;
 }
 
-// Each call owns its own blob URL and iframe, never module-level state: two
-// print jobs can be in flight at once, and shared state means the second
-// revokes the first's URL and removes its iframe mid-print.
+// Each call owns its own blob URL and iframe, never module-level state: two print jobs can be in flight at once, and shared state means the second revokes the first's URL and removes its iframe mid-print.
 function printPdfInFrame(bytes: Uint8Array, outputName: string) {
   const url = URL.createObjectURL(
     new Blob([uint8ArrayToArrayBuffer(bytes)], { type: "application/pdf" }),
@@ -81,8 +76,7 @@ function printPdfInFrame(bytes: Uint8Array, outputName: string) {
         return;
       }
 
-      // A download, never a new tab: a printable tab has to be opened without
-      // `noopener`, handing a window reference to untrusted PDF bytes.
+      // A download, never a new tab: a printable tab has to be opened without `noopener`, handing a window reference to untrusted PDF bytes.
       cleanupPrintResources();
       downloadPdfBytes(bytes, outputName);
       finish();

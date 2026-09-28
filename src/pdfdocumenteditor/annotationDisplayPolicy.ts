@@ -6,20 +6,16 @@ import {
 import type { ExistingPdfAnnotation } from "./annotationImport";
 import type { PdfAnnotation } from "./types";
 
-// A security boundary, not a styling choice: the pdf.js annotation layer
-// builds real DOM nodes out of an untrusted document, while the appearance
-// overlay only paints onto a canvas.
+// A security boundary, not a styling choice: the pdf.js annotation layer builds real DOM nodes out of an untrusted document, while the appearance overlay only paints onto a canvas.
 
 export function shouldRenderExistingAnnotationInPdfJsLayer(
   annotation: ExistingPdfAnnotation,
 ) {
-  // Widgets are absent on purpose: a form field here would be a focusable,
-  // scriptable control.
+  // Widgets are absent on purpose: a form field here would be a focusable, scriptable control.
   return annotation.annotationType === AnnotationType.LINK;
 }
 
-// Widgets belong here: excluding them left signed documents missing content
-// every other viewer shows.
+// Widgets belong here: excluding them left signed documents missing content every other viewer shows.
 export function shouldRenderExistingAnnotationInAppearanceOverlay(
   annotation: ExistingPdfAnnotation,
   pageAnnotations: PdfAnnotation[],
@@ -50,8 +46,7 @@ export function isReadOnlyTextMarkupAnnotation(
   );
 }
 
-// Hiding the native rendering and the import must never disagree, or the stamp
-// is drawn twice or not at all.
+// Hiding the native rendering and the import must never disagree, or the stamp is drawn twice or not at all.
 export function isManagedExistingAnnotation(
   annotation: ExistingPdfAnnotation,
   pageAnnotations: PdfAnnotation[],

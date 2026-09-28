@@ -1,5 +1,4 @@
-// The two dialogs the tabbedapp shell renders over the core: the password prompt for
-// an encrypted document, and the confirmation for an external link.
+// The two dialogs the tabbedapp shell renders over the core: the password prompt for an encrypted document, and the confirmation for an external link.
 import { useId, useRef } from "react";
 import type { FormEvent, RefObject } from "react";
 import type { PendingExternalLink } from "../useExternalLinks";
@@ -76,16 +75,13 @@ export function ExternalLinkDialog({
         <p className="dialog-body">
           This file wants to open the following link:
         </p>
-        {/* Rendered as stored, not re-derived: PendingExternalLink.url is
-            already the sanitized string that will be opened. */}
+        {/* Rendered as stored, not re-derived: PendingExternalLink.url is already the sanitized string that will be opened. */}
         <p className="dialog-body external-link-url text-mono">{link.url}</p>
         <div className="dialog-actions">
           <button className="" onClick={onCancel} type="button">
             Cancel
           </button>
-          {/* The scope label comes from PendingExternalLink so the button
-              promises exactly what confirmExternalLink stores: this origin, or
-              this mailto recipient - not every link in the document. */}
+          {/* The scope label comes from PendingExternalLink so the button promises exactly what confirmExternalLink stores: this origin, or this mailto recipient - not every link in the document. */}
           <button
             className=""
             onClick={onAlways}

@@ -1,7 +1,4 @@
-// `pdfjs-dist` ships its worker with a `sourceMappingURL` for a map it does not
-// ship and Vite copies the asset through verbatim, so the references naming a
-// file the build did not produce are stripped here, before the digest stamper,
-// which would otherwise pin bytes this then rewrites.
+// `pdfjs-dist` ships its worker with a `sourceMappingURL` for a map it does not ship and Vite copies the asset through verbatim, so the references naming a file the build did not produce are stripped here.
 import {
   existsSync,
   readFileSync,
@@ -17,8 +14,7 @@ const outDir = join(root, "dist");
 
 const MAPPABLE_ASSET = /\.(?:[cm]?js|css)$/;
 
-// Both spellings, anchored to a whole line so a string in the code that
-// happens to contain the word is not matched.
+// Both spellings, anchored to a whole line so a string in the code that happens to contain the word is not matched.
 const SOURCE_MAP_REFERENCE =
   /^[ \t]*(?:\/\/|\/\*)[#@][ \t]*sourceMappingURL=(\S+?)[ \t]*(?:\*\/)?[ \t]*$/gm;
 

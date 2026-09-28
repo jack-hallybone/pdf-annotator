@@ -10,8 +10,7 @@ import {
   MAX_BAND_LOAD_PAGES,
 } from "../src/pdfdocumenteditor/viewerConfig";
 
-// The band is a function of the displayed range, so a wide range asks for a wide
-// band and a test written against an active index could not tell the two apart.
+// The band is a function of the displayed range, so a wide range asks for a wide band and a test written against an active index could not tell the two apart.
 
 test("the load band covers everything displayed plus the buffer", () => {
   assert.deepEqual(
@@ -48,8 +47,7 @@ test("the band is clamped to the document at both ends", () => {
 });
 
 test("the band loads outward from the centre of the viewport", () => {
-  // Order is the promise the cap rests on: when it bites it takes the edges, so
-  // the pages the reader is looking at are the ones that arrive.
+  // Order is the promise the cap rests on: when it bites it takes the edges, so the pages the reader is looking at are the ones that arrive.
   assert.deepEqual(
     visibleLoadPageIndexes({ end: 22, start: 18 }, 60),
     [20, 19, 21, 18, 22, 17, 23, 16, 24],
@@ -72,8 +70,7 @@ test("the cap bites at the edges and never in the middle", () => {
 
 test("render priority ranks against the range, not one index", () => {
   const range = { end: 14, start: 6 };
-  // Ranked against a scalar active index these came out "idle", which is a
-  // requestIdleCallback with a 1200ms timeout: on screen and blank for a second.
+  // Ranked against a scalar active index these came out "idle", which is a requestIdleCallback with a 1200ms timeout: on screen and blank for a second.
   for (let pageIndex = 6; pageIndex <= 14; pageIndex += 1) {
     assert.equal(pageRenderPriority(pageIndex, range), "visible");
   }

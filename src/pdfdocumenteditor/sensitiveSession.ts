@@ -1,6 +1,4 @@
-// A toJSON guard that throws instead of silently serializing: a session holds
-// full PDF bytes and host save targets, and JSON.stringify - or anything built
-// on it, such as localStorage or a fetch body - would otherwise leak them.
+// A toJSON guard that throws instead of silently serializing: a session holds full PDF bytes and host save targets, and JSON.stringify - or anything built on it, such as localStorage or a fetch body - would otherwise leak them.
 export function markNonSerializable<T extends object>(value: T): T {
   Object.defineProperty(value, "toJSON", {
     value() {

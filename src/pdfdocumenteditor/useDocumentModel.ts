@@ -1,5 +1,4 @@
-// The document owner: views attach through `PdfDocumentEditorViewBridge` refs and
-// there may be more than one.
+// The document owner: views attach through `PdfDocumentEditorViewBridge` refs and there may be more than one.
 import {
   useCallback,
   useDeferredValue,
@@ -25,6 +24,7 @@ import {
 } from "./annotationImport";
 import { loadPdfOutline } from "./pdfOutline";
 import type { PdfOutlineEntry } from "./pdfOutline";
+import { formatBytes, MAX_PDF_FILE_BYTES } from "./pdfFile";
 import {
   annotationReplacementPageIndexes,
   annotationSourceIdsForReplacement,
@@ -87,6 +87,7 @@ import type {
   PdfDownloadTarget,
   PdfSaveAsTarget,
   PdfSaveTarget,
+  PdfSaveTargetChange,
   PdfSaveWithResult,
   PdfDocumentEditorSource,
 } from "./host";
@@ -128,14 +129,14 @@ const UNNAMED_DOCUMENT = "document.pdf";
 const RENDER_RESOURCE_RELEASE_DELAY_MS = 500;
 const MAX_DOCUMENT_HISTORY_ENTRY_BYTES = 96 * 1024 * 1024;
 
-// `sources` is null when nothing was written.
+// `sources` is null when nothing was written. `annotations` is the exact snapshot serialised into `bytes`, so a caller can adopt it as the clean baseline instead of re-reading live state a save's awaits may have moved on.
 type PdfOutput = {
   bytes: Uint8Array;
   sources: WrittenAnnotationSources | null;
+  annotations: PdfAnnotation[];
 };
 
-// What a structural page edit rewrites beside the bytes, all of which a failed
-// reload has to put back.
+// What a structural page edit rewrites beside the bytes, all of which a failed reload has to put back.
 type DocumentEditorAncillaryState = {
   annotations: PdfAnnotation[];
   cleanAnnotations: PdfAnnotation[];
@@ -180,8 +181,7 @@ export type PdfDocumentEditorHistoryEntry =
       view: PdfDocumentEditorViewSnapshot;
     };
 
-// Full PDF bytes, annotation state, history and save targets: never logged,
-// sent over a network, stored in browser storage or persisted to disk.
+// Full PDF bytes, annotation state, history and save targets: never logged, sent over a network, stored in browser storage or persisted to disk.
 export type SensitivePdfDocumentEditorSession = {
   annotations: PdfAnnotation[];
   cleanAnnotations: PdfAnnotation[];
@@ -253,6 +253,8 @@ type DocumentModelOptions = PdfDocumentEditorCapabilities & {
   onDocumentReset?: () => void;
   onMalformedAnnotations?: (count: number) => void;
   onNotice: PdfDocumentEditorNoticeReporter;
+  // Fires whenever a save (or leaving read-only for an in-memory copy) changes this document's own file identity or write target, so a host mirroring them on the source does not fall behind the mounted core.
+  onSaveTargetChange?: (change: PdfSaveTargetChange) => void;
   onSessionRestore?: () => void;
   onShowAnnotationsChange?: (showAnnotations: boolean) => void;
   onToolChange?: (tool: Tool) => void;
@@ -276,6 +278,7 @@ export function useDocumentModel({
   onDocumentReset,
   onMalformedAnnotations,
   onNotice,
+  onSaveTargetChange,
   onSessionRestore,
   onShowAnnotationsChange,
   onToolChange,
@@ -322,8 +325,7 @@ export function useDocumentModel({
   const cleanAnnotationsRef = useRef<PdfAnnotation[]>([]);
   const cleanSignatureRefreshEnabledRef = useRef(true);
   const passwordProtectedLoadRef = useRef(false);
-  // A Set of bridge refs, not of bridges: a view rewrites its bridge object on
-  // every render.
+  // A Set of bridge refs, not of bridges: a view rewrites its bridge object on every render.
   const viewsRef = useRef<Set<RefObject<PdfDocumentEditorViewBridge>>>(
     new Set(),
   );
@@ -359,8 +361,7 @@ export function useDocumentModel({
   } | null>(null);
   const [pageSize, setPageSize] = useState<PageSize | null>(null);
   const [fileName, setRawFileName] = useState(UNNAMED_DOCUMENT);
-  // The one place the untrusted name enters; every surface downstream reads it
-  // from this state.
+  // The one place the untrusted name enters; every surface downstream reads it from this state.
   const setFileName = (next: string | ((current: string) => string)) => {
     setRawFileName(
       (current) =>
@@ -467,8 +468,7 @@ export function useDocumentModel({
     [],
   );
 
-  // Keyed on the document object: page surgery replaces the whole proxy, and an
-  // outline read before the rewrite points at pages that have since moved.
+  // Keyed on the document object: page surgery replaces the whole proxy, and an outline read before the rewrite points at pages that have since moved.
   useEffect(() => {
     if (!pdfDoc) {
       setOutline(EMPTY_OUTLINE);
@@ -578,13 +578,11 @@ export function useDocumentModel({
     };
   }, [finishAnnotationEditEvent]);
 
-  // The page-residency claim is released here, so an unmounting viewport
-  // cannot forget to give back its hold.
+  // The page-residency claim is released here, so an unmounting viewport cannot forget to give back its hold.
   const attachView = useCallback(
     (bridge: RefObject<PdfDocumentEditorViewBridge>) => {
       viewsRef.current.add(bridge);
-      // A view may attach to a document that is already open, and has then
-      // missed the once-only announcement that a page's annotations are in.
+      // A view may attach to a document that is already open, and has then missed the once-only announcement that a page's annotations are in.
       for (const pageIndex of importedAnnotationPagesRef.current) {
         bridge.current.markInitialAnnotationsReady(
           pageIndex,
@@ -631,8 +629,7 @@ export function useDocumentModel({
     );
   }
 
-  // Document work that waits for a viewport's first paint runs once however
-  // many views are attached, so it follows the primary one.
+  // Document work that waits for a viewport's first paint runs once however many views are attached, so it follows the primary one.
   function afterPrimaryViewReady(callback: () => void) {
     const attached = primaryView();
     if (!attached) {
@@ -827,14 +824,12 @@ export function useDocumentModel({
   }
 
   async function undoHistory() {
-    // Must lock from this synchronous entry point: a save started between this
-    // check and the first await could write pre-undo bytes to disk.
+    // Must lock from this synchronous entry point: a save started between this check and the first await could write pre-undo bytes to disk.
     if (!beginBusyOperation()) {
       return;
     }
 
-    // Set once restoreDocumentHistory is invoked: from there on it owns the
-    // busy flag's lifecycle, so this function must not also clear it.
+    // Set once restoreDocumentHistory is invoked: from there on it owns the busy flag's lifecycle, so this function must not also clear it.
     let handedOffBusyState = false;
     try {
       finishAnnotationEdit();
@@ -865,8 +860,7 @@ export function useDocumentModel({
         }
 
         popUndoEntry(entry);
-        // Restated here, not inside the restore: renaming an entry replaces it,
-        // and popUndoEntry finds its entry by identity.
+        // Restated here, not inside the restore: renaming an entry replaces it, and popUndoEntry finds its entry by identity.
         renameStacksAcrossRestore(renames);
         updateRedoStack((stack) => [...stack, redoEntry]);
         lastUndoCommitTimeRef.current = 0;
@@ -1002,8 +996,7 @@ export function useDocumentModel({
     updateRedoStack([]);
   }
 
-  // Sole place that writes `annotations` state; annotationsRef is updated
-  // synchronously inside the updater so every write site gets a live ref.
+  // Sole place that writes `annotations` state; annotationsRef is updated synchronously inside the updater so every write site gets a live ref.
   function setAnnotationsState(
     update: PdfAnnotation[] | ((current: PdfAnnotation[]) => PdfAnnotation[]),
   ) {
@@ -1209,6 +1202,7 @@ export function useDocumentModel({
   function startPdfLoading(bytes: Uint8Array, generation: number) {
     passwordProtectedLoadRef.current = false;
     setPasswordRequest(null);
+    // .slice() copies on purpose: pdf.js can detach the caller's buffer otherwise.
     const loadingTask = getDocument({
       ...PDFJS_DOCUMENT_OPTIONS,
       data: bytes.slice(),
@@ -1236,8 +1230,7 @@ export function useDocumentModel({
     return loadingTask;
   }
 
-  // An empty string is ignored rather than sent, so a blank submit does not
-  // burn one of PDF.js's attempts.
+  // An empty string is ignored rather than sent, so a blank submit does not burn one of PDF.js's attempts.
 
   function handlePasswordUnlock(password: string) {
     const request = passwordRequest;
@@ -1298,6 +1291,8 @@ export function useDocumentModel({
       !pdfBytes ||
       pages.length === 0 ||
       !printTarget ||
+      // The UI hides the print action for a password-protected file, but a stale readOnlyReason or a caller that skips the UI must not still hand its decrypted content to a printer.
+      !canCreateOutputCopy(readOnlyReason) ||
       !beginBusyOperation()
     ) {
       return;
@@ -1454,8 +1449,7 @@ export function useDocumentModel({
         return;
       }
 
-      // The file is refused here or not at all; a restored tab was weighed when
-      // it was opened.
+      // The file is refused here or not at all; a restored tab was weighed when it was opened.
       if (!restoredSession) {
         const annotationCharacters = await annotationTextCharacters(
           loadedPdf,
@@ -1474,8 +1468,7 @@ export function useDocumentModel({
         }
       }
 
-      // Gates only the banner and the editing toggle, so it need not block
-      // page 1.
+      // Gates only the banner and the editing toggle, so it need not block page 1.
       const activePage = Math.min(
         options.activePage ?? 0,
         loadedPdf.numPages - 1,
@@ -1534,8 +1527,7 @@ export function useDocumentModel({
           normalizeAnnotationLayout,
         );
         eachView((attached) => attached.setScale(restoredSession.view.scale));
-        // After the reset above, not before: a restored tab must not flash
-        // back to the defaults resetPdfState just announced.
+        // After the reset above, not before: a restored tab must not flash back to the defaults resetPdfState just announced.
         onSessionRestore?.();
         cleanSignatureRefreshEnabledRef.current =
           restoredSession.cleanSignatureRefreshEnabled ?? true;
@@ -1625,8 +1617,7 @@ export function useDocumentModel({
     nextPages: LoadedPage[];
   };
 
-  // Commits nothing: the two callers differ in which state they set and in what
-  // order, and that ordering is load-bearing.
+  // Commits nothing: the two callers differ in which state they set and in what order, and that ordering is load-bearing.
   async function openReloadedDocument(
     bytes: Uint8Array,
     generation: number,
@@ -1691,8 +1682,7 @@ export function useDocumentModel({
     };
   }
 
-  // The reload claims the generation before it can fail, so both outcomes it
-  // owns report one; `superseded` carries none.
+  // The reload claims the generation before it can fail, so both outcomes it owns report one; `superseded` carries none.
   type StructureReloadOutcome =
     | { generation: number; state: "committed" }
     | { generation: number; state: "failed" }
@@ -1732,8 +1722,7 @@ export function useDocumentModel({
         loadedPdf,
         nextPages,
       } = opened;
-      // Held so this function's own catch can destroy it if the commit below
-      // throws; openReloadedDocument cleans up its own failures.
+      // Held so this function's own catch can destroy it if the commit below throws; openReloadedDocument cleans up its own failures.
       pendingPdf = loadedPdf;
       pdfFingerprintRef.current = nextPdfFingerprint;
       cleanPdfBytesRef.current = null;
@@ -1795,15 +1784,13 @@ export function useDocumentModel({
     }
   }
 
-  // Covers everything but the history stacks, whose entries describe the page
-  // order before this edit.
+  // Covers everything but the history stacks, whose entries describe the page order before this edit.
   function restateIdentitiesAcrossPageEdit(
     change: PdfPageOrderChange,
     renames: PdfAnnotationRenames,
   ) {
     const mapping = pageMappingFor(change);
-    // Read off the baseline before it is restated: an indirect reference
-    // carries no page of its own.
+    // Read off the baseline before it is restated: an indirect reference carries no page of its own.
     const removedSourcePages = pageIndexesBySourceKey(
       cleanAnnotationsRef.current,
     );
@@ -1868,8 +1855,7 @@ export function useDocumentModel({
     };
   }
 
-  // Not restoreDocumentHistory, which applies the entry's operation to bytes it
-  // assumes were already committed.
+  // Not restoreDocumentHistory, which applies the entry's operation to bytes it assumes were already committed.
   function rollbackAncillaryStateOnly(snapshot: DocumentEditorAncillaryState) {
     cleanSignatureRefreshEnabledRef.current =
       snapshot.cleanSignatureRefreshEnabled ?? true;
@@ -1893,8 +1879,7 @@ export function useDocumentModel({
     clearViewSelections();
   }
 
-  // After a save since the snapshot: the pages this restore keeps are the
-  // written file's, while the pages it brings back keep the snapshot's record.
+  // After a save since the snapshot: the pages this restore keeps are the written file's, while the pages it brings back keep the snapshot's record.
   function cleanBaselineAcrossRestore(
     snapshot: PdfDocumentEditorHistorySnapshot,
     currentCleanAnnotations: PdfAnnotation[],
@@ -1910,8 +1895,7 @@ export function useDocumentModel({
     ];
   }
 
-  // `viewSnapshot`'s zoom is deliberately not applied: undoing a page deletion
-  // is not a request to re-zoom the document.
+  // `viewSnapshot`'s zoom is deliberately not applied: undoing a page deletion is not a request to re-zoom the document.
   async function restoreDocumentHistory(
     snapshot: PdfDocumentEditorHistorySnapshot,
     viewSnapshot: PdfDocumentEditorViewSnapshot,
@@ -1943,8 +1927,7 @@ export function useDocumentModel({
     setCurrentBusy(true);
 
     try {
-      // Both halves: the page half the snapshot's identities already describe,
-      // and this object report, because a copy re-creates every dictionary.
+      // Both halves: the page half the snapshot's identities already describe, and this object report, because a copy re-creates every dictionary.
       const {
         bytes: restoredBytes,
         descriptionsUnproven,
@@ -1976,8 +1959,7 @@ export function useDocumentModel({
         UNCHANGED_PAGE_ORDER,
         renames,
       ).map(normalizeAnnotationLayout);
-      // The clean baseline has to describe the file this restore lands on, and
-      // a save since the snapshot describes one that no longer exists.
+      // The clean baseline has to describe the file this restore lands on, and a save since the snapshot describes one that no longer exists.
       const cleanBaselineIsStale =
         (cleanPdfBytesRef.current ?? null) !== (snapshot.cleanPdfBytes ?? null);
       const restoredCleanAnnotations = remapAnnotationsAcrossPageEdit(
@@ -1988,8 +1970,7 @@ export function useDocumentModel({
         renames,
       ).map(normalizeAnnotationLayout);
 
-      // A removal replayed against a re-created object deletes nothing and
-      // stops the save.
+      // A removal replayed against a re-created object deletes nothing and stops the save.
       removedAnnotationSourceIdsRef.current = new Set(
         remapRemovedSourcesAcrossPageEdit(
           removedAnnotationSourceIdsRef.current,
@@ -2208,8 +2189,7 @@ export function useDocumentModel({
       return;
     }
 
-    // Reading a page this session already manages mints a second annotation for
-    // every dictionary on it, and both then resolve to one on save.
+    // Reading a page this session already manages mints a second annotation for every dictionary on it, and both then resolve to one on save.
     const pagesToImport = loadedPages.filter(
       ({ pageIndex }) =>
         !importedAnnotationPagesRef.current.has(pageIndex) &&
@@ -2239,8 +2219,7 @@ export function useDocumentModel({
     );
   }
 
-  // They join the clean set as well as the working one: an annotation already
-  // in the file is not an edit.
+  // They join the clean set as well as the working one: an annotation already in the file is not an edit.
   function commitImportedAnnotations(
     importedAnnotations: PdfAnnotation[],
     malformedCount: number,
@@ -2290,8 +2269,7 @@ export function useDocumentModel({
     commitImportedAnnotations(importedAnnotations, malformedCount);
   }
 
-  // A page fetched here never enters `pages`, so no canvas is made for it and
-  // the LRU never sees it.
+  // A page fetched here never enters `pages`, so no canvas is made for it and the LRU never sees it.
   const ANNOTATION_SCAN_CHUNK = 8;
 
   async function scanDocumentAnnotations() {
@@ -2299,8 +2277,7 @@ export function useDocumentModel({
     const bytes = pdfBytesRef.current;
     const generation = loadGenerationRef.current;
     if (structureReloadInProgressRef.current) {
-      // Mid-reload, reading now would import old page indexes and mark those
-      // pages done, so the reload's own import would skip them.
+      // Mid-reload, reading now would import old page indexes and mark those pages done, so the reload's own import would skip them.
       return;
     }
 
@@ -2451,8 +2428,7 @@ export function useDocumentModel({
     }
   }
 
-  // `pageOrderChange` and `renames` are required, so leaving the restatement
-  // out is not a thing this shape can express.
+  // `pageOrderChange` and `renames` are required, so leaving the restatement out is not a thing this shape can express.
   type StructuralEditPlan = {
     activePage: number;
     bytes: Uint8Array;
@@ -2467,8 +2443,7 @@ export function useDocumentModel({
     beforeReplace?: () => void;
   };
 
-  // A superseded operation must neither apply its result nor roll back another
-  // document's ancillary state.
+  // A superseded operation must neither apply its result nor roll back another document's ancillary state.
   type StructuralEditContext = {
     /** The bytes this edit started from, captured before the busy flag. */
     bytes: Uint8Array;
@@ -2488,8 +2463,7 @@ export function useDocumentModel({
 
     finishAnnotationEdit();
     const ancillaryBefore = captureAncillaryState();
-    // The generation this edit owns: its own reload claims the next one, and
-    // this takes that claim over when the reload reports it.
+    // The generation this edit owns: its own reload claims the next one, and this takes that claim over when the reload reports it.
     let generation = loadGenerationRef.current;
     const superseded = () => generation !== loadGenerationRef.current;
     try {
@@ -2528,6 +2502,29 @@ export function useDocumentModel({
     }
   }
 
+  // A merge source never goes through readPdfFile or the main load path's own annotation-text budget check, so without this a file merged in bypasses both safety limits a file opened directly is held to.
+  async function mergeSourceAnnotationCharacters(bytes: Uint8Array) {
+    try {
+      // .slice() copies on purpose: pdf.js can detach the caller's buffer otherwise.
+      const loadingTask = getDocument({
+        ...PDFJS_DOCUMENT_OPTIONS,
+        data: bytes.slice(),
+      });
+      const mergeDoc = await loadingTask.promise;
+      try {
+        return await annotationTextCharacters(
+          mergeDoc,
+          MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS,
+        );
+      } finally {
+        await destroyPdfDocument(mergeDoc);
+      }
+    } catch {
+      // Unparsable as a merge source anyway - mergePdfAfterPage below will fail on it with its own message; this check just has nothing to add.
+      return 0;
+    }
+  }
+
   async function handleMergePdf() {
     await runStructuralEdit({
       allowed: Boolean(mergePdfVisible && pickMergePdfFile && pages.length > 0),
@@ -2537,6 +2534,24 @@ export function useDocumentModel({
         const mergeFile = await pickMergePdfFile?.();
         if (!mergeFile || superseded()) {
           return null;
+        }
+
+        if (mergeFile.bytes.byteLength > MAX_PDF_FILE_BYTES) {
+          throw new Error(
+            `The file you're merging in is ${formatBytes(mergeFile.bytes.byteLength)}. The current safety limit is ${formatBytes(MAX_PDF_FILE_BYTES)}.`,
+          );
+        }
+
+        const mergeCharacters = await mergeSourceAnnotationCharacters(
+          mergeFile.bytes,
+        );
+        if (superseded()) {
+          return null;
+        }
+        if (mergeCharacters > MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS) {
+          throw new Error(
+            `The file you're merging in holds more than ${MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS / 1_000_000} million characters of notes and comments, which is the current safety limit. It has not been merged in.`,
+          );
         }
 
         const {
@@ -2552,6 +2567,7 @@ export function useDocumentModel({
             type: "removePages",
             startIndex: insertAt,
             count: insertedPageCount,
+            mergedSourceByteLength: mergeFile.bytes.byteLength,
           }),
           pageOrderChange: {
             atIndex: insertAt,
@@ -2578,8 +2594,7 @@ export function useDocumentModel({
         const undoEntry = documentHistoryEntry({
           type: "insertPages",
           atIndex: pageIndex,
-          // The undo of a delete cannot relink, so the names travel with the
-          // entry; without them the annotations come back unnamed.
+          // The undo of a delete cannot relink, so the names travel with the entry; without them the annotations come back unnamed.
           copiedNames: extractedPage.copiedNames,
           pageCount: extractedPage.pageCount,
           pagesBytes: extractedPage.bytes,
@@ -2709,12 +2724,20 @@ export function useDocumentModel({
     });
   }
 
-  // The saved bytes become the baseline without being re-imported, so nothing
-  // else would restate the identities this session holds.
+  // Lets a host mirroring fileKeyRef/saveTargetRef on the source (see PdfDocumentEditorSource) keep up with the mounted core changing them, instead of only learning about it once the tab is parked.
+  function reportSaveTargetChange() {
+    onSaveTargetChange?.({
+      fileKey: fileKeyRef.current,
+      saveTarget: saveTargetRef.current,
+    });
+  }
+
+  // The saved bytes become the baseline without being re-imported, so nothing else would restate the identities this session holds. `writtenAnnotations` must be the snapshot that was actually serialised into `cleanPdfBytes` (PdfOutput.annotations), never a fresh live read: an edit committed during the save's own awaits is not yet in `cleanPdfBytes` and must stay dirty.
   function markCurrentWorkClean(
     cleanPdfBytes: Uint8Array,
     // Required, with no default: the omission this argument exists to prevent.
     writtenSources: WrittenAnnotationSources | null,
+    writtenAnnotations: PdfAnnotation[],
   ) {
     if (writtenSources && writtenSources.size > 0) {
       applyWrittenAnnotationSources(writtenSources);
@@ -2724,9 +2747,15 @@ export function useDocumentModel({
     pdfFingerprintRef.current = nextPdfFingerprint;
     cleanPdfBytesRef.current = cleanPdfBytes;
     cleanSignatureRefreshEnabledRef.current = true;
-    cleanAnnotationsRef.current = currentPersistedAnnotations().map(
-      normalizeAnnotationLayout,
-    );
+    cleanAnnotationsRef.current = (
+      writtenSources && writtenSources.size > 0
+        ? remapAnnotationSources(
+            writtenAnnotations,
+            writtenSources,
+            UNCHANGED_PAGE_ORDER,
+          )
+        : writtenAnnotations
+    ).map(normalizeAnnotationLayout);
     const nextCleanSignature = createWorkSignature(
       nextPdfFingerprint,
       cleanAnnotationsRef.current,
@@ -2736,8 +2765,7 @@ export function useDocumentModel({
     setCurrentCleanWorkSignature(nextCleanSignature);
   }
 
-  // Both history stacks included, or an undo past a save brings the pre-save
-  // positions back.
+  // Both history stacks included, or an undo past a save brings the pre-save positions back.
   function applyWrittenAnnotationSources(sources: WrittenAnnotationSources) {
     const nextAnnotations = remapAnnotationSources(
       annotationsRef.current,
@@ -2774,12 +2802,16 @@ export function useDocumentModel({
   }
 
   async function handleSave() {
-    if (!pdfBytes || !beginBusyOperation()) {
+    if (
+      !pdfBytes ||
+      // The UI hides Save for a password-protected file, but a stale readOnlyReason or a caller that skips the UI must not still write its decrypted content out under the writer's own authority.
+      !canCreateOutputCopy(readOnlyReason) ||
+      !beginBusyOperation()
+    ) {
       return false;
     }
 
-    // Captured before the awaits below so a document swap mid-save is detected
-    // instead of stamping this save's result onto whatever is then current.
+    // Captured before the awaits below so a document swap mid-save is detected instead of stamping this save's result onto whatever is then current.
     const generation = loadGenerationRef.current;
 
     try {
@@ -2792,7 +2824,12 @@ export function useDocumentModel({
           const saveResult = await saveTarget(savedBytes);
           if (generation === loadGenerationRef.current) {
             fileKeyRef.current = saveResult?.fileKey ?? fileKeyRef.current;
-            markCurrentWorkClean(savedBytes, output.sources);
+            markCurrentWorkClean(
+              savedBytes,
+              output.sources,
+              output.annotations,
+            );
+            reportSaveTargetChange();
           }
           return true;
         } catch (error) {
@@ -2857,7 +2894,11 @@ export function useDocumentModel({
   async function saveThroughHostWriter(
     write: (bytes: Uint8Array) => Promise<PdfSaveWithResult | void>,
   ) {
-    if (!pdfBytes || !beginBusyOperation()) {
+    if (
+      !pdfBytes ||
+      !canCreateOutputCopy(readOnlyReason) ||
+      !beginBusyOperation()
+    ) {
       return false;
     }
 
@@ -2870,7 +2911,8 @@ export function useDocumentModel({
         if (result?.saveTarget !== undefined) {
           saveTargetRef.current = result.saveTarget;
         }
-        markCurrentWorkClean(output.bytes, output.sources);
+        markCurrentWorkClean(output.bytes, output.sources, output.annotations);
+        reportSaveTargetChange();
       }
       return true;
     } finally {
@@ -2879,7 +2921,11 @@ export function useDocumentModel({
   }
 
   async function saveAsDocument(suggestedName = fileName) {
-    if (!pdfBytes || !beginBusyOperation()) {
+    if (
+      !pdfBytes ||
+      !canCreateOutputCopy(readOnlyReason) ||
+      !beginBusyOperation()
+    ) {
       return false;
     }
 
@@ -2903,8 +2949,7 @@ export function useDocumentModel({
     }
   }
 
-  // Not shorthand for savePdfAs(currentPdfOutput, ...): those bytes are made
-  // lazily, so the annotation check runs before the user picks a destination.
+  // Not shorthand for savePdfAs(currentPdfOutput, ...): those bytes are made lazily, so the annotation check runs before the user picks a destination.
   async function saveCurrentPdfAs(suggestedName = fileName) {
     validateCurrentPdfOutput();
     return savePdfAs(currentPdfOutput, suggestedName);
@@ -2944,19 +2989,27 @@ export function useDocumentModel({
     }
     // A host that hands back other bytes gets no report applied to them.
     const producedOutput = produced.output;
+    const producedMatches = Boolean(
+      producedOutput && producedOutput.bytes === result.bytes,
+    );
     markCurrentWorkClean(
       result.bytes,
-      producedOutput && producedOutput.bytes === result.bytes
-        ? producedOutput.sources
-        : null,
+      producedMatches ? (producedOutput?.sources ?? null) : null,
+      producedMatches
+        ? (producedOutput?.annotations ?? currentPersistedAnnotations())
+        : currentPersistedAnnotations(),
     );
+    reportSaveTargetChange();
     return "saved" as const;
   }
 
-  // A copy is not a save and must not fail like one: a refused download is
-  // retried with the unidentifiable annotations left out, and the reader told.
+  // A copy is not a save and must not fail like one: a refused download is retried with the unidentifiable annotations left out, and the reader told.
   async function handleDownload() {
-    if (!pdfBytes || !beginBusyOperation()) {
+    if (
+      !pdfBytes ||
+      !canCreateOutputCopy(readOnlyReason) ||
+      !beginBusyOperation()
+    ) {
       return;
     }
 
@@ -3002,8 +3055,7 @@ export function useDocumentModel({
         annotationsToWrite,
         { replaceAnnotationSourceIds, replacePageIndexes },
       );
-      // What the reader would recognise as theirs, once each: adding the two
-      // sets counted an edited annotation whose identity is lost twice.
+      // What the reader would recognise as theirs, once each: adding the two sets counted an edited annotation whose identity is lost twice.
       const omittedCount = unwritable.omittedAnnotationCount;
       if (omittedCount === 0) {
         // Not one annotation's identity, so there is no smaller copy to offer.
@@ -3042,7 +3094,11 @@ export function useDocumentModel({
       return annotatedPdfOutput(outputAnnotations);
     }
 
-    return { bytes: cleanPdfBytesRef.current ?? pdfBytes, sources: null };
+    return {
+      bytes: cleanPdfBytesRef.current ?? pdfBytes,
+      sources: null,
+      annotations: outputAnnotations.annotationsForOutput,
+    };
   }
 
   async function currentPdfOutputBytes() {
@@ -3116,14 +3172,26 @@ export function useDocumentModel({
       annotationsToWrite.length === 0 &&
       replaceAnnotationSourceIds.size === 0
     ) {
-      return { bytes: pdfBytes, sources: null };
+      return {
+        bytes: pdfBytes,
+        sources: null,
+        annotations: annotationsForOutput,
+      };
     }
 
-    return writeAnnotatedPdf(pdfBytes, annotationsToWrite, {
+    const written = await writeAnnotatedPdf(pdfBytes, annotationsToWrite, {
       replaceAnnotationSourceIds,
       replacePageIndexes,
       onMalformedExistingAnnotations: reportMalformedAnnotations,
+      // Same posture as the copy path's own omission notice above: saved rather than aborted, but counted and said out loud rather than left for the reader to notice was missing.
+      onUnwritablePageIndex: (count) => {
+        showNotice(
+          `${count} annotation${count === 1 ? "" : "s"} could not be saved because ${count === 1 ? "it refers" : "they refer"} to a page this file no longer has. Everything else was saved.`,
+          { tone: "danger" },
+        );
+      },
     });
+    return { ...written, annotations: annotationsForOutput };
   }
 
   async function printablePdfBytes() {
@@ -3143,9 +3211,9 @@ export function useDocumentModel({
     }
 
     saveTargetRef.current = null;
-    // This tab now holds an in-memory copy, no longer tied to a file on disk,
-    // so the already-open-tab dedup must stop treating it as that file.
+    // This tab now holds an in-memory copy, no longer tied to a file on disk, so the already-open-tab dedup must stop treating it as that file.
     fileKeyRef.current = null;
+    reportSaveTargetChange();
     setEditingEnabled(true);
     setFileName((current) => copyName(current));
     onToolChange?.("select");
@@ -3187,8 +3255,7 @@ export function useDocumentModel({
     saveAsAvailable,
     saveAvailable,
 
-    // Refs rather than values because a pointer gesture reads them between
-    // renders.
+    // Refs rather than values because a pointer gesture reads them between renders.
     annotationsRef,
     busyRef,
     liveAnnotationEditRef,

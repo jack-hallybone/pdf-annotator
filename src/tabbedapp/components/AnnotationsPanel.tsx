@@ -12,10 +12,7 @@ import type {
   AnnotationListRow,
 } from "../annotationList";
 
-/**
- * The open row follows the viewport selection but never drives it: a selection
- * would raise the core's editing popover under this very panel.
- */
+/** The open row follows the viewport selection but never drives it: a selection would raise the core's editing popover under this very panel. */
 export function AnnotationsPanel({
   complete,
   filter,
@@ -105,7 +102,7 @@ export function AnnotationsPanel({
           {rows.length > 0
             ? "No annotations match the current filter."
             : complete
-              ? "No annotations in this document yet."
+              ? "No annotations"
               : "Reading the rest of the document\u2026"}
         </p>
       ) : (
@@ -216,10 +213,7 @@ function AnnotationRow({
   );
 }
 
-/**
- * Uncontrolled while focused, so a keystroke is not a round trip through the
- * core's annotation state; committed on blur and on every pause.
- */
+/** Uncontrolled while focused, so a keystroke is not a round trip through the core's annotation state; committed on blur and on every pause. */
 function CommentEditor({
   annotation,
   comment,

@@ -1,5 +1,4 @@
-// Built here rather than found here: `npm run verify` runs the browser suites
-// before the build, and a directory found on disk can be older than the source.
+// Built here rather than found here: a directory found on disk can be older than the source.
 import http from "node:http";
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -7,6 +6,8 @@ import { extname, join, resolve, sep } from "node:path";
 
 const ROOT = resolve(import.meta.dirname, "..");
 export const SITE = join(ROOT, "dist");
+// deploy.yml builds for the Pages sub-path in BASE_PATH, as vite.config.ts reads it, so this serves and opens the site under it too. Stripped of any trailing slash: vite.config.ts's own normalizeBasePath() tolerates one or none on the way in, and the `${BASE}/`s below need exactly one slash, not two, to match the single-slash paths a browser actually requests.
+const BASE = (process.env.BASE_PATH ?? "").replace(/\/+$/u, "");
 
 const TYPES = {
   ".css": "text/css",
@@ -22,18 +23,9 @@ const TYPES = {
   ".webmanifest": "application/manifest+json",
 };
 
-// The returned server's `kill()` refuses every request at the socket, which is
-// what a dead network looks like to a service worker.
+// The returned server's `kill()` refuses every request at the socket, which is what a dead network looks like to a service worker.
 export async function serveBuiltSite(expect = "index.html") {
-  // Root-served, always: this server maps every request path 1:1 onto dist/,
-  // with no notion of a base path. CI now sets BASE_PATH/VITE_SITE_URL on the
-  // same step that runs this build, for the OUTER build that ships - inheriting
-  // them here bakes a subpath into every asset URL this server can't answer to,
-  // so every one 404s and the app never mounts.
-  const env = { ...process.env };
-  delete env.BASE_PATH;
-  delete env.VITE_SITE_URL;
-  execFileSync("npm", ["run", "build"], { cwd: ROOT, env, stdio: "ignore" });
+  execFileSync("npm", ["run", "build"], { cwd: ROOT, stdio: "ignore" });
   if (!existsSync(join(SITE, expect))) {
     throw new Error(`the build produced no dist/${expect}`);
   }
@@ -44,7 +36,8 @@ export async function serveBuiltSite(expect = "index.html") {
       request.socket.destroy();
       return;
     }
-    const path = decodeURIComponent((request.url ?? "/").split(/[?#]/u, 1)[0]);
+    const raw = decodeURIComponent((request.url ?? "/").split(/[?#]/u, 1)[0]);
+    const path = raw.startsWith(`${BASE}/`) ? raw.slice(BASE.length) : raw;
     const file = resolve(
       SITE,
       path === "/" ? "index.html" : path.replace(/^\/+/u, ""),
@@ -64,7 +57,7 @@ export async function serveBuiltSite(expect = "index.html") {
     response.end(readFileSync(file));
   });
   await new Promise((listening) => site.listen(0, "127.0.0.1", listening));
-  site.url = `http://127.0.0.1:${site.address().port}/`;
+  site.url = `http://127.0.0.1:${site.address().port}${BASE}/`;
   site.kill = (value) => {
     dead = value;
   };

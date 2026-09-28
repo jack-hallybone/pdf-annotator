@@ -4,8 +4,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { loadPdfOutline } from "../src/pdfdocumenteditor/pdfOutline";
 import type { PdfOutlineEntry } from "../src/pdfdocumenteditor/pdfOutline";
 
-// An outline is document-controlled data that gets rendered, and nothing in
-// pdf.js bounds its depth, its size, its titles or the characters in them.
+// An outline is document-controlled data that gets rendered, and nothing in pdf.js bounds its depth, its size, its titles or the characters in them.
 function fakeDoc(outline: unknown): PDFDocumentProxy {
   return { getOutline: async () => outline } as unknown as PDFDocumentProxy;
 }
@@ -20,8 +19,7 @@ function countEntries(entries: PdfOutlineEntry[]): number {
 const CONTROL = String.fromCharCode(7);
 const RTL_OVERRIDE = "‮";
 
-// An outline nested a few thousand deep: both the sanitiser and the renderer
-// walk it recursively, so it is a blown stack from a file.
+// An outline nested a few thousand deep: both the sanitiser and the renderer walk it recursively, so it is a blown stack from a file.
 test("a deeply nested outline is cut off at a fixed depth", async () => {
   let deepest: unknown = [{ title: "leaf", dest: "d", items: [] }];
   for (let level = 0; level < 400; level += 1) {

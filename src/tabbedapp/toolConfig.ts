@@ -40,8 +40,7 @@ export type ToolDefinition = {
 
 export const tools: ToolDefinition[] = [
   { key: "select", tool: "select", label: "Select", icon: MousePointer2 },
-  // Labelled by position, not colour, and the position is a UI affordance only
-  // that must not reach annotation data.
+  // Labelled by position, not colour, and the position is a UI affordance only that must not reach annotation data.
   {
     key: "pen-1",
     tool: "draw",
@@ -95,12 +94,7 @@ export function createDefaultToolPresets(): ToolPresetMap {
   }, {});
 }
 
-// A tool's icon is a thin stroke on --theme-surface, not a wash over paper -
-// a pale reader-chosen colour can fail contrast here even though the same
-// colour reads fine painted translucent on a page. Only the icon is
-// darkened; the colour a reader picks is never touched. Highlight and
-// stickyNote sidestep this instead (see toolFillColor): their icons carry
-// the true colour as a small fill, not as the whole icon's stroke.
+// A tool's icon is a thin stroke on --theme-surface, not a wash over paper - a pale reader-chosen colour can fail contrast here even though the same colour reads fine painted translucent on a page. Only the icon is darkened; the colour a reader picks is never touched. Highlight and stickyNote sidestep this instead (see toolFillColor): their icons carry the true colour as a small fill, not as the whole icon's stroke.
 const ICON_CONTRAST_FLOOR = 3;
 const WHITE_SURFACE: RgbColor = [1, 1, 1];
 
@@ -111,14 +105,9 @@ function iconAccent(color: RgbColor) {
     : `light-dark(${rgbToHex(safe)}, ${rgbToHex(color)})`;
 }
 
-// Highlight/stickyNote go the other way: their stroke stays plain ink, like
-// every other tool, so it's the fill (the one colour a reader chooses) that
-// bends for contrast - against --theme-ink's own two values, since that's
-// what it now has to sit next to. Ink is dark in light mode (already
-// plenty of contrast against any fill) and light in dark mode, where the
-// default yellow fill measures only ~1.15:1 against it.
-const THEME_INK_LIGHT: RgbColor = [0x23 / 255, 0x1d / 255, 0x22 / 255];
-const THEME_INK_DARK: RgbColor = [0xed / 255, 0xe5 / 255, 0xeb / 255];
+// Highlight/stickyNote go the other way: their stroke stays plain ink, like every other tool, so it's the fill (the one colour a reader chooses) that bends for contrast - against --theme-ink's own two values, since that's what it now has to sit next to. Ink is dark in light mode (already plenty of contrast against any fill) and light in dark mode, where the default yellow fill measures only ~1.15:1 against it.
+const THEME_INK_LIGHT: RgbColor = [0x1c / 255, 0x19 / 255, 0x17 / 255];
+const THEME_INK_DARK: RgbColor = [0xe9 / 255, 0xe7 / 255, 0xe2 / 255];
 
 function fillAccent(color: RgbColor) {
   const safeForLight = ensureContrastAgainst(
@@ -158,12 +147,7 @@ export function toolAccent(
   }
 }
 
-// The colour for the one fillable region of an icon that has one (the
-// highlighter's mark, the note's body) - undefined for every other tool,
-// which has no such region and stays plain ink. Bent for contrast against
-// the icon's own ink stroke (see fillAccent) rather than left as the true
-// reader-chosen colour: unlike a mark painted on a page, there's no page
-// colour here to look wrong against, and the icon has to stay legible.
+// The colour for the one fillable region of an icon that has one (the highlighter's mark, the note's body) - undefined for every other tool, which has no such region and stays plain ink. Bent for contrast against the icon's own ink stroke (see fillAccent) rather than left as the true reader-chosen colour: unlike a mark painted on a page, there's no page colour here to look wrong against, and the icon has to stay legible.
 export function toolFillColor(tool: Tool, settings: ToolSettings) {
   switch (tool) {
     case "highlight":
@@ -179,10 +163,7 @@ export function toolFillColor(tool: Tool, settings: ToolSettings) {
 
 const PAPER_WHITE: RgbColor = [1, 1, 1];
 
-// A highlight always lands on a white page, so its toolbar preview is
-// flattened against paper rather than CSS opacity over the button's own
-// (theme-dependent) background - otherwise the same colour and opacity
-// read as a different shade in dark mode than the highlight it previews.
+// A highlight always lands on a white page, so its toolbar preview is flattened against paper rather than CSS opacity over the button's own (theme-dependent) background - otherwise the same colour and opacity read as a different shade in dark mode than the highlight it previews.
 export function highlightIndicatorColor(settings: ToolSettings) {
   return rgbToHex(
     flattenOver(

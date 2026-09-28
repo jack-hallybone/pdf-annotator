@@ -4,9 +4,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument, PDFName, PDFString, rgb } from "pdf-lib";
 
-// The annotation copied here comes from the file, so a copy that kept its source
-// identity would be two in-memory annotations naming one dictionary, and a
-// saved-and-reopened count is what tells a real copy from a second reference.
+// The annotation copied here comes from the file, so a copy that kept its source identity would be two in-memory annotations naming one dictionary, and a saved-and-reopened count is what tells a real copy from a second reference.
 
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 const TAB = ".tabbedapp-document-tab";
@@ -80,8 +78,7 @@ async function showAnnotations(page: Page) {
   await expect(page.getByRole("list", { name: "Annotations" })).toBeVisible();
 }
 
-// Clicked rather than reached through a test-only hook: the copy listener only
-// answers for the viewport that owns the gesture.
+// Clicked rather than reached through a test-only hook: the copy listener only answers for the viewport that owns the gesture.
 async function copySelectedHighlight(page: Page) {
   const box = await page
     .locator(".pdfdocumenteditor-page")

@@ -142,11 +142,7 @@ export async function pickLocalImageFile() {
   }
 }
 
-/**
- * Everything a drop carries, taken off the drag data store synchronously: it
- * answers only while the drop event is being dispatched, so one `await` is
- * enough to leave `items`, `files` and every unasked handle empty.
- */
+/** Everything a drop carries, taken off the drag data store synchronously: it answers only while the drop event is being dispatched, so one `await` is enough to leave `items`, `files` and every unasked handle empty. */
 type DroppedFiles = {
   files: File[];
   handleRequests: Array<Promise<LocalPdfFileHandle | null>>;
@@ -321,8 +317,7 @@ async function verifySavedPdfBytes(
   }
 }
 
-// Called for every dropped item in one synchronous pass; only the awaiting is
-// deferred.
+// Called for every dropped item in one synchronous pass; only the awaiting is deferred.
 function requestFileSystemHandle(item: DataTransferItem) {
   const getHandle = (item as DataTransferItemWithFileSystemHandle)
     .getAsFileSystemHandle;
@@ -392,8 +387,7 @@ function isPdfFileHandle(handle: unknown): handle is LocalPdfFileHandle {
   );
 }
 
-// The revoke is deferred a tick because Chrome cancels an in-flight
-// navigation if the object URL dies in the same task.
+// The revoke is deferred a tick because Chrome cancels an in-flight navigation if the object URL dies in the same task.
 export function downloadPdfBytes(bytes: Uint8Array, outputName: string) {
   const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
     type: "application/pdf",

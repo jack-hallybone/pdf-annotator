@@ -1,4 +1,5 @@
-const MAX_PDF_FILE_BYTES = 128 * 1024 * 1024;
+// Exported so a merge - which never goes through readPdfFile itself, since its bytes may already be in memory - can hold its own source to the same limit rather than skipping it.
+export const MAX_PDF_FILE_BYTES = 128 * 1024 * 1024;
 const PDF_HEADER_SCAN_BYTES = 1024;
 
 export async function readPdfFile(file: File) {
@@ -55,7 +56,7 @@ function hasPdfHeader(bytes: Uint8Array) {
   return false;
 }
 
-function formatBytes(bytes: number) {
+export function formatBytes(bytes: number) {
   // Binary units, because the divisor below is 1024.
   const units = ["B", "KiB", "MiB", "GiB"];
   let value = bytes;

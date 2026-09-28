@@ -4,13 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Split-view harness</title>
-    <!--
-      A TEST HOST, not a feature. The product renders one view; this page is
-      the second host the core claims to support, and it exists so
-      split-view.spec.ts can drive two viewports over one document in a real
-      browser. It is served by the dev server only - vite's build input is
-      index.html, so nothing here ships.
-    -->
+    <!-- A TEST HOST, not a feature: the second host the core claims to support, letting split-view.spec.ts drive two viewports over one document in a real browser; served by the dev server only, so nothing here ships. -->
     <style>
       html,
       body,

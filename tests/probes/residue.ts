@@ -7,10 +7,7 @@ import {
   PDFString,
 } from "pdf-lib";
 
-// pdf-lib's removePage takes the leaf out of the page tree and leaves everything
-// it referenced in the context, and save() writes every indirect object it knows
-// about, so this probe page owns one of everything a page can own that could
-// carry text a reader wrote.
+// pdf-lib's removePage takes the leaf out of the page tree and leaves everything it referenced in the context, and save() writes every indirect object it knows about, so this probe page owns one of everything a page can own that could carry text a reader wrote.
 
 /** Two pages: page 0 owns the secrets, page 1 owns the controls. */
 export async function probePdf(useObjectStreams: boolean) {
@@ -125,8 +122,7 @@ export async function probePdf(useObjectStreams: boolean) {
       Type: "Annot",
     }),
   );
-  // The other storage spelling: the dictionary written straight into /Annots,
-  // which has no object of its own though what it points at does.
+  // The other storage spelling: the dictionary written straight into /Annots, which has no object of its own though what it points at does.
   const directNote = {
     AP: {
       N: stream("(SECRET-direct-appearance) Tj", { BBox: [0, 0, 20, 20] }),
@@ -208,8 +204,7 @@ export async function probePdf(useObjectStreams: boolean) {
     context.obj({ Font: { F1: sharedFont }, XObject: { Fm1: sharedXObject } }),
   );
 
-  // The structures a catalog-wide sweep would have to understand, each naming
-  // something on the deleted page as well as something on the kept one.
+  // The structures a catalog-wide sweep would have to understand, each naming something on the deleted page as well as something on the kept one.
   const outlineToDeleted = context.register(
     context.obj({
       Dest: [page0.ref, "Fit"],
@@ -262,8 +257,7 @@ export async function probePdf(useObjectStreams: boolean) {
     context.obj({
       K: [
         {
-          // An /OBJR names the deleted page's annotation from outside it, and the
-          // /Alt is a SECRET because it describes the page that leaves.
+          // An /OBJR names the deleted page's annotation from outside it, and the /Alt is a SECRET because it describes the page that leaves.
           Alt: PDFString.of("SECRET-struct-alt-on-deleted-page"),
           K: [{ Obj: note, Type: "OBJR" }],
           Pg: page0.ref,

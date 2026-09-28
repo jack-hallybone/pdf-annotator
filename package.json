@@ -8,7 +8,7 @@
   "type": "module",
   "description": "Client-side PDF viewer and annotator. No sign-up, no uploads, works offline.",
   "engines": {
-    "node": "^22.15.0 || >=24"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "node scripts/prepare-renderer-assets.mjs && vite",
@@ -19,15 +19,17 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "security:audit": "npm audit --audit-level=high && npm audit --omit=dev --audit-level=moderate",
+    "license:check": "node scripts/license-check.mjs",
+    "secrets:scan": "node scripts/secrets-scan.mjs",
     "test": "npm run test:unit && npm run test:dom && npm run test:build",
     "test:unit": "node --import tsx --test tests/*.test.ts",
     "test:dom": "TSX_TSCONFIG_PATH=./tests/tsconfig.json node --import tsx --import ./tests/dom-setup.ts --test tests/*.dom.test.tsx",
     "test:build": "node --test tests/build/*.test.mjs",
     "test:browser": "node tests/journey.test.mjs && node tests/worker.test.mjs",
     "test:e2e": "playwright test",
-    "test:browser:setup": "playwright install --with-deps chromium",
     "build": "node scripts/clean-renderer-output.mjs && node scripts/prepare-renderer-assets.mjs && tsc -b && vite build && node scripts/strip-dangling-source-maps.mjs",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run build && npm test && npm run test:browser && npm run test:e2e"
+    "verify": "docker compose run --rm verify",
+    "verify:run": "npm run typecheck && npm run lint && npm run format:check && npm run build && npm test && npm run test:browser && npm run test:e2e && npm run security:audit && npm run license:check && npm run secrets:scan"
   },
   "dependencies": {
     "lucide-react": "1.30.0",
@@ -35,12 +37,13 @@
     "pdfjs-dist": "6.2.108",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "workbox-core": "7.4.1",
     "workbox-precaching": "7.4.1"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@pdf-lib/upng": "1.0.1",
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.63.0",
     "@testing-library/dom": "10.4.1",
     "@testing-library/react": "16.3.2",
     "@types/node": "24.13.3",

@@ -10,8 +10,7 @@ import {
 } from "../src/pdfdocumenteditor/historyStack";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// The history-entry types live in a .tsx React module, so these build minimal
-// shapes and cast rather than pulling React and the DOM into the runner.
+// The history-entry types live in a .tsx React module, so these build minimal shapes and cast rather than pulling React and the DOM into the runner.
 type HistoryEntry = ReturnType<typeof annotationHistoryEntry>;
 
 function stickyNote(id: string, pageIndex = 0): PdfAnnotation {
@@ -92,9 +91,7 @@ test("trimHistoryStack caps document entries at 5, evicting oldest documents fir
 });
 
 test("trimHistoryStack enforces the total-bytes cap even when the document-entry count is under its own cap", () => {
-  // The byte-size trim used to be gated behind an early return that only fired
-  // past MAX_DOCUMENT_HISTORY_ENTRIES (5), so three huge document entries could
-  // sit past the total-bytes budget for ever.
+  // The byte-size trim used to be gated behind an early return that only fired past MAX_DOCUMENT_HISTORY_ENTRIES (5), so three huge document entries could sit past the total-bytes budget for ever.
   const bigEntry = () => documentEntry(new Uint8Array(50 * 1024 * 1024)); // 50MB
   const entries: HistoryEntry[] = [bigEntry(), bigEntry(), bigEntry()]; // 150MB, 3 <= 5
   const trimmed = trimHistoryStack(entries);
@@ -143,9 +140,28 @@ test("documentHistorySnapshotByteSize sums insertPages bytes plus cleanPdfBytes,
   assert.equal(documentHistorySnapshotByteSize(snapshotWithShared), 100);
 });
 
+// A merge's own undo is a removePages (deleting the pages it just inserted needs no bytes of its own), so without mergedSourceByteLength its entry would look free no matter how large the file merged in was.
+test("documentHistorySnapshotByteSize counts a merge's removePages entry by its mergedSourceByteLength", () => {
+  const plainDelete = {
+    operation: { type: "removePages", startIndex: 0, count: 1 },
+    cleanPdfBytes: new Uint8Array(30),
+  } as unknown as Parameters<typeof documentHistorySnapshotByteSize>[0];
+  assert.equal(documentHistorySnapshotByteSize(plainDelete), 30);
+
+  const mergeUndo = {
+    operation: {
+      type: "removePages",
+      startIndex: 1,
+      count: 3,
+      mergedSourceByteLength: 5_000,
+    },
+    cleanPdfBytes: new Uint8Array(30),
+  } as unknown as Parameters<typeof documentHistorySnapshotByteSize>[0];
+  assert.equal(documentHistorySnapshotByteSize(mergeUndo), 5_030);
+});
+
 test("trimHistoryStack caps the image bytes the stack holds, under every other cap", () => {
-  // Ten entries, one 8 MiB stamp each: inside MAX_HISTORY_ENTRIES (20), no
-  // document entry at all, and 80 MiB of held image.
+  // Ten entries, one 8 MiB stamp each: inside MAX_HISTORY_ENTRIES (20), no document entry at all, and 80 MiB of held image.
   const entries = Array.from({ length: 10 }, (_, index) =>
     annotationHistoryEntry([imageStamp(`stamp-${index}`, 8 * ONE_MIB)]),
   );
@@ -179,9 +195,7 @@ test("a single step heavier than the whole budget is not kept", () => {
 });
 
 test("one image named by every entry is counted once, and evicts nothing", () => {
-  // commitAnnotations stores the pre-edit array by reference, so dragging one
-  // stamp leaves many entries naming one string. A bound that counted occurrences
-  // would read 20 x 8 MiB here and throw away nineteen undo steps to free nothing.
+  // commitAnnotations stores the pre-edit array by reference, so dragging one stamp leaves many entries naming one string. A bound that counted occurrences would read 20 x 8 MiB here and throw away nineteen undo steps to free nothing.
   const dragged = imageStamp("dragged", 8 * ONE_MIB);
   const entries = Array.from({ length: 20 }, () =>
     annotationHistoryEntry([dragged]),

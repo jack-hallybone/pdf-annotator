@@ -4,6 +4,7 @@ import { inflateSync } from "node:zlib";
 import {
   PDFArray,
   PDFDict,
+  PDFDocument,
   PDFHexString,
   PDFName,
   PDFNumber,
@@ -12,7 +13,7 @@ import {
   PDFStream,
   PDFString,
 } from "pdf-lib";
-import type { PDFDocument, PDFObject } from "pdf-lib";
+import type { PDFObject } from "pdf-lib";
 import {
   detectReadOnlyReason,
   pdfLooksSignedOrCertified,
@@ -25,14 +26,9 @@ import {
 } from "../src/pdfdocumenteditor/pdfPageOperations";
 import { loadTestPdf, readFixture } from "./pdfTestUtils";
 
-// A resave always breaks a signature's crypto, but its appearance stream is
-// ordinary page content to a renderer that does not verify signatures, and
-// pdf-lib packs these dicts into compressed object streams, where leftovers are
-// invisible to a byte scan while still rendering.
+// A resave always breaks a signature's crypto, but its appearance stream is ordinary page content to a renderer that does not verify signatures, and pdf-lib packs these dicts into compressed object streams, where leftovers are invisible to a byte scan while still rendering.
 
-// The one test that runs against a genuinely signed document: real /ByteRange
-// offsets, a real detached PKCS#7 blob in /Contents, and a signature dictionary
-// sitting uncompressed the way a real signer has to leave it.
+// The one test that runs against a genuinely signed document: real /ByteRange offsets, a real detached PKCS#7 blob in /Contents, and a signature dictionary sitting uncompressed the way a real signer has to leave it.
 test("a real signed fixture stops being detected as signed after an edit", async () => {
   const bytes = await readFixture("test-signed.pdf");
   assert.equal(pdfLooksSignedOrCertified(bytes), true, "fixture precondition");
@@ -50,6 +46,50 @@ test("a real signed fixture stops being detected as signed after an edit", async
   assert.equal(await signatureFieldCount(output), 0);
   assert.equal(await signatureWidgetsOnPage(output), 0);
   assert.equal(await acroFormPresent(output), false);
+});
+
+// The raw scan runs on unparsed bytes precisely so a file that fails to parse still gets a read-only answer; that speed comes at the cost of not knowing a PDF string or a content stream's own text from a real dictionary key, so it has to at least skip everywhere a stream keeps that lower-trust content.
+test("a marker string spelled out in a page's own content does not make a file look signed", async () => {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const { context } = pdfDoc;
+  const content =
+    "BT /Helv 12 Tf 50 700 Td (Look up the /SigFlags key on /AcroForm) Tj ET";
+  page.node.set(
+    PDFName.of("Contents"),
+    context.register(context.stream(content)),
+  );
+
+  const bytes = await pdfDoc.save({ useObjectStreams: false });
+  assert.ok(
+    Buffer.from(bytes).toString("latin1").includes("/SigFlags"),
+    "fixture precondition: the marker text must sit in the raw bytes",
+  );
+
+  assert.equal(pdfLooksSignedOrCertified(bytes), false);
+  assert.equal(await detectReadOnlyReason(bytes, null, false), null);
+});
+
+// pruneSignatureFields walks /Fields to find what to remove; a malformed one gives it nothing to walk, but /SigFlags still claims a signed form once stripSignatureFields has otherwise run, so it must not survive on that account alone.
+test("/SigFlags is cleared even when /AcroForm has no readable /Fields to prune", async () => {
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.addPage([612, 792]);
+  const { context } = pdfDoc;
+  const acroForm = context.obj({ SigFlags: 3 }) as PDFDict;
+  acroForm.set(PDFName.of("Fields"), PDFString.of("not-an-array"));
+  pdfDoc.catalog.set(PDFName.of("AcroForm"), context.register(acroForm));
+
+  const bytes = await pdfDoc.save({ useObjectStreams: false });
+  assert.equal(pdfLooksSignedOrCertified(bytes), true, "fixture precondition");
+
+  const output = await rotatePageClockwise(bytes, 0);
+  assert.equal(pdfLooksSignedOrCertified(output), false);
+
+  const outputAcroForm = (await loadTestPdf(output)).catalog.lookup(
+    PDFName.of("AcroForm"),
+    PDFDict,
+  );
+  assert.equal(outputAcroForm.get(PDFName.of("SigFlags")), undefined);
 });
 
 test("a top-level signature field and its widget are removed", async () => {
@@ -159,8 +199,7 @@ test("an unreasonably large field tree is treated as protected without an unboun
   assert.equal(await pdfLooksStructurallySignedOrCertified(bytes), true);
 });
 
-// The operation measured here is rotate, whose page mapping is `keep`, so nothing
-// about the page order can be blamed for the shift.
+// The operation measured here is rotate, whose page mapping is `keep`, so nothing about the page order can be blamed for the shift.
 test("stripping a signature widget shifts every /Annots entry behind it", async () => {
   const bytes = await buildSignedPdfWithNotesBehindTheWidget();
   assert.deepEqual(await pageZeroAnnots(bytes), [
@@ -282,8 +321,7 @@ async function buildSignedPdf({
     PDFName.of("AcroForm"),
     context.register(
       context.obj({
-        // Put the ordinary field last: the sanitizer walks backwards, and a typed lookup
-        // of its legal string /V used to throw before reaching the signature.
+        // Put the ordinary field last: the sanitizer walks backwards, and a typed lookup of its legal string /V used to throw before reaching the signature.
         Fields: context.obj(textField ? [topLevel, textField] : [topLevel]),
         SigFlags: 3,
       }),
@@ -327,8 +365,7 @@ async function buildTextFieldPdf() {
   return rawSave(pdfDoc);
 }
 
-// pdf-lib's own save, not saveEditedPdf: these fixtures must still carry what
-// the code under test is meant to remove.
+// pdf-lib's own save, not saveEditedPdf: these fixtures must still carry what the code under test is meant to remove.
 function rawSave(pdfDoc: PDFDocument) {
   return pdfDoc.save({ objectsPerTick: 500, updateFieldAppearances: false });
 }
@@ -493,9 +530,7 @@ async function fieldListEntries(bytes: Uint8Array) {
   };
 }
 
-// Deleting the widget and its `/AP` entry leaves the appearance stream in the
-// context, and pdf-lib writes every indirect object it knows about. A sweep of
-// the file, not of the structure: the defect is bytes nothing points at.
+// Deleting the widget and its `/AP` entry leaves the appearance stream in the context, and pdf-lib writes every indirect object it knows about. A sweep of the file, not of the structure: the defect is bytes nothing points at.
 const SIGNATURE_MARKER = /(?:SECRET|KEEP)-[A-Za-z0-9-]+/g;
 
 async function buildSignedPdfWithAppearance({
@@ -721,6 +756,87 @@ test("a certification signature's own subtree leaves no bytes behind", async () 
     [],
   );
 });
+
+// /DSS holds the certificates and VRI a signature was validated against, independent of /AcroForm and /Perms; unlinking the catalog pointer alone leaves the certificate objects sitting in the file, addressed by nothing.
+test("a stripped signature's /DSS certificate store leaves no certificate bytes behind", async () => {
+  const bytes = await buildSignedPdfWithDss();
+  const pre = await loadTestPdf(bytes);
+  assert.equal(
+    pre.catalog.has(PDFName.of("DSS")),
+    true,
+    "fixture precondition",
+  );
+  assert.deepEqual(
+    [...(await signatureMarkers(bytes))]
+      .filter((marker) => marker.startsWith("SECRET-"))
+      .sort(),
+    ["SECRET-dss-certificate-bytes", "SECRET-dss-vri-certificate-bytes"],
+    "fixture precondition",
+  );
+
+  const output = await rotatePageClockwise(bytes, 0);
+
+  const post = await loadTestPdf(output);
+  assert.equal(post.catalog.has(PDFName.of("DSS")), false);
+  assert.deepEqual(
+    [...(await signatureMarkers(output))]
+      .filter((marker) => marker.startsWith("SECRET-"))
+      .sort(),
+    [],
+  );
+});
+
+async function buildSignedPdfWithDss() {
+  const pdfDoc = await loadEditablePdf(await readFixture("test-annotated.pdf"));
+  const { context } = pdfDoc;
+  const cert = context.register(
+    context.flateStream("SECRET-dss-certificate-bytes", {}),
+  );
+  const vriCert = context.register(
+    context.flateStream("SECRET-dss-vri-certificate-bytes", {}),
+  );
+  const dss = context.register(
+    context.obj({
+      Certs: context.obj([cert]),
+      VRI: context.obj({
+        AABBCCDD00112233AABBCCDD00112233AABBCCDD: context.obj({
+          Cert: context.obj([vriCert]),
+        }),
+      }),
+    }),
+  );
+  pdfDoc.catalog.set(PDFName.of("DSS"), dss);
+
+  const signature = context.register(
+    context.obj({
+      ByteRange: [0, 100, 200, 300],
+      SubFilter: "adbe.pkcs7.detached",
+      Type: "Sig",
+    }),
+  );
+  const signatureField = context.register(
+    context.obj({
+      FT: "Sig",
+      Rect: [50, 50, 150, 100],
+      Subtype: "Widget",
+      T: PDFString.of("Signature1"),
+      Type: "Annot",
+      V: signature,
+    }),
+  );
+  pdfDoc.catalog.set(
+    PDFName.of("AcroForm"),
+    context.register(
+      context.obj({ Fields: context.obj([signatureField]), SigFlags: 3 }),
+    ),
+  );
+  pdfDoc
+    .getPage(0)
+    .node.lookupMaybe(PDFName.of("Annots"), PDFArray)
+    ?.push(signatureField);
+
+  return rawSave(pdfDoc);
+}
 
 test("deleting the page a signature's only widget sits on still saves", async () => {
   const pdfDoc = await loadEditablePdf(await readFixture("test-annotated.pdf"));

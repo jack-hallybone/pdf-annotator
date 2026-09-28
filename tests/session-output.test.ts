@@ -11,9 +11,7 @@ import type { SensitivePdfDocumentEditorSession } from "../src/pdfdocumenteditor
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf } from "./pdfTestUtils";
 
-// Save All saves a tab that is not on screen, so it has to serialise one from
-// its parked session alone: mounting each tab in turn would put serialisation
-// inside React lifecycles at the moment they are torn down.
+// Save All saves a tab that is not on screen, so it has to serialise one from its parked session alone: mounting each tab in turn would put serialisation inside React lifecycles at the moment they are torn down.
 
 async function blankPdf() {
   const pdfDoc = await PDFDocument.create();
@@ -111,9 +109,7 @@ test("a session saved from its parked state comes back clean", async () => {
   assert.equal(saved.undoStack, original.undoStack);
 });
 
-// A session holds full PDF bytes behind a non-enumerable throwing toJSON, and a
-// spread does not carry a non-enumerable property, so a rebuilt one would be a
-// plain object that JSON.stringify - and so localStorage - would serialise.
+// A session holds full PDF bytes behind a non-enumerable throwing toJSON, and a spread does not carry a non-enumerable property, so a rebuilt one would be a plain object that JSON.stringify - and so localStorage - would serialise.
 test("a session rebuilt after a save still refuses to be serialised", async () => {
   const saved = documentEditorSessionAfterSave(
     session(await blankPdf(), [highlight("saved")]),

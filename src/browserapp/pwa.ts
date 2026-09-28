@@ -20,6 +20,7 @@ type PwaFileLaunchHandler = (
 let fileLaunchHandler: PwaFileLaunchHandler | null = null;
 let launchQueueRegistered = false;
 let launchDeliveryQueue = Promise.resolve();
+// A launch can fire before the shell calls setPwaFileLaunchHandler - a cold start is exactly when it does - so it waits here until one is set.
 const pendingFileLaunches: LocalPdfFileHandle[][] = [];
 
 export function registerBrowserServiceWorker() {
@@ -28,9 +29,7 @@ export function registerBrowserServiceWorker() {
   }
 
   const register = () => {
-    // Registration only: a new worker installs and waits, so the running page
-    // keeps the asset set it booted with and a lazy chunk cannot 404
-    // mid-session.
+    // Registration only: a new worker installs and waits, so the running page keeps the asset set it booted with and a lazy chunk cannot 404 mid-session.
     void navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`, {
         scope: import.meta.env.BASE_URL,
@@ -67,6 +66,7 @@ function registerLaunchQueueConsumer() {
   }
 
   launchQueueRegistered = true;
+  // One callback per launch, whatever it carries: a launch is either one with every file or, on Windows, one per file, and both shapes just work since nothing here batches them together.
   launchQueue.setConsumer(({ files }) => {
     if (files.length === 0) {
       return;
@@ -101,7 +101,6 @@ async function deliverFileLaunch(handles: LocalPdfFileHandle[]) {
   try {
     await fileLaunchHandler?.(handles);
   } catch {
-    // The handler reports its own failures; this only keeps a rejected
-    // delivery from breaking the queue for the next one.
+    // The handler reports its own failures; this only keeps a rejected delivery from breaking the queue for the next one.
   }
 }

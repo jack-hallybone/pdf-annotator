@@ -5,24 +5,20 @@ import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument, rgb } from "pdf-lib";
 import { MAX_BAND_LOAD_PAGES } from "../src/pdfdocumenteditor/viewerConfig";
 
-// Measured as ink, because "a canvas is present" is equally true of a canvas
-// PDF.js never painted into, which is exactly this defect.
+// Measured as ink, because "a canvas is present" is equally true of a canvas PDF.js never painted into, which is exactly this defect.
 
-// Longer than EAGER_PAGE_LIMIT (25), or the document loads every page up front
-// and there is no lazy band left to get wrong.
+// Longer than EAGER_PAGE_LIMIT (25), or the document loads every page up front and there is no lazy band left to get wrong.
 const PAGE_COUNT = 60;
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
-// A pane this tall at MIN_ZOOM shows about eleven pages of an A4-shaped
-// document, comfortably more than the five an active-page band covered.
+// A pane this tall at MIN_ZOOM shows about eleven pages of an A4-shaped document, comfortably more than the five an active-page band covered.
 const TALL_VIEWPORT = { height: 1800, width: 1280 };
 
 const MIN_VISIBLE_PAGES = 8;
 
 test.describe.configure({ timeout: 180_000 });
 
-// Tiny pages, so MIN_ZOOM puts more on screen than the load band may hold: a
-// 90x120pt page is 24 CSS px tall at MIN_ZOOM.
+// Tiny pages, so MIN_ZOOM puts more on screen than the load band may hold: a 90x120pt page is 24 CSS px tall at MIN_ZOOM.
 const TINY_PAGE_COUNT = 200;
 
 async function fixture(
@@ -47,10 +43,7 @@ async function fixture(
   return path;
 }
 
-// Read off the DOM rather than derived from the active page, which would be the
-// same guess the code makes. A page displayed and not painted is reported with
-// its placeholder, so the cap doing its job and no element at all can be told
-// apart.
+// Read off the DOM rather than derived from the active page, which would be the same guess the code makes. A page displayed and not painted is reported with its placeholder, so the cap doing its job and no element at all can be told apart.
 function readPane(page: Page) {
   return page.evaluate(() => {
     const root = document.querySelector<HTMLElement>(
@@ -149,8 +142,7 @@ test.describe("a zoomed-out viewport paints every page it displays", () => {
     });
     await page.waitForTimeout(1_000);
 
-    // Polling and then asserting is not circular: the poll can only end early, and a
-    // band that never asks for those pages never ends it.
+    // Polling and then asserting is not circular: the poll can only end early, and a band that never asks for those pages never ends it.
     await expect
       .poll(
         async () =>
@@ -161,8 +153,7 @@ test.describe("a zoomed-out viewport paints every page it displays", () => {
 
     const pane = await readPane(page);
 
-    // A pane showing five pages, or one parked back at the top of the document,
-    // would report "everything painted" while proving nothing about the band.
+    // A pane showing five pages, or one parked back at the top of the document, would report "everything painted" while proving nothing about the band.
     expect(
       pane.displayed.length,
       "the pane is not showing more pages than the old five-page band covered",
@@ -179,9 +170,7 @@ test.describe("a zoomed-out viewport paints every page it displays", () => {
     ).toEqual([]);
   });
 
-  // "Load the visible range" is unbounded, which is why MAX_BAND_LOAD_PAGES exists.
-  // The cap is acceptable only because it takes the edges of the viewport and never
-  // the middle, and a page past it is visibly pending rather than a gap.
+  // "Load the visible range" is unbounded, which is why MAX_BAND_LOAD_PAGES exists. The cap is acceptable only because it takes the edges of the viewport and never the middle, and a page past it is visibly pending rather than a gap.
   test("past the cap a page is a pending placeholder, not a gap", async ({
     page,
   }) => {
@@ -222,18 +211,14 @@ test.describe("a zoomed-out viewport paints every page it displays", () => {
     const painted = pane.displayed.filter((entry) => entry.ink > 0);
     const blank = pane.displayed.filter((entry) => entry.ink === 0);
 
-    // If the pane is not showing more pages than the band may hold, the cap never
-    // bit and everything below is vacuous.
+    // If the pane is not showing more pages than the band may hold, the cap never bit and everything below is vacuous.
     expect(
       pane.displayed.length,
       "the pane is not showing more pages than MAX_BAND_LOAD_PAGES",
     ).toBeGreaterThan(MAX_BAND_LOAD_PAGES);
     expect(blank.length, "the cap did not bite").toBeGreaterThan(0);
 
-    // The cap took both edges: one painted run with blanks above and below it in
-    // roughly equal numbers. "The middle is inside the painted run" is not enough - a
-    // band loading from the first visible page satisfies that whenever the cap is
-    // more than half the pane.
+    // The cap took both edges: one painted run with blanks above and below it in roughly equal numbers. "The middle is inside the painted run" is not enough - a band loading from the first visible page satisfies that whenever the cap is more than half the pane.
     const paintedIndexes = painted.map((entry) => entry.pageIndex);
     const first = paintedIndexes[0]!;
     const last = paintedIndexes.at(-1)!;

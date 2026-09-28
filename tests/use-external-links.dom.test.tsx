@@ -71,8 +71,7 @@ test('"always" trusts the origin so later links from it open without a prompt', 
   act(() => result.current.confirmExternalLink({ always: true }));
   assert.equal(opens.length, 1);
 
-  // Asserted through a local because node:assert/strict's `equal` is an assertion
-  // signature, so asserting the property itself narrows every later read of it.
+  // Asserted through a local because node:assert/strict's `equal` is an assertion signature, so asserting the property itself narrows every later read of it.
   act(() => result.current.requestExternalLink("https://trusted.example/b"));
   const afterTrustedOpen = result.current.pendingExternalLink;
   assert.equal(afterTrustedOpen, null);
@@ -112,8 +111,7 @@ test("an unparseable url is ignored (no dialog, no open)", () => {
   assert.equal(opens.length, 0);
 });
 
-// Defence in depth: the PDF link layer sanitizes before it calls in here, and
-// the allowlist is re-applied at the point that actually opens a URL.
+// Defence in depth: the PDF link layer sanitizes before it calls in here, and the allowlist is re-applied at the point that actually opens a URL.
 test("a url outside the protocol allowlist never reaches the dialog", () => {
   const opens: OpenCall[] = [];
   const { result } = renderHook(() => useLinksHarness(opens, []));
@@ -157,9 +155,7 @@ test("credentials are stripped before a link is opened", () => {
   assert.ok(!opens[0].url.includes("secret"));
 });
 
-// Credentials are where a display path and an open path deriving separately
-// would disagree, so the string the dialog renders has to be the one handed to
-// the opener.
+// Credentials are where a display path and an open path deriving separately would disagree, so the string the dialog renders has to be the one handed to the opener.
 test("the url offered for confirmation is the sanitized url that opens", () => {
   const opens: OpenCall[] = [];
   const { result } = renderHook(() => useLinksHarness(opens, []));

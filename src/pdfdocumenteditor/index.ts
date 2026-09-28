@@ -1,9 +1,8 @@
 import "./styles.css";
 
-/**
- * The first line here loads the theme and the core stylesheet, which is why a
- * module tested under plain node imports the core module directly.
- */
+// This layer is usable standalone: nothing under src/pdfdocumenteditor may import from ../tabbedapp or ../browserapp.
+
+/** The first line here loads the theme and the core stylesheet, which is why a module tested under plain node imports the core module directly. */
 export { PdfDocumentEditor } from "./PdfDocumentEditor";
 
 /* Two views over one document: one usePdfDocumentEditor, many viewports. */
@@ -85,6 +84,7 @@ export type {
   PdfSaveAsTarget,
   PdfSaveStage,
   PdfSaveTarget,
+  PdfSaveTargetChange,
   PdfSaveWithResult,
   PdfDocumentEditorBytesSource,
   PdfDocumentEditorLoaderSource,

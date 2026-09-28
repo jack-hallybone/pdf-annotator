@@ -21,6 +21,7 @@ import type {
 import type {
   PdfDocumentEditorSource,
   PdfDocumentEditorHostCapabilities,
+  PdfSaveTargetChange,
   PdfSaveWithResult,
   SplitAxis,
 } from "../pdfdocumenteditor";
@@ -64,8 +65,7 @@ import {
 import { useExternalLinks } from "./useExternalLinks";
 import { useTabbedAppNotices } from "./useTabbedAppNotices";
 
-// A host for the document editor core: it owns no document state and reaches
-// the core only through the command API on PdfDocumentEditorHandle.
+// A host for the document editor core: it owns no document state and reaches the core only through the command API on PdfDocumentEditorHandle.
 
 export type TabbedAppDocumentHandle = {
   // A sensitive in-memory session; discard it when the tab is closed.
@@ -97,6 +97,7 @@ export type TabbedAppDocumentProps = PdfDocumentEditorHostCapabilities & {
   onBusyChange?: (busy: boolean) => void;
   onDirtyChange?: (hasUnsavedChanges: boolean) => void;
   onDocumentTitleChange?: (title: string) => void;
+  onSaveTargetChange?: (change: PdfSaveTargetChange) => void;
   /** The chrome is the document's, not a view's, so it stays with the first. */
   secondView?: boolean;
   showCloseButton?: boolean;
@@ -126,6 +127,7 @@ export const TabbedAppDocument = forwardRef<
     onBusyChange,
     onDirtyChange,
     onDocumentTitleChange,
+    onSaveTargetChange,
     onOpenExternalLink,
     pickImageFile,
     pickMergePdfFile,
@@ -193,8 +195,7 @@ export const TabbedAppDocument = forwardRef<
   const tool =
     tools.find((item) => item.key === activeToolKey)?.tool ?? "select";
 
-  // The sidebar overlays the viewport, so the core's ResizeObserver never
-  // sees it move and has to be told.
+  // The sidebar overlays the viewport, so the core's ResizeObserver never sees it move and has to be told.
   useEffect(() => {
     documentEditorRef.current?.remeasureViewport();
   }, [sidebarOpen, sidebarWidth]);
@@ -378,9 +379,7 @@ export const TabbedAppDocument = forwardRef<
         .join(" ")}
       style={style}
     >
-      {/* Outside the core, not in its overlay slot: below 700px this docks
-          in flow and has to push the whole core - viewport and floating
-          chrome together - down the page. */}
+      {/* Outside the core, not in its overlay slot: below 700px this docks in flow and has to push the whole core - viewport and floating chrome together - down the page. */}
       {notices.length > 0 || readOnlyBannerReason ? (
         <TabbedAppNoticeStack
           notices={notices}
@@ -420,6 +419,7 @@ export const TabbedAppDocument = forwardRef<
         onExternalLinkRequest={requestExternalLink}
         onMalformedAnnotations={reportMalformedAnnotations}
         onNotice={showNotice}
+        onSaveTargetChange={onSaveTargetChange}
         onReadOnlyChange={setReadOnlyState}
         onSessionRestore={handleSessionRestore}
         onShowAnnotationsChange={setShowAnnotations}

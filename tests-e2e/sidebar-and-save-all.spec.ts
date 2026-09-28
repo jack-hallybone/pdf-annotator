@@ -2,8 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Download, type Page } from "@playwright/test";
 
-// The comment round trip runs model -> pdf-lib -> file -> pdf.js -> model, and
-// Save All is a batch across tabs where all but one are unmounted.
+// The comment round trip runs model -> pdf-lib -> file -> pdf.js -> model, and Save All is a batch across tabs where all but one are unmounted.
 
 const fixturePath = fileURLToPath(
   new URL("../tests/fixtures/test-annotated.pdf", import.meta.url),
@@ -18,9 +17,7 @@ async function openFixture(page: Page, file = fixturePath) {
   await expect(page.locator(".page-jump-control")).toBeVisible();
 }
 
-// Playwright's download path is a UUID with no extension and the app decides a
-// File is a PDF by its type or its name, so the copy is saved under its real
-// filename.
+// Playwright's download path is a UUID with no extension and the app decides a File is a PDF by its type or its name, so the copy is saved under its real filename.
 async function savedCopyPath(download: Download) {
   const target = test.info().outputPath(download.suggestedFilename());
   await download.saveAs(target);
@@ -72,8 +69,7 @@ async function outlinedPdf() {
   return Buffer.from(await doc.save());
 }
 
-// The highlight is on the second page: the only way to prove a row click
-// navigates rather than merely opening itself in the list.
+// The highlight is on the second page: the only way to prove a row click navigates rather than merely opening itself in the list.
 async function annotatedTwoPagePdf() {
   const { PDFDocument, PDFName } = await import("pdf-lib");
   const doc = await PDFDocument.create();
@@ -98,8 +94,7 @@ async function annotatedTwoPagePdf() {
   return Buffer.from(await doc.save());
 }
 
-// Longer than EAGER_PAGE_LIMIT (25), with a highlight on the last page: past
-// that limit pages load only when scrolled to.
+// Longer than EAGER_PAGE_LIMIT (25), with a highlight on the last page: past that limit pages load only when scrolled to.
 const LONG_DOCUMENT_PAGES = 40;
 
 async function longPdf({ annotated } = { annotated: true }) {
@@ -143,8 +138,7 @@ test("the annotations tab lists a mark on a page nobody has scrolled to", async 
   await expect(page.locator(".page-jump-control")).toBeVisible();
   await expect(page.locator(".page-number-input")).toHaveValue("1");
 
-  // A pass that re-ranked or re-loaded pages would blank their canvases for two
-  // frames, which a screenshot cannot see, so the frames are counted.
+  // A pass that re-ranked or re-loaded pages would blank their canvases for two frames, which a screenshot cannot see, so the frames are counted.
   await page.getByRole("button", { name: /show sidebar/i }).click();
   const baseCanvas = page.locator(
     '.pdfdocumenteditor-page-slot[data-page-index="0"] .canvasWrapper canvas',
@@ -192,8 +186,7 @@ test("the annotations tab lists a mark on a page nobody has scrolled to", async 
     .locator(".pdfdocumenteditor-page-slot .canvasWrapper canvas")
     .count();
   expect(rendered).toBeGreaterThan(0);
-  // The window around the current page, not the document: LAZY_PAGE_BUFFER is 2,
-  // so a handful. A bound of "fewer than 40" would still pass on 39.
+  // The window around the current page, not the document: LAZY_PAGE_BUFFER is 2, so a handful. A bound of "fewer than 40" would still pass on 39.
   expect(rendered).toBeLessThanOrEqual(10);
 
   await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(0);
@@ -204,8 +197,7 @@ test("the annotations tab lists a mark on a page nobody has scrolled to", async 
   );
 });
 
-// An empty list means both "this document has none" and "not read yet", and has
-// to keep telling them apart after a page edit reloads the document.
+// An empty list means both "this document has none" and "not read yet", and has to keep telling them apart after a page edit reloads the document.
 test("an empty list says the document has none only once it has read it", async ({
   page,
 }) => {
@@ -219,9 +211,7 @@ test("an empty list says the document has none only once it has read it", async 
 
   await page.getByRole("button", { name: /show sidebar/i }).click();
   await page.getByRole("tab", { name: "Annotations" }).click();
-  await expect(page.locator(".annotations-empty")).toHaveText(
-    "No annotations in this document yet.",
-  );
+  await expect(page.locator(".annotations-empty")).toHaveText("No annotations");
 
   await page.getByRole("tab", { name: "Pages" }).click();
   await page.getByRole("button", { name: "Actions for page 1" }).click();
@@ -234,23 +224,17 @@ test("an empty list says the document has none only once it has read it", async 
   );
 
   await page.getByRole("tab", { name: "Annotations" }).click();
-  await expect(page.locator(".annotations-empty")).toHaveText(
-    "No annotations in this document yet.",
-  );
+  await expect(page.locator(".annotations-empty")).toHaveText("No annotations");
 
   await page.getByRole("button", { name: "Undo", exact: true }).click();
   await expect(page.locator(".page-jump-control")).toContainText(
     `of ${LONG_DOCUMENT_PAGES}`,
     { timeout: 45_000 },
   );
-  await expect(page.locator(".annotations-empty")).toHaveText(
-    "No annotations in this document yet.",
-  );
+  await expect(page.locator(".annotations-empty")).toHaveText("No annotations");
 });
 
-// Page surgery reloads the document and forgets which pages have been read, so
-// the pass has to run again - and not during the reload, where the document in
-// hand is the one being replaced.
+// Page surgery reloads the document and forgets which pages have been read, so the pass has to run again - and not during the reload, where the document in hand is the one being replaced.
 test("the list is still whole after a page is deleted under it", async ({
   page,
 }) => {
@@ -509,8 +493,7 @@ test("Save All lists every unsaved tab, and each is resolved with its own Save A
   const saveAll = page.getByRole("button", { name: /save all/i });
   await expect(saveAll).toBeVisible();
 
-  // None of the three has a file of its own, so Save All lists them instead
-  // of guessing at a destination - each is resolved with its own Save As.
+  // None of the three has a file of its own, so Save All lists them instead of guessing at a destination - each is resolved with its own Save As.
   await saveAll.click();
   const destinationDialog = page.getByRole("dialog", {
     name: "Choose where to save",
@@ -600,8 +583,7 @@ test("a Save As that fails leaves that file listed, ready to retry", async ({
   await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
 });
 
-// showSaveFilePicker needs a real dialog too, so it is stubbed with an
-// in-memory file standing in for the chosen one.
+// showSaveFilePicker needs a real dialog too, so it is stubbed with an in-memory file standing in for the chosen one.
 async function stubSaveFilePicker(page: Page) {
   await page.addInitScript(() => {
     const files = new Map<string, Uint8Array>();
@@ -616,10 +598,7 @@ async function stubSaveFilePicker(page: Page) {
         }) => Promise<unknown>;
       }
     ).showSaveFilePicker = async (options) => {
-      // Every blank document starts out "Untitled.pdf", and each save here is
-      // its own dialog now rather than one batch an app-side disambiguator
-      // could dedupe - so this, like a real save dialog would, offers the
-      // next free name instead of colliding with an already-saved one.
+      // Every blank document starts out "Untitled.pdf", and each save here is its own dialog now rather than one batch an app-side disambiguator could dedupe - so this, like a real save dialog would, offers the next free name instead of colliding with an already-saved one.
       let name = options?.suggestedName ?? "saved.pdf";
       if (files.has(name)) {
         const stem = name.replace(/\.pdf$/i, "");
@@ -696,9 +675,7 @@ test("Save As from the destination dialog also resolves a parked (background) ta
   await page.goto("/");
   await page.getByRole("button", { name: "New tab" }).click();
   await page.getByRole("menuitem", { name: /New Blank A4/i }).click();
-  // Waited for by content, not just the tab strip: tab 1's document pane is
-  // lazy-loaded, and creating tab 2 before it mounts would park it having
-  // never registered - the very session tab 2 then needs to capture.
+  // Waited for by content, not just the tab strip: tab 1's document pane is lazy-loaded, and creating tab 2 before it mounts would park it having never registered - the very session tab 2 then needs to capture.
   await expect(page.locator(".page-jump-control")).toBeVisible();
   await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(1);
   await page.getByRole("button", { name: "New tab" }).click();
@@ -722,6 +699,88 @@ test("Save As from the destination dialog also resolves a parked (background) ta
   expect(await savedFileNames(page)).toEqual(["Untitled.pdf"]);
 });
 
+test("Save As from the destination dialog sanitizes a dirty name the save picker hands back", async ({
+  page,
+}) => {
+  const dirtyName = "*My​File.pdf";
+  await page.addInitScript((name: string) => {
+    (
+      window as unknown as {
+        showSaveFilePicker: (options?: {
+          suggestedName?: string;
+        }) => Promise<unknown>;
+      }
+    ).showSaveFilePicker = async () => {
+      let stored = new Uint8Array();
+      return {
+        kind: "file" as const,
+        name,
+        async createWritable() {
+          const chunks: Uint8Array[] = [];
+          return {
+            async write(blob: Blob) {
+              chunks.push(new Uint8Array(await blob.arrayBuffer()));
+            },
+            async close() {
+              const total = chunks.reduce((sum, part) => sum + part.length, 0);
+              const merged = new Uint8Array(total);
+              let offset = 0;
+              for (const part of chunks) {
+                merged.set(part, offset);
+                offset += part.length;
+              }
+              stored = merged;
+            },
+            async abort() {},
+          };
+        },
+        async getFile() {
+          return new File([stored.slice().buffer], name, {
+            type: "application/pdf",
+          });
+        },
+        async queryPermission() {
+          return "granted";
+        },
+        async requestPermission() {
+          return "granted";
+        },
+      };
+    };
+  }, dirtyName);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menuitem", { name: /New Blank A4/i }).click();
+  await expect(page.locator(".page-jump-control")).toBeVisible();
+  await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(1);
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menuitem", { name: /New Blank A4/i }).click();
+  await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(2);
+  await expect(page.locator(".page-jump-control")).toBeVisible();
+  // Tab 1 is parked (unmounted) now that tab 2 is the active one - this is the saveParkedDocumentAs path, not the mounted onTitleChange path that already guards against exactly this.
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(2);
+
+  await page.getByRole("button", { name: /save all/i }).click();
+  const destinationDialog = page.getByRole("dialog", {
+    name: "Choose where to save",
+  });
+  await expect(destinationDialog).toBeVisible();
+  await destinationDialog
+    .getByRole("button", { name: "Save as..." })
+    .first()
+    .click();
+
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+  // The save picker (standing in for a real OS Save dialog, which does not sanitize whatever the reader typed there) handed back a name carrying an unsaved-marker asterisk and a zero-width space - the parked tab's title is the cleaned form, the same rule updateDocumentTitle already applies to a mounted document's own onTitleChange.
+  await expect(
+    page.getByRole("button", { name: "Close MyFile.pdf" }),
+  ).toHaveCount(1);
+  await expect(
+    page.getByRole("button", { name: `Close ${dirtyName}` }),
+  ).toHaveCount(0);
+});
+
 test("Cancel leaves the tabs open and dirty, with no way to mass-discard them from here", async ({
   page,
 }) => {
@@ -741,8 +800,7 @@ test("Cancel leaves the tabs open and dirty, with no way to mass-discard them fr
   });
   await expect(destinationDialog).toBeVisible();
 
-  // A destination for one file, not a verdict on every listed one - discard
-  // belongs to the per-tab close flow, not this dialog.
+  // A destination for one file, not a verdict on every listed one - discard belongs to the per-tab close flow, not this dialog.
   await expect(
     destinationDialog.getByRole("button", { name: /discard/i }),
   ).toHaveCount(0);
@@ -768,9 +826,7 @@ test("closing a dirty tab can save it instead of discarding it", async ({
   await expect(page.locator(".tabbedapp-close-dialog")).toBeVisible();
   await page.getByRole("button", { name: "Save changes" }).click();
 
-  // No file of its own yet, so the close waits on the same destination
-  // dialog Save All uses; resolving it here still leaves the tab open, so
-  // closing it is a second, now unconfirmed, click.
+  // No file of its own yet, so the close waits on the same destination dialog Save All uses; resolving it here still leaves the tab open, so closing it is a second, now unconfirmed, click.
   const destinationDialog = page.getByRole("dialog", {
     name: "Choose where to save",
   });

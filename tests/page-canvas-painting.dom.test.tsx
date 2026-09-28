@@ -3,23 +3,17 @@ import { test } from "node:test";
 import type { PageViewport } from "../src/pdfdocumenteditor/types";
 import "./rendererAssetStubs";
 
-// pdf.js's own page view gives up quietly: on some documents it leaves the
-// canvas wrapper empty, on others it hands back a canvas that rendered nothing,
-// and either way the reader sees a blank page with no error.
+// pdf.js's own page view gives up quietly: on some documents it leaves the canvas wrapper empty, on others it hands back a canvas that rendered nothing, and either way the reader sees a blank page with no error.
 
-// jsdom has no 2D rasteriser, so the emptiness probe is stubbed below and the
-// pixel scan lives in pdfRender's own tests.
+// jsdom has no 2D rasteriser, so the emptiness probe is stubbed below and the pixel scan lives in pdfRender's own tests.
 
-// pageCanvasPainting reaches pdf.js through pdfRender, so it needs the renderer
-// asset stubs registered by the side-effect import above; this import has to be
-// dynamic so it runs after that registration rather than alongside it.
+// pageCanvasPainting reaches pdf.js through pdfRender, so it needs the renderer asset stubs registered by the side-effect import above; this import has to be dynamic so it runs after that registration rather than alongside it.
 const { renderRasterFallback, shouldUseRasterFallback } =
   await import("../src/pdfdocumenteditor/pageCanvasPainting");
 
 const SAMPLE = 32;
 
-// A canvas marked `data-painted` samples as having content; anything else
-// samples as the opaque white a failed render leaves behind.
+// A canvas marked `data-painted` samples as having content; anything else samples as the opaque white a failed render leaves behind.
 function samplePixels(painted: boolean) {
   const pixels = new Uint8ClampedArray(SAMPLE * SAMPLE * 4).fill(255);
   if (painted) {

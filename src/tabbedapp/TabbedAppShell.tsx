@@ -51,9 +51,9 @@ import { useTabDragReorder } from "./useTabDragReorder";
 import { displayableFileName, pdfFileNameFromStem } from "../fileNames";
 import { PRODUCT_NAME } from "../productName";
 import { useLatestRef } from "../useLatestRef";
-// Never src/pdfdocumenteditor's barrel for a value: it re-exports PdfDocumentEditor, and
-// this shell is in the initial chunk.
+// Never src/pdfdocumenteditor's barrel for a value: it re-exports PdfDocumentEditor, and this shell is in the initial chunk.
 import { attachPdfSourceId } from "../pdfdocumenteditor/host";
+import { useRenderLatestRef } from "../pdfdocumenteditor/useRenderLatestRef";
 import { useSplitResizer } from "../pdfdocumenteditor/useSplitResizer";
 import { TabbedAppNoticeStack } from "./components/TabbedAppNotices";
 import {
@@ -61,6 +61,7 @@ import {
   type ShowNoticeOptions,
 } from "./useTabbedAppNotices";
 import { useFocusTrap } from "./useFocusTrap";
+import { DocumentPaneErrorBoundary } from "./DocumentPaneErrorBoundary";
 
 const TabbedAppDocument = lazy(async () => ({
   default: (await import("./TabbedAppDocument")).TabbedAppDocument,
@@ -72,6 +73,7 @@ import type {
 } from "./TabbedAppDocument";
 import type {
   PdfDocumentEditorHostCapabilities,
+  PdfSaveTargetChange,
   PdfSaveWithResult,
   SplitAxis,
 } from "../pdfdocumenteditor";
@@ -84,6 +86,9 @@ import type {
 import { CORNELL_CONTENT_BOUNDS } from "../pdfTemplateGeometry";
 import type { PdfTemplateKind } from "../pdfTemplateGeometry";
 import { warmPdfRuntimeCaches } from "../pdfRuntime";
+
+// A document that reports itself busy (loading, saving, a proactive mark on the way in - see markDocumentsEnteringViewBusy) and then never reports back would otherwise lock the shell for good: shellLocked never clears, so every command below keeps bailing at its own guard with no path back to an unlocked shell except reloading the page. This is the one bound on how long a single document's own busy report is trusted before the shell gives up waiting on it and hands control back to the reader.
+const DOCUMENT_BUSY_TIMEOUT_MS = 30_000;
 
 export type TabbedAppTemplateAction = {
   kind: PdfTemplateKind;
@@ -175,10 +180,17 @@ export type TabbedAppDocumentOptions = PdfDocumentEditorHostCapabilities &
     "allowEditing" | "allowImageAnnotations" | "confirmDiscardChanges"
   >;
 
+export type TabbedAppOpenDocumentRequest =
+  | { kind: "template"; template: PdfTemplateKind }
+  | {
+      kind: "source";
+      options?: { fileKey?: string; title?: string };
+      source: PdfDocumentEditorSourceInput;
+    };
+
 export type TabbedAppHomeRenderProps = {
-  createTemplateDocument: (kind: PdfTemplateKind) => Promise<void>;
   dragActive: boolean;
-  openPdfDocuments: () => Promise<void>;
+  openPdfDocuments: (request?: TabbedAppOpenDocumentRequest) => Promise<void>;
   templateActions: TabbedAppTemplateAction[];
 };
 
@@ -238,16 +250,14 @@ export const TabbedAppShell = forwardRef<
   const [activeDocumentId, setActiveDocumentId] = useState<string | null>(null);
   const [documents, setDocuments] = useState<TabbedAppOpenDocument[]>([]);
   const [dragActive, setDragActive] = useState(false);
-  // `activeDocumentId` is the left panel and the shell's one idea of "the
-  // document"; the right must always name one, or the split closes.
+  // `activeDocumentId` is the left panel and the shell's one idea of "the document"; the right must always name one, or the split closes.
   const [splitView, setSplitView] = useState(false);
   const [secondaryDocumentId, setSecondaryDocumentId] = useState<string | null>(
     null,
   );
   const [activePanel, setActivePanel] = useState<PanelSide>("left");
   const [splitDirection, setSplitDirection] = useState<SplitAxis>("row");
-  // The primary panel's share of the split; the secondary panel takes the
-  // rest, so one number describes both.
+  // The primary panel's share of the split; the secondary panel takes the rest, so one number describes both.
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
   const [newTabMenuPosition, setNewTabMenuPosition] = useState<MenuPosition>({
@@ -271,6 +281,8 @@ export const TabbedAppShell = forwardRef<
   const [busyDocumentIds, setBusyDocumentIds] = useState<Set<string>>(
     () => new Set(),
   );
+  // See handleDocumentBusyChange: one timeout per document currently marked busy, so a real onBusyChange(id, false) - or a fresh busy period - can cancel it before it ever fires.
+  const busyTimeoutsRef = useRef<Map<string, number>>(new Map());
   const [shellCommandBusy, setShellCommandBusy] = useState(false);
   const {
     notices,
@@ -302,7 +314,8 @@ export const TabbedAppShell = forwardRef<
     splitView ? secondaryDocumentId : null,
   ).some((documentId) => busyDocumentIds.has(documentId));
   const shellLocked = shellCommandBusy || activeDocumentBusy;
-  const shellLockedRef = useLatestRef(shellLocked);
+  // Render-fresh: every command handler below bails when this reads true, and useLatestRef's usual one-commit-behind write would still read true - and silently drop the action - for one render after shellLocked genuinely cleared.
+  const shellLockedRef = useRenderLatestRef(shellLocked);
   const splitResizer = useSplitResizer({
     axis: splitDirection,
     disabled: shellLocked,
@@ -330,12 +343,7 @@ export const TabbedAppShell = forwardRef<
     tabsNavRef,
   });
 
-  // The tab strip grows to fill the bar so a tab can reach its own preferred
-  // width (see .tabbedapp-tabs), but "+" stays a fixed sibling outside it so
-  // an overflowing, scrolling strip never scrolls it out of reach. Left
-  // alone, that growth strands "+" wherever the strip's grown edge lands
-  // rather than right after the tabs, so this pins the strip back down to
-  // its own content width whenever that's narrower than what it grew to.
+  // The tab strip grows to fill the bar so a tab can reach its own preferred width (see .tabbedapp-tabs), but "+" stays a fixed sibling outside it so an overflowing, scrolling strip never scrolls it out of reach. Left alone, that growth strands "+" wherever the strip's grown edge lands rather than right after the tabs, so this pins the strip back down to its own content width whenever that's narrower than what it grew to.
   useEffect(() => {
     const nav = tabsNavRef.current;
     if (!nav) {
@@ -345,11 +353,7 @@ export const TabbedAppShell = forwardRef<
     let layoutFrame: number | null = null;
     let scrollFrame: number | null = null;
 
-    // The strip's own edge fade (see .tabbedapp-tabs--overflowing and its
-    // --at-start/--at-end siblings) is the reader's only cue that it
-    // scrolls now that its scrollbar is hidden by design - only reachable
-    // with an extreme number of tabs, since the floor below lets a tab
-    // shrink well past where it used to force this.
+    // The strip's own edge fade (see .tabbedapp-tabs--overflowing and its --at-start/--at-end siblings) is the reader's only cue that it scrolls now that its scrollbar is hidden by design - only reachable with an extreme number of tabs, since the floor below lets a tab shrink well past where it used to force this.
     function updateScrollEdgeState() {
       if (!nav) {
         return;
@@ -366,9 +370,7 @@ export const TabbedAppShell = forwardRef<
       if (!nav) {
         return;
       }
-      // scrollWidth only reports overflow, which there is none of while nav
-      // has grown wider than its content - measuring the last child's own
-      // edge is what actually says how much of that grown width is real.
+      // scrollWidth only reports overflow, which there is none of while nav has grown wider than its content - measuring the last child's own edge is what actually says how much of that grown width is real.
       const lastChild = nav.lastElementChild;
       nav.style.flexBasis = "";
       nav.style.flexGrow = "";
@@ -377,9 +379,7 @@ export const TabbedAppShell = forwardRef<
           nav.getBoundingClientRect().left
         : 0;
       const available = nav.clientWidth;
-      // flex-basis alone is not a cap: flex-grow still claims leftover space
-      // from that starting point, so it has to be zeroed too, or this pins
-      // nothing.
+      // flex-basis alone is not a cap: flex-grow still claims leftover space from that starting point, so it has to be zeroed too, or this pins nothing.
       if (needed < available) {
         nav.style.flexBasis = `${needed}px`;
         nav.style.flexGrow = "0";
@@ -510,14 +510,7 @@ export const TabbedAppShell = forwardRef<
     getDocuments: documentSummaries,
     openDocument: (document) => openImperativeDocuments([document]),
     openDocuments: openImperativeDocuments,
-    openSource: (source, options = {}) =>
-      openImperativeDocuments([
-        {
-          fileKey: options.fileKey,
-          source,
-          title: options.title,
-        },
-      ]),
+    openSource: openSourceDocument,
     showNotice,
   }));
 
@@ -569,8 +562,7 @@ export const TabbedAppShell = forwardRef<
     notifyDocumentsChangeEvent();
   }, [activeDocumentId, documents, notifyDocumentsChangeEvent]);
 
-  // Registered for the shell's lifetime, so it precedes a newly opened tab's
-  // own handler and stopImmediatePropagation stops that one running twice.
+  // Registered for the shell's lifetime, so it precedes a newly opened tab's own handler and stopImmediatePropagation stops that one running twice.
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey)) {
@@ -607,21 +599,28 @@ export const TabbedAppShell = forwardRef<
         return;
       }
 
-      const activeDocumentId = activeDocumentIdRef.current;
-      if (!activeDocumentId) {
+      // In split view, Ctrl+S/Ctrl+P must act on whichever pane the reader is actually looking at, not always the left one - same left/right resolution showDocumentInPanel and selectDocument already use.
+      const focusedDocumentId =
+        splitViewRef.current && activePanelRef.current === "right"
+          ? secondaryDocumentIdRef.current
+          : activeDocumentIdRef.current;
+      if (!focusedDocumentId) {
         return;
       }
 
-      void runDocumentCommandEvent(activeDocumentId, command);
+      void runDocumentCommandEvent(focusedDocumentId, command);
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     activeDocumentIdRef,
+    activePanelRef,
     openPdfDocumentsEvent,
     runDocumentCommandEvent,
     saveDocumentsEvent,
+    secondaryDocumentIdRef,
+    splitViewRef,
   ]);
 
   useEffect(() => {
@@ -692,6 +691,30 @@ export const TabbedAppShell = forwardRef<
     [],
   );
 
+  // Mirrors a mounted document's own fileKey/saveTarget onto its record, so neither lags behind what the core is actually using: the record is what a parked save and the already-open-tab dedup both read.
+  const updateDocumentSaveTarget = useCallback(
+    (documentId: string, change: PdfSaveTargetChange) => {
+      setDocuments((current) => {
+        const next = current.map((document) =>
+          document.id === documentId
+            ? {
+                ...document,
+                fileKey: change.fileKey ?? undefined,
+                source: {
+                  ...document.source,
+                  fileKey: change.fileKey ?? undefined,
+                  saveTarget: change.saveTarget,
+                },
+              }
+            : document,
+        );
+        documentsRef.current = next;
+        return next;
+      });
+    },
+    [documentsRef],
+  );
+
   const updateDocumentTitle = useCallback(
     (documentId: string, title: string) => {
       const cleanedTitle = cleanDocumentTitle(title);
@@ -722,8 +745,48 @@ export const TabbedAppShell = forwardRef<
     [],
   );
 
+  const forceClearBusyDocument = useCallback(
+    (documentId: string) => {
+      busyTimeoutsRef.current.delete(documentId);
+      // handleDocumentBusyChange cancels this timeout the moment the document reports itself clear, so by the time it actually fires the document is still on record as busy - but reading that off a captured busyDocumentIds would risk a stale close over the state setter's own always-current value, so the check happens inside it.
+      let wasBusy = false;
+      setBusyDocumentIds((current) => {
+        if (!current.has(documentId)) {
+          return current;
+        }
+        wasBusy = true;
+        const next = new Set(current);
+        next.delete(documentId);
+        return next;
+      });
+      if (wasBusy) {
+        showNotice(
+          "A document is taking longer than expected, so its controls have been unlocked. It may still be mid-operation.",
+          { tone: "warning" },
+        );
+      }
+    },
+    [showNotice],
+  );
+
   const handleDocumentBusyChange = useCallback(
     (documentId: string, busy: boolean) => {
+      const pendingTimeout = busyTimeoutsRef.current.get(documentId);
+      if (pendingTimeout !== undefined) {
+        window.clearTimeout(pendingTimeout);
+        busyTimeoutsRef.current.delete(documentId);
+      }
+
+      if (busy) {
+        busyTimeoutsRef.current.set(
+          documentId,
+          window.setTimeout(
+            () => forceClearBusyDocument(documentId),
+            DOCUMENT_BUSY_TIMEOUT_MS,
+          ),
+        );
+      }
+
       setBusyDocumentIds((current) => {
         const isCurrentlyBusy = current.has(documentId);
         if (isCurrentlyBusy === busy) {
@@ -738,6 +801,17 @@ export const TabbedAppShell = forwardRef<
         }
         return next;
       });
+    },
+    [forceClearBusyDocument],
+  );
+
+  // Unmounting the whole shell (a host tearing it down) leaves nothing for a pending timeout to unlock; only cancelling it avoids a setState on a component that no longer exists.
+  useEffect(
+    () => () => {
+      for (const timeout of busyTimeoutsRef.current.values()) {
+        window.clearTimeout(timeout);
+      }
+      busyTimeoutsRef.current.clear();
     },
     [],
   );
@@ -788,6 +862,16 @@ export const TabbedAppShell = forwardRef<
     for (const currentVisibleId of visibleDocumentIds()) {
       if (!nextVisibleIdSet.has(currentVisibleId)) {
         releaseDocumentResources(currentVisibleId);
+      }
+    }
+  }
+
+  // Mirror of releaseDocumentsLeavingView: an entering document always mounts a fresh view and starts a real load, but busyDocumentIds only reflects that once the view mounts and reports it - a gap a fast follow-up action can land in first and be silently dropped. onBusyChange still owns clearing it once that real load finishes.
+  function markDocumentsEnteringViewBusy(nextVisibleIds: string[]) {
+    const currentVisibleIdSet = new Set(visibleDocumentIds());
+    for (const nextVisibleId of nextVisibleIds) {
+      if (!currentVisibleIdSet.has(nextVisibleId)) {
+        handleDocumentBusyChange(nextVisibleId, true);
       }
     }
   }
@@ -877,6 +961,16 @@ export const TabbedAppShell = forwardRef<
     openHostDocuments(hostDocuments);
   }
 
+  /* Shared by the imperative openSource handle and the home screen's own source-opening request, so a resolved file opens the same way regardless of which one handed it in. */
+  function openSourceDocument(
+    source: PdfDocumentEditorSourceInput,
+    options: { fileKey?: string; title?: string } = {},
+  ) {
+    openImperativeDocuments([
+      { fileKey: options.fileKey, source, title: options.title },
+    ]);
+  }
+
   function openHostDocuments(hostDocuments: TabbedAppHostDocument[]) {
     if (shellLockedRef.current) {
       return;
@@ -958,11 +1052,7 @@ export const TabbedAppShell = forwardRef<
     );
   }
 
-  /**
-   * Every route that changes what is on screen goes through here, because a
-   * document leaving view must be captured before it unmounts - its
-   * annotations and unsaved bytes are in that session alone.
-   */
+  /** Every route that changes what is on screen goes through here, because a document leaving view must be captured before it unmounts - its annotations and unsaved bytes are in that session alone. */
   function showDocumentInPanel(documentId: string, panel: PanelSide) {
     if (shellLockedRef.current) {
       return;
@@ -983,10 +1073,10 @@ export const TabbedAppShell = forwardRef<
       return;
     }
 
+    const nextVisibleIds = panelDocumentIds(nextActiveId, nextSecondaryId);
     captureMountedSessions();
-    releaseDocumentsLeavingView(
-      panelDocumentIds(nextActiveId, nextSecondaryId),
-    );
+    releaseDocumentsLeavingView(nextVisibleIds);
+    markDocumentsEnteringViewBusy(nextVisibleIds);
     setActiveDocumentId(nextActiveId);
     if (split) {
       setSecondaryDocumentId(nextSecondaryId);
@@ -1010,20 +1100,21 @@ export const TabbedAppShell = forwardRef<
       return;
     }
 
-    // A fresh split always starts even; re-picking one that's already open
-    // is a swap, and keeps whatever ratio the reader dragged it to.
-    if (!splitView) {
+    // A fresh split always starts even; re-picking one that's already open is a swap, and keeps whatever ratio the reader dragged it to.
+    const isFirstSplit = !splitView;
+    if (isFirstSplit) {
       setSplitRatio(0.5);
     }
 
-    // Re-picking Split Right/Down while already split swaps the secondary
-    // document instead of being blocked, so whatever it displaces needs the
-    // same capture-then-release a close gives it - otherwise its live scroll
-    // and undo state would be silently dropped, not just hidden.
+    // Re-picking Split Right/Down while already split swaps the secondary document instead of being blocked, so whatever it displaces needs the same capture-then-release a close gives it - otherwise its live scroll and undo state would be silently dropped, not just hidden.
+    const nextVisibleIds = panelDocumentIds(activeDocumentId, targetDocumentId);
     captureMountedSessions();
-    releaseDocumentsLeavingView(
-      panelDocumentIds(activeDocumentId, targetDocumentId),
-    );
+    releaseDocumentsLeavingView(nextVisibleIds);
+    markDocumentsEnteringViewBusy(nextVisibleIds);
+    // The first split onto a second document also moves the active document's own view from tabbedapp-content's direct child into the panel wrapper markup below - a different position React remounts rather than updates, so it is about to run a real load too, same as the incoming secondary. A re-pick or a secondary swap keeps that wrapper in place, so only the entrant above needs this.
+    if (isFirstSplit && targetDocumentId !== activeDocumentId) {
+      handleDocumentBusyChange(activeDocumentId, true);
+    }
     setSplitDirection(direction);
     setSplitView(true);
     setSecondaryDocumentId(targetDocumentId);
@@ -1096,8 +1187,23 @@ export const TabbedAppShell = forwardRef<
     documentsRef.current = remainingDocuments;
     setDocuments(remainingDocuments);
     setActiveDocumentId(nextActiveId);
+    closeSplitViewIfSecondaryIsClosing(new Set([documentId]));
     releaseDocumentResources(documentId);
     return true;
+  }
+
+  // A closing tab may be the split view's own secondary pane, which (unlike the primary above) has no other tab to fall back to - closed the same way the dedicated Close Split button does, rather than leaving splitView on with a secondaryDocumentId that names a tab that no longer exists (rendering already falls back to a single pane when that happens, but the stale split state then confuses the next split/close).
+  function closeSplitViewIfSecondaryIsClosing(closingIds: ReadonlySet<string>) {
+    if (
+      !splitViewRef.current ||
+      secondaryDocumentIdRef.current === null ||
+      !closingIds.has(secondaryDocumentIdRef.current)
+    ) {
+      return;
+    }
+    setSplitView(false);
+    setSecondaryDocumentId(null);
+    setActivePanel("left");
   }
 
   async function closeDocumentGroup(
@@ -1158,11 +1264,18 @@ export const TabbedAppShell = forwardRef<
       }
     }
 
+    // The confirm dialog and the save above both await on the reader, who is free to switch to a document that is not even closing and keep editing it while they wait - re-captured now, or a remaining document's record would be overwritten with a session from before that edit and lose track that it needs saving.
+    const freshSessionsByDocumentId = new Map(
+      captureMountedSessions().map((update) => [
+        update.documentId,
+        update.session,
+      ]),
+    );
     const latestDocuments = documentsRef.current;
     const remainingDocuments = latestDocuments
       .filter((document) => !uniqueDocumentIds.has(document.id))
       .map((document) => {
-        const session = sessionsByDocumentId.get(document.id);
+        const session = freshSessionsByDocumentId.get(document.id);
         return session && session.sourceId === document.source.sourceId
           ? applySessionToDocument(document, session)
           : document;
@@ -1178,6 +1291,7 @@ export const TabbedAppShell = forwardRef<
     documentsRef.current = remainingDocuments;
     setDocuments(remainingDocuments);
     setActiveDocumentId(nextActiveId);
+    closeSplitViewIfSecondaryIsClosing(uniqueDocumentIds);
 
     for (const documentId of uniqueDocumentIds) {
       releaseDocumentResources(documentId);
@@ -1186,10 +1300,7 @@ export const TabbedAppShell = forwardRef<
     return true;
   }
 
-  /**
-   * Whether "Save changes" may be offered: only when Save All can reach every
-   * dirty document being closed.
-   */
+  /** Whether "Save changes" may be offered: only when Save All can reach every dirty document being closed. */
   function canSaveClosingDocuments(
     closingDocuments: TabbedAppOpenDocument[],
     dirtyDocumentIds: Set<string>,
@@ -1207,11 +1318,7 @@ export const TabbedAppShell = forwardRef<
     );
   }
 
-  /**
-   * Saves an unmounted tab from its parked session rather than by mounting it.
-   * Anything without its own destination is left for the reader to resolve
-   * one file at a time, rather than guessed at with one upfront folder pick.
-   */
+  /** Saves an unmounted tab from its parked session rather than by mounting it. Anything without its own destination is left for the reader to resolve one file at a time, rather than guessed at with one upfront folder pick. */
   async function saveDocuments(documentIds?: string[]) {
     if (shellLockedRef.current) {
       return new Set(documentIds ?? []);
@@ -1323,9 +1430,24 @@ export const TabbedAppShell = forwardRef<
     let savedCount = 0;
 
     for (const document of dirty) {
+      // The record only gates eligibility here (kept fresh by onSaveTargetChange); a mounted document is never written through a writer built from it, since the core's own target can have moved on since this record was last touched.
       const saveTarget = documentSaveTarget(document);
       if (!saveTarget) {
         failures.push(document);
+        continue;
+      }
+
+      const documentHandle = documentRefs.current.get(document.id);
+      if (documentHandle) {
+        try {
+          if (await documentHandle.save()) {
+            savedCount += 1;
+          } else {
+            failures.push(document);
+          }
+        } catch {
+          failures.push(document);
+        }
         continue;
       }
 
@@ -1335,16 +1457,6 @@ export const TabbedAppShell = forwardRef<
         (await saveTarget(bytes)) ?? undefined;
 
       try {
-        const documentHandle = documentRefs.current.get(document.id);
-        if (documentHandle) {
-          if (await documentHandle.saveWith(write)) {
-            savedCount += 1;
-          } else {
-            failures.push(document);
-          }
-          continue;
-        }
-
         const session = document.session;
         if (!session) {
           // Never mounted, so its bytes cannot be produced without rendering.
@@ -1404,10 +1516,7 @@ export const TabbedAppShell = forwardRef<
     );
   }
 
-  /**
-   * Read from the batch's own result, never documentsRef: onDirtyChange is a
-   * state update that has not committed by the time this returns.
-   */
+  /** Read from the batch's own result, never documentsRef: onDirtyChange is a state update that has not committed by the time this returns. */
   async function saveDocumentBeforeClose(documentIds: string[]) {
     return (await saveDocuments(documentIds)).size === 0;
   }
@@ -1733,7 +1842,9 @@ export const TabbedAppShell = forwardRef<
     }
   }
 
+  // preventDefault unconditionally, before any state check: skipping it while locked instead falls through to the browser's own drop handling, which navigates the tab to the dropped file and discards every open document.
   function handleDragEnter(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
     if (shellLockedRef.current) {
       return;
     }
@@ -1742,11 +1853,11 @@ export const TabbedAppShell = forwardRef<
       return;
     }
 
-    event.preventDefault();
     setDragActive(true);
   }
 
   function handleDragOver(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
     if (shellLockedRef.current) {
       return;
     }
@@ -1755,7 +1866,6 @@ export const TabbedAppShell = forwardRef<
       return;
     }
 
-    event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setDragActive(true);
   }
@@ -1773,6 +1883,7 @@ export const TabbedAppShell = forwardRef<
   }
 
   async function handleDrop(event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
     if (shellLockedRef.current) {
       return;
     }
@@ -1781,11 +1892,9 @@ export const TabbedAppShell = forwardRef<
       return;
     }
 
-    event.preventDefault();
     setDragActive(false);
 
-    // Both reads before anything awaits: a drag data store answers only while
-    // the drop event is being dispatched.
+    // Both reads before anything awaits: a drag data store answers only while the drop event is being dispatched.
     const droppedFiles = Array.from(event.dataTransfer.files);
     const droppedDocuments = fileAdapter.pdfDocumentsFromDrop?.(
       event.dataTransfer,
@@ -1831,6 +1940,24 @@ export const TabbedAppShell = forwardRef<
     }
   }
 
+  async function openPdfDocuments(request?: TabbedAppOpenDocumentRequest) {
+    if (!request) {
+      await handleOpenPdfRequest();
+      return;
+    }
+
+    if (request.kind === "template") {
+      await createTemplateDocument(request.template);
+      return;
+    }
+
+    try {
+      openSourceDocument(request.source, request.options);
+    } catch {
+      showNotice("Could not open this file.", { tone: "danger" });
+    }
+  }
+
   async function runNewTabMenuAction(action: TabbedAppMenuAction) {
     if (shellLockedRef.current) {
       return;
@@ -1859,9 +1986,7 @@ export const TabbedAppShell = forwardRef<
   const tabContextMenuDocument = tabContextMenu
     ? documents.find((document) => document.id === tabContextMenu.documentId)
     : null;
-  // Filtered against live state, not just the request's own id list: a save
-  // through any other path (a tab's own Save button) drops a document from
-  // here too, not only the two resolutions this dialog itself offers.
+  // Filtered against live state, not just the request's own id list: a save through any other path (a tab's own Save button) drops a document from here too, not only the two resolutions this dialog itself offers.
   const saveDestinationDocuments = saveDestinationRequest
     ? documents.filter(
         (document) =>
@@ -1874,13 +1999,13 @@ export const TabbedAppShell = forwardRef<
         (document) => document.id === tabContextMenuDocument.id,
       )
     : -1;
+  // A right-clicked tab is just as available to save/print when it is the secondary panel's document as when it is the primary's - it only needs a live mounted session, which either visible panel has.
   const tabContextMenuDocumentAvailable = Boolean(
     tabContextMenuDocument &&
-    tabContextMenuDocument.id === activeDocumentId &&
+    visibleDocumentIdSet.has(tabContextMenuDocument.id) &&
     documentRefs.current.has(tabContextMenuDocument.id),
   );
-  /* Merged once for all of them, so null and undefined cannot be handled
-     inconsistently per capability. */
+  /* Merged once for all of them, so null and undefined cannot be handled inconsistently per capability. */
   const capabilities: PdfDocumentEditorHostCapabilities = {
     onOpenExternalLink:
       documentOptions.onOpenExternalLink ?? fileAdapter.onOpenExternalLink,
@@ -1924,9 +2049,8 @@ export const TabbedAppShell = forwardRef<
       .join(" ");
   };
   const homeProps = {
-    createTemplateDocument,
     dragActive,
-    openPdfDocuments: handleOpenPdfRequest,
+    openPdfDocuments,
     templateActions: TEMPLATE_ACTIONS,
   };
   const showDropPanel = dragActive && Boolean(activeDocument);
@@ -1956,6 +2080,7 @@ export const TabbedAppShell = forwardRef<
         onBusyChange={handleDocumentBusyChange}
         onDirtyChange={updateDocumentDirtyState}
         onRegisterDocumentRef={registerDocumentRef}
+        onSaveTargetChange={updateDocumentSaveTarget}
         onTitleChange={updateDocumentTitle}
         secondView={secondView}
         splitDirection={panelSplitDirection}
@@ -1986,8 +2111,7 @@ export const TabbedAppShell = forwardRef<
     );
   }
 
-  // Named so a reader can tell which document the second panel holds without
-  // switching to it - the same reason a background tab keeps its own title.
+  // Named so a reader can tell which document the second panel holds without switching to it - the same reason a background tab keeps its own title.
   function renderSecondHeaderTitle() {
     return (
       <span className="tabbedapp-second-header-title truncate">
@@ -1996,8 +2120,7 @@ export const TabbedAppShell = forwardRef<
     );
   }
 
-  // Shared by both split directions: beside the tab bar for Split Right,
-  // capping the second panel for Split Down - one control either way.
+  // Shared by both split directions: beside the tab bar for Split Right, capping the second panel for Split Down - one control either way.
   function renderCloseSplitButton() {
     return (
       <button
@@ -2071,7 +2194,7 @@ export const TabbedAppShell = forwardRef<
           <header
             ref={tabbarRef}
             tabIndex={-1}
-            className={`tabbedapp-tabbar z-nav row end nowrap ${tabDragState ? "tabbedapp-tabbar-dragging" : ""}`}
+            className={`tabbedapp-tabbar z-dropdown row end nowrap ${tabDragState ? "tabbedapp-tabbar-dragging" : ""}`}
             onDragOver={handleTabbarDragOver}
             onDrop={handleTabbarDrop}
           >
@@ -2184,8 +2307,7 @@ export const TabbedAppShell = forwardRef<
                   onKeyDown={handleMenuKeyDown}
                   role="menu"
                   style={{
-                    // x is a distance from the viewport's right edge, not
-                    // the left one - see clampTabListMenuPosition.
+                    // x is a distance from the viewport's right edge, not the left one - see clampTabListMenuPosition.
                     right: tabListMenuPosition.x,
                     top: tabListMenuPosition.y,
                   }}
@@ -2215,8 +2337,7 @@ export const TabbedAppShell = forwardRef<
               ) : null}
             </div>
             <div className="tabbedapp-tabbar-actions row end nowrap xxs">
-              {/* Row gets its own second-header slot below; column has no
-                  equivalent slot yet, so its close button lives here. */}
+              {/* Row gets its own second-header slot below; column has no equivalent slot yet, so its close button lives here. */}
               {isMirroredSplit && splitDirection !== "row"
                 ? renderCloseSplitButton()
                 : null}
@@ -2285,9 +2406,7 @@ export const TabbedAppShell = forwardRef<
               aria-hidden="true"
               className="tabbedapp-tabbar-divider tabbedapp-tabbar-divider-end"
             />
-            {/* Kept apart from the tab-management cluster: always present, since
-            a reader with unsaved work in a tab they are not looking at is
-            exactly who needs to find this, not just who has just used it. */}
+            {/* Kept apart from the tab-management cluster: always present, since a reader with unsaved work in a tab they are not looking at is exactly who needs to find this, not just who has just used it. */}
             <button
               aria-label={
                 dirtyDocumentCount > 0
@@ -2306,9 +2425,7 @@ export const TabbedAppShell = forwardRef<
         </div>
         {splitView && splitDirection === "row" ? (
           <>
-            {/* A fixed-width spacer, not a border: the same width as
-                renderSplitResizer() below is what keeps this line aligned
-                with the page separator regardless of the split ratio. */}
+            {/* A fixed-width spacer, not a border: the same width as renderSplitResizer() below is what keeps this line aligned with the page separator regardless of the split ratio. */}
             <div
               aria-hidden="true"
               className="split-resizer tabbedapp-header-divider"
@@ -2328,13 +2445,9 @@ export const TabbedAppShell = forwardRef<
 
       <section className="tabbedapp-content">
         {activeDocument ? (
-          /* One document in both panels must stay one TabbedAppDocument:
-             mounting it twice would give each panel its own bytes and undo
-             history. */
+          /* One document in both panels must stay one TabbedAppDocument: mounting it twice would give each panel its own bytes and undo history. */
           secondaryDocument && secondaryDocument.id === activeDocument.id ? (
-            // Controlled by the shell's own splitRatio: this is the only
-            // resizer rendered for a mirrored split, so without this the
-            // header row above it (sized off the same state) never follows.
+            // Controlled by the shell's own splitRatio: this is the only resizer rendered for a mirrored split, so without this the header row above it (sized off the same state) never follows.
             renderDocumentPanel(activeDocument, {
               secondView: true,
               splitDirection,
@@ -2780,6 +2893,7 @@ function DocumentTabContent({
   onCloseDocument,
   onDirtyChange,
   onRegisterDocumentRef,
+  onSaveTargetChange,
   onSplitRatioChange,
   onTitleChange,
   secondView,
@@ -2797,6 +2911,7 @@ function DocumentTabContent({
   onRegisterDocumentRef: (
     documentId: string,
   ) => RefCallback<TabbedAppDocumentHandle>;
+  onSaveTargetChange: (documentId: string, change: PdfSaveTargetChange) => void;
   onSplitRatioChange?: Dispatch<SetStateAction<number>>;
   onTitleChange: (documentId: string, title: string) => void;
   secondView?: boolean;
@@ -2817,42 +2932,64 @@ function DocumentTabContent({
     (busy: boolean) => onBusyChange(document.id, busy),
     [document.id, onBusyChange],
   );
+  const handleSaveTargetChange = useCallback(
+    (change: PdfSaveTargetChange) => onSaveTargetChange(document.id, change),
+    [document.id, onSaveTargetChange],
+  );
+  const handleClose = useCallback(
+    () => void onCloseDocument(document.id, { skipConfirm: true }),
+    [document.id, onCloseDocument],
+  );
 
   return (
-    <Suspense
-      fallback={
-        <div className="tabbedapp-document-pane tabbedapp-document-pane-loading">
-          Loading…
-        </div>
-      }
-    >
-      <TabbedAppDocument
-        className="tabbedapp-document-pane"
-        enableGlobalShortcuts
-        enableWheelZoom
-        initialSession={document.session}
-        manageDocumentTitle={false}
-        confirmDiscardChanges={documentOptions.confirmDiscardChanges}
-        onClose={() => void onCloseDocument(document.id, { skipConfirm: true })}
-        onBusyChange={handleBusyChange}
-        onDirtyChange={handleDirtyChange}
-        onDocumentTitleChange={handleTitleChange}
-        onOpenExternalLink={documentOptions.onOpenExternalLink}
-        pickImageFile={documentOptions.pickImageFile}
-        pickMergePdfFile={documentOptions.pickMergePdfFile}
-        printTarget={documentOptions.printTarget}
-        ref={onRegisterDocumentRef(document.id)}
-        secondView={secondView}
-        splitDirection={splitDirection}
-        splitRatio={splitRatio}
-        onSplitRatioChange={onSplitRatioChange}
-        allowEditing={documentOptions.allowEditing ?? true}
-        allowImageAnnotations={documentOptions.allowImageAnnotations}
-        showCloseButton={false}
-        source={document.source}
-      />
-    </Suspense>
+    <DocumentPaneErrorBoundary onCloseDocument={handleClose}>
+      <Suspense
+        fallback={
+          <div className="tabbedapp-document-pane tabbedapp-document-pane-loading">
+            Loading…
+          </div>
+        }
+      >
+        <TabbedAppDocument
+          className="tabbedapp-document-pane"
+          enableGlobalShortcuts
+          enableWheelZoom
+          initialSession={document.session}
+          manageDocumentTitle={false}
+          confirmDiscardChanges={documentOptions.confirmDiscardChanges}
+          onClose={handleClose}
+          onBusyChange={handleBusyChange}
+          onDirtyChange={handleDirtyChange}
+          onDocumentTitleChange={handleTitleChange}
+          onSaveTargetChange={handleSaveTargetChange}
+          onOpenExternalLink={documentOptions.onOpenExternalLink}
+          pickImageFile={documentOptions.pickImageFile}
+          pickMergePdfFile={documentOptions.pickMergePdfFile}
+          printTarget={documentOptions.printTarget}
+          ref={onRegisterDocumentRef(document.id)}
+          secondView={secondView}
+          splitDirection={splitDirection}
+          splitRatio={splitRatio}
+          onSplitRatioChange={onSplitRatioChange}
+          allowEditing={documentOptions.allowEditing ?? true}
+          allowImageAnnotations={documentOptions.allowImageAnnotations}
+          showCloseButton={false}
+          source={document.source}
+        />
+      </Suspense>
+    </DocumentPaneErrorBoundary>
   );
+}
+
+// Mirrors updateDocumentTitle's own cleaning and guard: a parked tab's session comes from the same untrusted filename source (a host's Save As result, or the file itself) as a mounted one's onTitleChange, so it needs the same character rules and the same refusal to adopt an empty title or one that collides with the product's own name.
+function sanitizedSessionTitle(
+  fileName: string,
+  fallbackTitle: string,
+): string {
+  const cleanedTitle = cleanDocumentTitle(fileName);
+  return cleanedTitle && cleanedTitle !== PRODUCT_NAME
+    ? cleanedTitle
+    : fallbackTitle;
 }
 
 function applySessionToDocument(
@@ -2879,7 +3016,7 @@ function applySessionToDocument(
       name: session.fileName,
       sourceId: session.sourceId,
     },
-    title: session.fileName,
+    title: sanitizedSessionTitle(session.fileName, document.title),
   };
 }
 
@@ -2924,9 +3061,7 @@ function canOpenDroppedFiles(fileAdapter: TabbedAppHostAdapter) {
   );
 }
 
-// A title is a filename, so it is untrusted: a document opened through the
-// imperative API is titled from `source.name` before the core sees it, so the
-// character rules have to be applied on this side too.
+// A title is a filename, so it is untrusted: a document opened through the imperative API is titled from `source.name` before the core sees it, so the character rules have to be applied on this side too.
 function cleanDocumentTitle(title: string) {
   return displayableFileName(title.replace(/^\*/, ""));
 }
@@ -2963,8 +3098,7 @@ function cornellTitleAnnotation(text: string): PdfAnnotation {
   };
 }
 
-// The callback is mirrored in a ref, not listed as a dependency: the shell's
-// close handlers are inline, so depending on one re-subscribes every render.
+// The callback is mirrored in a ref, not listed as a dependency: the shell's close handlers are inline, so depending on one re-subscribes every render.
 function useDismissOnOutsidePress(
   open: boolean,
   insideSelector: string,
@@ -3061,13 +3195,7 @@ function clampMenuPosition(
   };
 }
 
-// The tab-list toggle lives at the bar's own right edge, so this menu opens
-// right-edge anchored rather than left-anchored like the others: positioned
-// with CSS `right`, not `left`, its own right edge lands exactly on the
-// button's regardless of the menu's actual max-content width - clampMenuPosition's
-// left-anchored math would leave a gap sized to however far that width falls
-// short of its own assumed maximum. `right`'s returned x is a distance from
-// the viewport's right edge, not the left one.
+// The tab-list toggle lives at the bar's own right edge, so this menu opens right-edge anchored rather than left-anchored like the others: positioned with CSS `right`, not `left`, its own right edge lands exactly on the button's regardless of the menu's actual max-content width - clampMenuPosition's left-anchored math would leave a gap sized to however far that width falls short of its own assumed maximum. `right`'s returned x is a distance from the viewport's right edge, not the left one.
 function clampTabListMenuPosition(buttonRight: number, y: number) {
   const margin = 8;
   const menuMaxWidth = 352; // matches .tabbedapp-tab-list-menu's own max-width

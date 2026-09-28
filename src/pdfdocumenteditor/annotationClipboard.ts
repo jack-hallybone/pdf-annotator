@@ -1,16 +1,11 @@
 import { annotationBounds, moveAnnotation } from "./annotationGeometry";
 import type { PdfAnnotation, PdfPoint, PdfRect } from "./types";
 
-/*
- * The annotations never go on the system clipboard: what goes there is a token
- * this window compares for equality, so no serialised annotation is ever parsed
- * and no user content reaches an OS clipboard history.
- */
+/* The annotations never go on the system clipboard: what goes there is a token this window compares for equality, so no serialised annotation is ever parsed and no user content reaches an OS clipboard history. */
 
 export const ANNOTATION_CLIPBOARD_TYPE = "application/x-pdfdocumenteditor-clip";
 
-/* PDF points, applied once per paste of the same clip, so repeated pastes do
- * not stack. */
+/* PDF points, applied once per paste of the same clip, so repeated pastes do not stack. */
 const PASTE_OFFSET_POINTS = 12;
 
 type AnnotationPasteTarget = {
@@ -50,11 +45,7 @@ export function readAnnotationPaste(
   return pasteAnnotations(clip.annotations, target, clip.pasteCount);
 }
 
-/**
- * A pasted annotation is a new one: a fresh `id` and no `sourceId`, because a
- * source identity names one dictionary in the file and sharing it would make
- * one edit match two annotations.
- */
+/** A pasted annotation is a new one: a fresh `id` and no `sourceId`, because a source identity names one dictionary in the file and sharing it would make one edit match two annotations. */
 function pasteAnnotations(
   annotations: PdfAnnotation[],
   target: AnnotationPasteTarget,

@@ -18,8 +18,7 @@ import {
 } from "../src/pdfdocumenteditor/pageIdentity";
 import { loadTestPdf } from "./pdfTestUtils";
 
-// Every operation answers with both halves of what it did: the bytes, and the
-// annotation names it changed getting there.
+// Every operation answers with both halves of what it did: the bytes, and the annotation names it changed getting there.
 async function applyStructuralOperationBytes(
   bytes: Uint8Array,
   operation: PdfStructuralOperation,
@@ -27,8 +26,7 @@ async function applyStructuralOperationBytes(
   return (await applyStructuralOperation(bytes, operation)).bytes;
 }
 
-// Each page gets a distinct width, so page identity and order can be verified
-// without real content or text extraction.
+// Each page gets a distinct width, so page identity and order can be verified without real content or text extraction.
 async function buildFingerprintedPdf(pageCount: number, startWidth = 600) {
   const doc = await PDFDocument.create();
   for (let index = 0; index < pageCount; index += 1) {
@@ -214,8 +212,7 @@ test("movePageBy swaps a page with its neighbor in either direction", async () =
   );
 });
 
-// A move must not renumber what it moves: a copied page leaves an annotation
-// named by nothing in the file, and the next edit to it stops the save.
+// A move must not renumber what it moves: a copied page leaves an annotation named by nothing in the file, and the next edit to it stops the save.
 test("movePageBy moves the page's own objects, not copies of them", async () => {
   const bytes = await indirectAnnotationPdf(["A", "B", "C"]);
   const before = await annotationEntries(bytes);
@@ -349,8 +346,7 @@ test("multi-step sequence: rotate, delete, add, then undo x3, redo x3 stays cons
   assert.deepEqual(await pageWidths(bytes), [600, 950, 601, 603]);
 });
 
-// A name that is none of the three the assertion allows is an identity the
-// writer will refuse.
+// A name that is none of the three the assertion allows is an identity the writer will refuse.
 const INDIRECT_PAGES = ["A", "B", "C", "D"];
 
 async function structuralOperations(
@@ -397,8 +393,7 @@ async function referencedAnnotations(bytes: Uint8Array) {
 for (const shape of ["as it is", "with the page removed first"] as const) {
   test(`every operation ${shape} leaves each annotation under a name the file has`, async () => {
     const original = await indirectAnnotationPdf(INDIRECT_PAGES);
-    // The second shape is delete-then-undo: the operation under test is the
-    // inversion that brings the page back.
+    // The second shape is delete-then-undo: the operation under test is the inversion that brings the page back.
     const bytes =
       shape === "as it is"
         ? original
@@ -425,8 +420,7 @@ for (const shape of ["as it is", "with the page removed first"] as const) {
       );
       const held = await referencedAnnotations(after);
 
-      // The one legitimate way for a name to stop naming anything: the page it was on
-      // left the document, and the dictionary left with it.
+      // The one legitimate way for a name to stop naming anything: the page it was on left the document, and the dictionary left with it.
       const mapping = pageMappingFor(pageOrderChangeOfOperation(operation));
 
       for (const [reference, { pageIndex, text }] of before) {
@@ -463,8 +457,7 @@ test("the three operations that relink rename nothing", async () => {
   }
 });
 
-// A merged file's `5 0 R` is not this document's, so reporting it would rename a
-// live identity onto a stranger's annotation.
+// A merged file's `5 0 R` is not this document's, so reporting it would rename a live identity onto a stranger's annotation.
 test("inserted pages that never left this document rename nothing", async () => {
   const target = await indirectAnnotationPdf(["A", "B"]);
   const elsewhere = await indirectAnnotationPdf(["X"]);
@@ -505,11 +498,7 @@ test("the undo of a delete reports the name every annotation came back under", a
   );
 });
 
-// Copying a page renames every annotation on it and removing one leaves
-// everything it owned in the context, so a second call to either is a second
-// place for that to go unreported. `movePageBy` is the one that must not go
-// through `dropPages`, because it re-links the same page. The scan is over the
-// whole of `src/`: a copy added in `pdfWriter.ts` would pass a narrower check.
+// Copying a page renames every annotation on it and removing one leaves everything it owned in the context, so a second call to either is a second place for that to go unreported. `movePageBy` is the one that must not go through `dropPages`, because it re-links the same page. The scan is over the whole of `src/`: a copy added in `pdfWriter.ts` would pass a narrower check.
 test("only pdfPageOperations copies or drops a page, and only where it says", async () => {
   const sourceDir = new URL("../src/", import.meta.url);
   const files = await readdir(sourceDir, { recursive: true });

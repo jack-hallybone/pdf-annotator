@@ -12,10 +12,7 @@ import {
   type PDFObject,
 } from "pdf-lib";
 
-// A byte scan answers "is this text still in the file?" wrongly in both
-// directions - a page's text is written as `<hex> Tj` inside a deflated content
-// stream, so a file full of the word reads clean, and a run of digits in a font
-// table reads as a hit - so the document is walked object by object.
+// A byte scan answers "is this text still in the file?" wrongly in both directions - a page's text is written as `<hex> Tj` inside a deflated content stream, so a file full of the word reads clean, and a run of digits in a font table reads as a hit - so the document is walked object by object.
 
 export async function markersIn(bytes: Uint8Array, pattern: RegExp) {
   const pdfDoc = await PDFDocument.load(bytes, {
@@ -85,8 +82,7 @@ export function streamText(object: PDFStream) {
     text = raw.toString("latin1");
   }
 
-  // The decoded hex runs are appended rather than substituted, so a marker written
-  // plainly and one written as `<hex>` are both visible.
+  // The decoded hex runs are appended rather than substituted, so a marker written plainly and one written as `<hex>` are both visible.
   return `${text}\n${decodeHexRuns(text)}`;
 }
 

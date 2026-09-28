@@ -3,8 +3,7 @@ import { X } from "lucide-react";
 import type { PdfDocumentEditorNoticeTone } from "../../pdfdocumenteditor";
 import type { PdfDocumentEditorReadOnlyReason } from "../../pdfdocumenteditor";
 
-// The core's vocabulary, so what it can raise and what this can render cannot
-// drift apart.
+// The core's vocabulary, so what it can raise and what this can render cannot drift apart.
 type TabbedAppNoticeTone = PdfDocumentEditorNoticeTone;
 
 export type TabbedAppNotice = {
@@ -35,8 +34,7 @@ export function TabbedAppNoticeStack({
   onPauseTimers?: () => void;
   onResumeTimers?: () => void;
 }) {
-  // React's focus events bubble, so the relatedTarget check is what keeps
-  // focus moving between controls inside the stack from reading as departure.
+  // React's focus events bubble, so the relatedTarget check is what keeps focus moving between controls inside the stack from reading as departure.
   return (
     <div
       className="tabbedapp-notice-stack toast inline no-print stack"

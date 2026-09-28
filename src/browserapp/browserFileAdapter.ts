@@ -1,5 +1,4 @@
-// Never src/pdfdocumenteditor's barrel: it re-exports PdfDocumentEditor, and this file is
-// in the initial chunk.
+// Never src/pdfdocumenteditor's barrel: it re-exports PdfDocumentEditor, and this file is in the initial chunk.
 import { createPdfFileLoader, readPdfFile } from "../pdfdocumenteditor/pdfFile";
 import type { PdfSaveAsTarget, PdfSaveTarget } from "../tabbedapp";
 import { PdfSaveError } from "../pdfdocumenteditor/host";
@@ -51,8 +50,7 @@ export const browserFileAdapter: TabbedAppHostAdapter = {
   pickImageFile: browserPickImageFile,
   printTarget: browserPrintTarget(),
   async pdfDocumentsFromDrop(dataTransfer) {
-    // Must stay the first statement and the only one touching `dataTransfer`:
-    // the run up to the first `await` is the whole window a drop answers in.
+    // Must stay the first statement and the only one touching `dataTransfer`: the run up to the first `await` is the whole window a drop answers in.
     const dropped = readDroppedFiles(dataTransfer);
 
     try {

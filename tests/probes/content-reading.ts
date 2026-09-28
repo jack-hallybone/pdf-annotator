@@ -1,5 +1,4 @@
-// The probes for the content-stream scan itself: what only looks like a page
-// drawing an XObject, the caps the scan is bounded by, and a repeated figure.
+// The probes for the content-stream scan itself: what only looks like a page drawing an XObject, the caps the scan is bounded by, and a repeated figure.
 import {
   PDFDict,
   PDFDocument,
@@ -21,8 +20,7 @@ export const CONTENT_READING_SHAPES = [
     name: "an inline image's data",
   },
   {
-    // The walk does not type-check, so neither does this: `Do` takes the name
-    // immediately before it, and an operator in between has consumed it.
+    // The walk does not type-check, so neither does this: `Do` takes the name immediately before it, and an operator in between has consumed it.
     keptContent: "q /Fm0 gs Q Do",
     name: "a name another operator already took",
   },
@@ -43,8 +41,7 @@ export async function contentReadingProbePdf(
   );
   const shared = context.register(
     context.flateStream(
-      // A form XObject that draws itself: the walk has to stop, and still read the
-      // marked content it holds.
+      // A form XObject that draws itself: the walk has to stop, and still read the marked content it holds.
       `${markedContent(["shared-xobject-mcid-0"])}${selfDrawing ? "\nq /Fm0 Do Q" : ""}`,
       {
         BBox: [0, 0, 612, 120],
@@ -122,9 +119,7 @@ export async function contentReadingProbePdf(
   return doc.save({ updateFieldAppearances: false, useObjectStreams: false });
 }
 
-// The scan is bounded twice: how far one `Do` may nest, and how much may be
-// decoded in all. A file that reaches either gets the reachability answer and is
-// reported, because that answer may leave a deleted page's description behind.
+// The scan is bounded twice: how far one `Do` may nest, and how much may be decoded in all. A file that reaches either gets the reachability answer and is reported, because that answer may leave a deleted page's description behind.
 export async function cappedContentProbePdf(shape: "deep" | "long") {
   const doc = await PDFDocument.create();
   const { context } = doc;
@@ -143,8 +138,7 @@ export async function cappedContentProbePdf(shape: "deep" | "long") {
   let inner = form(markedContent(["capped-xobject-mcid-0"]), {
     StructParents: 7,
   });
-  // Deeper than MAX_CONTENT_SCAN_DEPTH, or wider than the byte budget: 40 MiB of
-  // comments, which flate stores in a few kilobytes and the scan has to decode.
+  // Deeper than MAX_CONTENT_SCAN_DEPTH, or wider than the byte budget: 40 MiB of comments, which flate stores in a few kilobytes and the scan has to decode.
   const levels = shape === "deep" ? 24 : 1;
   const padding =
     shape === "long" ? `%${"x".repeat(1024)}\n`.repeat(40 * 1024) : "";
@@ -203,9 +197,7 @@ export async function cappedContentProbePdf(shape: "deep" | "long") {
   return doc.save({ updateFieldAppearances: false, useObjectStreams: false });
 }
 
-// The same stream is never read twice. Eleven form XObjects, each drawing the
-// next one twice: read once each that is eleven small streams; read once per
-// path it is two thousand, which spends the whole byte budget.
+// The same stream is never read twice. Eleven form XObjects, each drawing the next one twice: read once each that is eleven small streams; read once per path it is two thousand, which spends the whole byte budget.
 export async function repeatedDrawProbePdf() {
   const doc = await PDFDocument.create();
   const { context } = doc;
@@ -228,8 +220,7 @@ export async function repeatedDrawProbePdf() {
       Resources: context.obj({ XObject: context.obj({ Fm: level }) }),
     });
   }
-  // The key nothing draws: only the content could decide it, so a scan that ran
-  // out of budget has not decided it.
+  // The key nothing draws: only the content could decide it, so a scan that ran out of budget has not decided it.
   const undrawn = form(markedContent(["repeated-undrawn-mcid-0"]), {
     StructParents: 7,
   });

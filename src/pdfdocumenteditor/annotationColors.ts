@@ -31,10 +31,7 @@ export const annotationColorSwatches: RgbColor[] = [
   annotationColors.red,
 ];
 
-/*
- * 0.8 is the lowest step at which a note's outline and glyph clear WCAG's 3:1
- * floor over its own fill for all seven colours; 0.75 leaves purple short.
- */
+/* 0.8 is the lowest step at which a note's outline and glyph clear WCAG's 3:1 floor over its own fill for all seven colours; 0.75 leaves purple short. */
 export const NOTE_MARK_OPACITY = 0.8;
 
 /* A selected note's outline is heavier, and clears the same floor. */

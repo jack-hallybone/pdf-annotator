@@ -22,11 +22,7 @@ export type SensitiveTabbedAppDocumentSession =
     chrome: TabbedAppDocumentChromeState;
   };
 
-/**
- * The spread is the dangerous part: the core's throwing `toJSON` is
- * non-enumerable, so spreading a session drops it and leaves a plain object of
- * PDF bytes that `JSON.stringify` will happily serialise.
- */
+/** The spread is the dangerous part: the core's throwing `toJSON` is non-enumerable, so spreading a session drops it and leaves a plain object of PDF bytes that `JSON.stringify` will happily serialise. */
 export function composeTabbedAppSession(
   session: SensitivePdfDocumentEditorSession,
   chrome: TabbedAppDocumentChromeState,

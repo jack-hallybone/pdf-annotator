@@ -1,6 +1,4 @@
-// The whole journey, against the built site rather than the dev server: it
-// builds, opens a PDF, takes an annotation, saves, and the annotation is still
-// there when the file is opened again, measured in pixels twice.
+// The whole journey, against the built site rather than the dev server: it builds, opens a PDF, takes an annotation, saves, and the annotation is still there when the file is opened again, measured in pixels twice.
 
 //   Run:  node tests/journey.test.mjs   (builds the site; needs playwright's chromium)
 import assert from "node:assert/strict";
@@ -12,9 +10,7 @@ import { chromium } from "@playwright/test";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { serveBuiltSite } from "./site.mjs";
 
-// A plain one-page PDF, made here: `test-annotated.pdf` carries 23 annotations
-// of its own, so every reading below would start at hundreds of ink pixels, and
-// `test-pdfa.pdf` opens read-only, correctly, so there is no pen to click.
+// A plain one-page PDF, made here: `test-annotated.pdf` carries 23 annotations of its own, so every reading below would start at hundreds of ink pixels, and `test-pdfa.pdf` opens read-only, correctly, so there is no pen to click.
 async function writeFixture() {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]);
@@ -32,13 +28,12 @@ async function writeFixture() {
   return at;
 }
 
-// The picker is a File System Access dialog no browser automation can drive, so
-// files are set on the fallback input the shell always renders, which takes the
-// same open path.
+// The picker is a File System Access dialog no browser automation can drive, so files are set on the fallback input the shell always renders, which takes the same open path.
 const FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
 const FIXTURE = await writeFixture();
 const site = await serveBuiltSite();
+
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ acceptDownloads: true });
 const page = await context.newPage();
@@ -51,9 +46,7 @@ after(async () => {
   site.close();
 });
 
-// The annotation canvases only, never the page canvas: the fixture's page has
-// text on it, so a reading that included the document would be thousands of
-// pixels before the pen was ever picked up.
+// The annotation canvases only, never the page canvas: the fixture's page has text on it, so a reading that included the document would be thousands of pixels before the pen was ever picked up.
 const inkPixels = () =>
   page
     .locator(".pdfdocumenteditor-ink-canvas-layer")
@@ -132,8 +125,7 @@ test("saving produces a PDF", async () => {
     page.waitForEvent("download"),
     page.getByRole("button", { name: "Download a copy" }).click(),
   ]);
-  // saveAs, not `download.path()`: Playwright's own temp path has no extension,
-  // and the app refuses an extensionless file silently.
+  // saveAs, not `download.path()`: Playwright's own temp path has no extension, and the app refuses an extensionless file silently.
   saved = join(dirname(FIXTURE), "saved.pdf");
   await download.saveAs(saved);
   const bytes = await readFile(saved);
@@ -141,9 +133,7 @@ test("saving produces a PDF", async () => {
 });
 
 test("reopening the saved file still shows the annotation", async () => {
-  // Reloaded first, and that is the whole case: opening the saved file into the
-  // running app leaves the tab that still holds the stroke in memory beside it, so
-  // every reading below would find the annotation either way.
+  // Reloaded first, and that is the whole case: opening the saved file into the running app leaves the tab that still holds the stroke in memory beside it, so every reading below would find the annotation either way.
   await page.goto(site.url);
   await page.locator(".browserapp-home-card").waitFor({ state: "visible" });
   assert.equal(await inkPixels(), 0, "the reload did not clear the session");

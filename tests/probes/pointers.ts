@@ -1,6 +1,4 @@
-// The probes for what a delete does to the pointers a reader follows: every
-// container that can name a page or a form field from outside it, and a button
-// whose export values are indexed by its widget list.
+// The probes for what a delete does to the pointers a reader follows: every container that can name a page or a form field from outside it, and a button whose export values are indexed by its widget list.
 import {
   PDFDict,
   PDFDocument,
@@ -11,8 +9,7 @@ import {
   type PDFPage,
 } from "pdf-lib";
 
-// One of everything that can name a page or a form field from outside it, so the
-// sweep is over a measured set; page 0 is the one that leaves.
+// One of everything that can name a page or a form field from outside it, so the sweep is over a measured set; page 0 is the one that leaves.
 export async function pointerProbePdf(useObjectStreams: boolean) {
   const doc = await PDFDocument.create();
   const { context } = doc;
@@ -268,10 +265,7 @@ export async function pointerProbePdf(useObjectStreams: boolean) {
   return doc.save({ updateFieldAppearances: false, useObjectStreams });
 }
 
-// A button's `/Opt` is indexed by `/Kids` position, and both shapes here - `/Opt`
-// inherited from a parent field, which is spec-legal, and an `/Opt` a different
-// size from `/Kids` - once left the surviving widget holding the deleted
-// widget's export value.
+// A button's `/Opt` is indexed by `/Kids` position, and both shapes here - `/Opt` inherited from a parent field, which is spec-legal, and an `/Opt` a different size from `/Kids` - once left the surviving widget holding the deleted widget's export value.
 export async function buttonProbePdf(shape: "inherited" | "size-mismatch") {
   const doc = await PDFDocument.create();
   const { context } = doc;

@@ -1,5 +1,4 @@
-// Page geometry for the built-in templates, kept apart from pdfTemplates.ts so
-// that the shell can read these numbers without pulling in pdf-lib.
+// Page geometry for the built-in templates, kept apart from pdfTemplates.ts so that the shell can read these numbers without pulling in pdf-lib.
 
 export type PdfTemplateKind = "a4Blank" | "a4Lined" | "a4Cornell";
 
@@ -24,8 +23,7 @@ export const CORNELL_CONTENT_BOUNDS = {
   titleWidth: A4_SIZE[0] - templateMarginX * 2,
 };
 
-// Snaps a y to the nearest ruled line, so dividers sit on the ruling rather
-// than between two lines.
+// Snaps a y to the nearest ruled line, so dividers sit on the ruling rather than between two lines.
 function ruledLineNear(targetY: number) {
   const maxIndex = Math.floor((ruledTop - ruledBottom) / lineSpacing);
   const index = Math.min(

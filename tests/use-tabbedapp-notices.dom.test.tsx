@@ -39,9 +39,7 @@ test("reportMalformedAnnotations ignores zero and pluralises", () => {
   assert.match(result.current.notices[1].message, /^3 annotations could not/);
 });
 
-// The tone decides how insistently a screen reader announces it - `danger`
-// renders role="alert" and interrupts - and a file that merely arrived with an
-// annotation we cannot draw has broken nothing of the reader's.
+// The tone decides how insistently a screen reader announces it - `danger` renders role="alert" and interrupts - and a file that merely arrived with an annotation we cannot draw has broken nothing of the reader's.
 test("a malformed-annotation report warns rather than alarms", () => {
   const { result } = renderHook(() => useTabbedAppNotices());
 
@@ -49,11 +47,9 @@ test("a malformed-annotation report warns rather than alarms", () => {
   assert.equal(result.current.notices[0].tone, "warning");
 });
 
-// A message about something that did not happen has to still be there when the
-// reader looks back at the screen.
+// A message about something that did not happen has to still be there when the reader looks back at the screen.
 test("a danger notice stays until it is dismissed", async () => {
-  // A short default, so "never expires" is distinguishable from "expires in ten
-  // seconds" without the test taking ten seconds.
+  // A short default, so "never expires" is distinguishable from "expires in ten seconds" without the test taking ten seconds.
   const { result } = renderHook(() =>
     useTabbedAppNotices({ defaultDurationMs: 20 }),
   );
@@ -90,8 +86,7 @@ test("an explicit duration still overrides the tone default", async () => {
   assert.equal(result.current.notices.length, 0);
 });
 
-// Hovering or tabbing into the stack pauses every countdown, so a notice cannot
-// disappear out from under whoever is reading it.
+// Hovering or tabbing into the stack pauses every countdown, so a notice cannot disappear out from under whoever is reading it.
 test("pausing holds a notice past its duration, and resuming releases it", async () => {
   const { result } = renderHook(() => useTabbedAppNotices());
 
@@ -118,8 +113,7 @@ test("pausing holds a notice past its duration, and resuming releases it", async
   );
 });
 
-// A notice raised while the pointer is already on the stack would otherwise be
-// the one message that ignores the pause.
+// A notice raised while the pointer is already on the stack would otherwise be the one message that ignores the pause.
 test("a notice raised while paused does not start counting down", async () => {
   const { result } = renderHook(() => useTabbedAppNotices());
 

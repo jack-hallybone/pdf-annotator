@@ -13,12 +13,9 @@ import type {
   Tool,
 } from "../../src/pdfdocumenteditor";
 
-// This reaches for src/pdfdocumenteditor's barrel and nothing else, so a binding split
-// view needs but the core does not export would fail to compile.
+// This reaches for src/pdfdocumenteditor's barrel and nothing else, so a binding split view needs but the core does not export would fail to compile.
 
-// Every entry is a read of a view's own state or a call on its handle, never a
-// back channel: a harness that copied anything between the views would be
-// answering its own question.
+// Every entry is a read of a view's own state or a call on its handle, never a back channel: a harness that copied anything between the views would be answering its own question.
 type SplitViewControls = {
   activePageIndex: (view: ViewId) => number;
   annotationCount: (view: ViewId) => number;
@@ -54,8 +51,7 @@ function SplitView({ source }: { source: PdfDocumentEditorSource }) {
   const documentEditorModel = usePdfDocumentEditor({
     onClose: () => {},
     onNotice: (message) => {
-      // The core draws no banner of its own, so a host that swallows this swallows
-      // every "could not save this file" the save path raises.
+      // The core draws no banner of its own, so a host that swallows this swallows every "could not save this file" the save path raises.
       console.warn(`[split-harness] ${message}`);
     },
     source,
@@ -117,8 +113,7 @@ function SplitView({ source }: { source: PdfDocumentEditorSource }) {
     setTool,
   };
 
-  // Everything it closes over is a ref or a stable setter, so one mount-time
-  // assignment stays current.
+  // Everything it closes over is a ref or a stable setter, so one mount-time assignment stays current.
   const controlsRef = useRef(controls);
   controlsRef.current = controls;
   useLayoutEffect(() => {
@@ -141,8 +136,7 @@ function SplitView({ source }: { source: PdfDocumentEditorSource }) {
         tool={tool}
       >
         {(state) => {
-          // The overlay slot is where a host reads the view state. A ref write during
-          // render, deliberately: there is nothing to paint.
+          // The overlay slot is where a host reads the view state. A ref write during render, deliberately: there is nothing to paint.
           viewStates.current[view] = state;
           return null;
         }}

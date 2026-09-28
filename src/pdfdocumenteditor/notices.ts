@@ -1,7 +1,4 @@
-/**
- * How the core reports something to its host: it raises notices and never
- * renders them.
- */
+/** How the core reports something to its host: it raises notices and never renders them. */
 export type PdfDocumentEditorNoticeTone = "danger" | "warning" | "success";
 
 export type PdfDocumentEditorNoticeOptions = {

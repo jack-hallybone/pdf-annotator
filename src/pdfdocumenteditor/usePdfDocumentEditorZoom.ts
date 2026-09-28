@@ -23,8 +23,7 @@ type PdfDocumentEditorZoomParams = {
 
 type PdfDocumentEditorZoomApi = {
   scale: number;
-  // No scroll anchor: session restore and document reset manage scroll
-  // themselves.
+  // No scroll anchor: session restore and document reset manage scroll themselves.
   setScale: (nextScale: number) => void;
   updateZoom: (delta: number) => void;
   resetZoom: () => void;
@@ -33,9 +32,7 @@ type PdfDocumentEditorZoomApi = {
   fitZoomToPageHeight: () => void;
 };
 
-// The zoom scale, plus the anchoring that keeps the active page visually
-// stable across a zoom change: the anchor is captured on zoom and re-applied
-// by a layout effect once the new scale has laid out.
+// The zoom scale, plus the anchoring that keeps the active page visually stable across a zoom change: the anchor is captured on zoom and re-applied by a layout effect once the new scale has laid out.
 export function usePdfDocumentEditorZoom({
   scrollContainerRef,
   pagesRef,
@@ -106,8 +103,7 @@ export function usePdfDocumentEditorZoom({
       return;
     }
 
-    // Read the real padding rather than a flat guess, so a page fit to width
-    // never renders wider than the box the dock's clearance keeps clear of.
+    // Read the real padding rather than a flat guess, so a page fit to width never renders wider than the box the dock's clearance keeps clear of.
     const style = getComputedStyle(container);
     const horizontalPadding =
       parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);

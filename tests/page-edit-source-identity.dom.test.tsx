@@ -19,8 +19,7 @@ import type { PdfDocumentEditorSource } from "../src/pdfdocumenteditor/host";
 import type { PdfDocumentEditorViewBridge } from "../src/pdfdocumenteditor/useDocumentModel";
 import type { PdfDocumentEditorViewSnapshot } from "../src/pdfdocumenteditor/viewSnapshot";
 
-// Every case reads the file that was written rather than the model's own
-// bookkeeping, which can look right over a file that is wrong.
+// Every case reads the file that was written rather than the model's own bookkeeping, which can look right over a file that is wrong.
 
 // pdf.js's browser entry touches these globals while it is evaluated.
 class FakeDOMMatrix {}
@@ -38,8 +37,7 @@ globals.Path2D ??= FakePath2D;
 const { useDocumentModel } =
   await import("../src/pdfdocumenteditor/useDocumentModel");
 
-// pdfRender's module side effect points workerSrc at a stubbed Vite asset, so it
-// has to be aimed at the real worker after that import.
+// pdfRender's module side effect points workerSrc at a stubbed Vite asset, so it has to be aimed at the real worker after that import.
 const { GlobalWorkerOptions } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 GlobalWorkerOptions.workerSrc = new URL(
   "../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
@@ -56,8 +54,7 @@ const TWO_NOTES = [null, "note on page 1", "note on page 2"];
 
 type Model = ReturnType<typeof useDocumentModel>;
 
-// appendDocument needs a host file picker, so its insert-at-the-end shape is
-// covered by the page insert here and by page-identity.test.ts.
+// appendDocument needs a host file picker, so its insert-at-the-end shape is covered by the page insert here and by page-identity.test.ts.
 const PAGE_EDITS = [
   {
     afterEdit: [
@@ -152,9 +149,7 @@ for (const pageEdit of PAGE_EDITS) {
   });
 }
 
-// The restatement runs before the reload, so a reload that fails would leave
-// every identity describing bytes that were never committed. The failure comes
-// from the renderer refusing the document (tests/refusingRenderer.mjs).
+// The restatement runs before the reload, so a reload that fails would leave every identity describing bytes that were never committed. The failure comes from the renderer refusing the document (tests/refusingRenderer.mjs).
 test("a page delete whose reload fails puts every identity back", async () => {
   const written: Uint8Array[] = [];
   const notices: string[] = [];
@@ -179,8 +174,7 @@ test("a page delete whose reload fails puts every identity back", async () => {
     await model().handleDeletePage(0);
   });
 
-  // The refusal must have been spent here, or the case passed on a path it never
-  // drove.
+  // The refusal must have been spent here, or the case passed on a path it never drove.
   assert.equal(
     pendingDocumentRefusals(),
     0,
@@ -355,9 +349,7 @@ test("a removal whose page is deleted outright is dropped, not replayed", async 
   assert.deepEqual(await fileNotes(written.at(-1)!), modelNotes(model()));
 });
 
-// The writer's uniqueness check counts how many annotations a key matches, so it
-// cannot tell a shifted /Annots array from the one the key was minted against:
-// the count is 1 either way, and the 1 is the wrong annotation.
+// The writer's uniqueness check counts how many annotations a key matches, so it cannot tell a shifted /Annots array from the one the key was minted against: the count is 1 either way, and the 1 is the wrong annotation.
 const CROWDED_PAGES: PageNotes[] = [
   null,
   ["note A", "note B", "note C"],
@@ -485,9 +477,7 @@ test("an identity a page edit cannot restate stops the save by name", async () =
   );
 });
 
-// Undoing a page delete re-creates that page's annotation objects under new
-// numbers. The delete direction reported success with the note still in the
-// written file, so this asks the outcome rather than the refusal.
+// Undoing a page delete re-creates that page's annotation objects under new numbers. The delete direction reported success with the note still in the written file, so this asks the outcome rather than the refusal.
 test("deleting a note on a page a delete-undo restored takes it out of the file", async () => {
   const written: Uint8Array[] = [];
   const notices: string[] = [];
@@ -622,8 +612,7 @@ test("a page edit does not re-read the marks the model already holds", async () 
   assert.deepEqual(await fileNotes(written.at(-1)!), modelNotes(model()));
 });
 
-// The undo of a page delete is insertPages over extractPagesBytes, and both
-// halves copy, so an indirect reference comes back naming nothing.
+// The undo of a page delete is insertPages over extractPagesBytes, and both halves copy, so an indirect reference comes back naming nothing.
 const COPY_SHAPED_PAGES: PageNotes[] = [
   ["p0a", "p0b"],
   "p1",
@@ -927,8 +916,7 @@ function sourceIdentities(
   ]);
 }
 
-// Read back through the command that parks a tab, where a session's bookkeeping
-// is written down. By identity only: the rollback rebuilds the objects.
+// Read back through the command that parks a tab, where a session's bookkeeping is written down. By identity only: the rollback rebuilds the objects.
 function pageEditBookkeeping(model: Model) {
   const session = model.createDocumentEditorSession();
   assert.ok(session, "no session was captured for a loaded document");
@@ -1060,8 +1048,7 @@ function useStubView() {
   return { bridge };
 }
 
-// Either the dictionary itself, whose identity is its position, or an indirect
-// reference, the shape a re-created page renumbers.
+// Either the dictionary itself, whose identity is its position, or an indirect reference, the shape a re-created page renumbers.
 async function notesPdf(contents: PageNotes[], indirect = false) {
   const pdfDoc = await PDFDocument.create();
   const { context } = pdfDoc;
@@ -1076,8 +1063,7 @@ async function notesPdf(contents: PageNotes[], indirect = false) {
         C: [1, 0.9, 0],
         Contents: PDFHexString.fromText(text),
         P: page.ref,
-        // Each note gets its own rectangle: sharing one would share a geometry key
-        // too, and position is all that tells them apart.
+        // Each note gets its own rectangle: sharing one would share a geometry key too, and position is all that tells them apart.
         Rect: [72, 700 - index * 40, 92, 720 - index * 40],
         Subtype: "Text",
         Type: "Annot",

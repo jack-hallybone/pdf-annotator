@@ -17,12 +17,14 @@ import {
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf } from "./pdfTestUtils";
 
-// annotationImport imports PDF.js's browser entry, which reads these globals
-// while the module is evaluated.
+// annotationImport imports PDF.js's browser entry, which reads these globals while the module is evaluated.
 installPdfJsGlobals();
 const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
-const { importExistingAnnotationsForPage } =
-  await import("../src/pdfdocumenteditor/annotationImport");
+const {
+  importExistingAnnotationsForPage,
+  MAX_INK_POINTS_PER_ANNOTATION,
+  MAX_QUADPOINTS_PER_ANNOTATION,
+} = await import("../src/pdfdocumenteditor/annotationImport");
 
 test("PDF.js highlight arrays and third-party metadata survive an in-place edit", async () => {
   const bytes = await buildIndirectHighlightPdf();
@@ -78,6 +80,43 @@ test("PDF.js highlight arrays and third-party metadata survive an in-place edit"
   );
 });
 
+// Both the rects this builds for display and the raw quadPoints the annotation keeps for its own /QuadPoints on save read the same capped array, so a huge claim cannot survive in one of the two and not the other.
+test("a highlight claiming an absurd number of quads is capped on import, not carried in full", async () => {
+  const rawQuadCount = MAX_QUADPOINTS_PER_ANNOTATION + 500;
+  const bytes = await buildHugeQuadPointsHighlightPdf(rawQuadCount);
+  const imported = await importPageAnnotations(bytes);
+  const highlight = imported.find(
+    (annotation) => annotation.kind === "textHighlight",
+  );
+
+  assert.ok(highlight && highlight.kind === "textHighlight");
+  assert.equal(highlight.quadPoints.length, MAX_QUADPOINTS_PER_ANNOTATION);
+  assert.equal(highlight.rects.length, MAX_QUADPOINTS_PER_ANNOTATION);
+});
+
+test("an ink annotation claiming an absurd number of points is capped on import, not carried in full", async () => {
+  const rawPointCount = MAX_INK_POINTS_PER_ANNOTATION + 5_000;
+  const bytes = await buildHugeInkListPdf(rawPointCount);
+  const imported = await importPageAnnotations(bytes);
+  const ink = imported.find((annotation) => annotation.kind === "draw");
+
+  assert.ok(ink && ink.kind === "draw");
+  const totalPoints = ink.paths.reduce((sum, path) => sum + path.length, 0);
+  assert.equal(totalPoints, MAX_INK_POINTS_PER_ANNOTATION);
+});
+
+// A cap shared across every path in one annotation, not per-path: two merely-large paths add up to the same claim as one huge one.
+test("an ink annotation's cap is shared across its paths, not reset for each one", async () => {
+  const perPath = Math.floor(MAX_INK_POINTS_PER_ANNOTATION / 2) + 2_000;
+  const bytes = await buildHugeInkListPdf(perPath, 2);
+  const imported = await importPageAnnotations(bytes);
+  const ink = imported.find((annotation) => annotation.kind === "draw");
+
+  assert.ok(ink && ink.kind === "draw");
+  const totalPoints = ink.paths.reduce((sum, path) => sum + path.length, 0);
+  assert.equal(totalPoints, MAX_INK_POINTS_PER_ANNOTATION);
+});
+
 test("a direct annotation dictionary is updated rather than duplicated", async () => {
   const bytes = await buildDirectNotePdf();
   const imported = await importPageAnnotations(bytes);
@@ -118,9 +157,7 @@ test("ambiguous duplicate annotation names stop replacement", async () => {
   );
 });
 
-// The position pdf.js reports for a direct dictionary can belong to a different
-// annotation, and the writer identifies a direct dictionary by that position;
-// the neighbour here is flagged NoView (bit 6).
+// The position pdf.js reports for a direct dictionary can belong to a different annotation, and the writer identifies a direct dictionary by that position; the neighbour here is flagged NoView (bit 6).
 test("an edit is not written to the entry ahead of it when pdf.js's array is shifted", async () => {
   const bytes = await buildShiftedAnnotsPdf({ neighbourSubtype: "Highlight" });
   const imported = await importPageAnnotations(bytes);
@@ -305,8 +342,7 @@ test("invalid or duplicate in-memory annotation identifiers stop the save", asyn
 });
 
 async function importPageAnnotations(bytes: Uint8Array) {
-  // Hoisted rather than inlined: `isEvalSupported` is absent from PDF.js 6's types
-  // and an inline literal would trip excess-property checking.
+  // Hoisted rather than inlined: `isEvalSupported` is absent from PDF.js 6's types and an inline literal would trip excess-property checking.
   const options = {
     data: bytes.slice(),
     disableFontFace: true,
@@ -356,6 +392,48 @@ async function buildIndirectHighlightPdf() {
   );
   highlight.set(PDFName.of("Popup"), popupRef);
   page.node.set(PDFName.of("Annots"), context.obj([highlightRef, popupRef]));
+  return rawSave(pdfDoc);
+}
+
+async function buildHugeQuadPointsHighlightPdf(quadCount: number) {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const { context } = pdfDoc;
+  const quadPoints: number[] = [];
+  for (let index = 0; index < quadCount; index += 1) {
+    const y = 90 + (index % 600);
+    quadPoints.push(72, y, 180, y, 72, y - 10, 180, y - 10);
+  }
+  const highlight = context.obj({
+    C: [1, 0.9, 0],
+    QuadPoints: quadPoints,
+    Rect: [72, 80, 180, 700],
+    Subtype: "Highlight",
+    Type: "Annot",
+  });
+  page.node.set(PDFName.of("Annots"), context.obj([highlight]));
+  return rawSave(pdfDoc);
+}
+
+async function buildHugeInkListPdf(pointsPerPath: number, pathCount = 1) {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const { context } = pdfDoc;
+  const inkList: number[][] = [];
+  for (let pathIndex = 0; pathIndex < pathCount; pathIndex += 1) {
+    const points: number[] = [];
+    for (let index = 0; index < pointsPerPath; index += 1) {
+      points.push(10 + (index % 500), 10 + Math.floor(index / 500));
+    }
+    inkList.push(points);
+  }
+  const ink = context.obj({
+    InkList: inkList,
+    Rect: [0, 0, 612, 792],
+    Subtype: "Ink",
+    Type: "Annot",
+  });
+  page.node.set(PDFName.of("Annots"), context.obj([ink]));
   return rawSave(pdfDoc);
 }
 

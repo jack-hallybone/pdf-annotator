@@ -2,41 +2,30 @@
 @import "../documentShell.css";
 @import "../splitResizer.css";
 
-/*
- * src/theme.css is never edited here and is imported by this file and no other.
- */
+/* src/theme.css is never edited here and is imported by this file and no other. */
 
-/* theme.css's own defaults now match what this project used to retint to,
-   so there is nothing left to redeclare here. */
+/* A new value snaps to theme.css's nearest existing token rather than defining a one-off, even at the cost of a small visual difference. */
+
+/* theme.css's own defaults now match what this project used to retint to, so there is nothing left to redeclare here. */
 :root {
-  /* --theme-accent is left at the theme's own default (--theme-ink): nothing
-     in the app's own chrome carries colour except a reader's marks and the
-     one exception below. */
+  /* --theme-accent is left at the theme's own default (--theme-ink): nothing in the app's own chrome carries colour except a reader's marks and the one exception below. */
 
-  /* The one exception: a selection needs to read as "selected", not just
-     "focused", once accent turns monochrome. Fixed in both schemes, not
-     light-dark - it marks a selection over the page, which is always white
-     paper regardless of the app's own colour scheme (same reasoning as
-     --app-ink-on-light/dark below). */
+  /* The one exception: a selection needs to read as "selected", not just "focused", once accent turns monochrome. Fixed in both schemes, not light-dark - it marks a selection over the page, which is always white paper regardless of the app's own colour scheme (same reasoning as --app-ink-on-light/dark below). */
   --app-selection: #1a56b0;
 
-  /* Fixed in both schemes: a reader-chosen fill does not follow the colour
-     scheme, so an ink that flipped would invert the contrast it was chosen
-     for. */
+  /* Fixed in both schemes: a reader-chosen fill does not follow the colour scheme, so an ink that flipped would invert the contrast it was chosen for. */
   --app-ink-on-light: #1c1917;
   --app-ink-on-dark: #ffffff;
 }
 
 @media (prefers-contrast: more) {
   :root:root {
-    /* Same reasoning as theme.css's own high-contrast overrides: a fixed
-       value needs its own darker step here since it can't ride --theme-ink's. */
+    /* Same reasoning as theme.css's own high-contrast overrides: a fixed value needs its own darker step here since it can't ride --theme-ink's. */
     --app-selection: #0b3d91;
   }
 }
 
-/* Overrides theme.css's accent-tinted default: selected text should read as
-   "selected", the same cue as everything else this project marks that way. */
+/* Overrides theme.css's accent-tinted default: selected text should read as "selected", the same cue as everything else this project marks that way. */
 ::selection {
   background: rgb(from var(--app-selection) r g b / 0.24);
 }
@@ -51,20 +40,15 @@ textarea {
 /* ── the document editor itself ──────────────────────────────────────────── */
 
 .pdfdocumenteditor {
-  /* --app-scrollbar-* are written from PdfDocumentEditor.tsx once the real
-     scrollbar gutter is measured. */
+  /* --app-scrollbar-* are written from PdfDocumentEditor.tsx once the real scrollbar gutter is measured. */
   --app-control-bottom-edge: var(--theme-space-md);
   --app-control-right-edge: var(--theme-space-md);
   --app-floating-safe-inline: 5rem;
-  /* Halved onto both sides rather than added only on the right, so the page
-     stack centres on the true viewport rather than on a box the dock alone
-     narrows; the total reserved width, and so the fit-to-width calculation
-     that reads it, is unchanged. */
+  /* Halved onto both sides rather than added only on the right, so the page stack centres on the true viewport rather than on a box the dock alone narrows; the total reserved width, and so the fit-to-width calculation that reads it, is unchanged. */
   --app-dock-clearance: calc(
     (var(--app-floating-safe-inline) + var(--app-scrollbar-inline)) / 2
   );
-  /* --app-selection-button-size: written from viewerConfig.ts, which also
-     positions the button. */
+  /* --app-selection-button-size: written from viewerConfig.ts, which also positions the button. */
   --app-scrollbar-block: 0px;
   --app-scrollbar-inline: 0px;
 
@@ -75,16 +59,13 @@ textarea {
   --app-shadow-hairline: 0 1px 2px rgb(from var(--theme-shadow) r g b / 0.05);
 }
 
-/* Positioned, so the floating chrome anchors here and never starts under the
-   docked notices. */
+/* Positioned, so the floating chrome anchors here and never starts under the docked notices. */
 .pdfdocumenteditor-body {
   min-height: 0;
   position: relative;
 }
 
-/* `min-width`/`min-height: 0` on children is what lets an even split hold:
-   a flex item's default minimum is its content, and a PDF page is wider (or,
-   stacked, taller) than half the window whenever the reader zooms in. */
+/* `min-width`/`min-height: 0` on children is what lets an even split hold: a flex item's default minimum is its content, and a PDF page is wider (or, stacked, taller) than half the window whenever the reader zooms in. */
 .pdfdocumenteditor-split {
   display: flex;
   min-height: 0;
@@ -99,11 +80,7 @@ textarea {
   min-width: 0;
 }
 
-/* The draggable seam between the two views; dragging it only ever moves
-   `splitRatio`, the same state a resize by keyboard changes. Shares
-   .split-resizer's shape (splitResizer.css), but must restate flex here:
-   .pdfdocumenteditor-split > * above sets it too, at equal specificity, and
-   this rule needs to win by coming after it in this file. */
+/* The draggable seam between the two views; dragging it only ever moves `splitRatio`, the same state a resize by keyboard changes. Shares .split-resizer's shape (splitResizer.css), but must restate flex here: .pdfdocumenteditor-split > * above sets it too, at equal specificity, and this rule needs to win by coming after it in this file. */
 .pdfdocumenteditor-split-resizer {
   background: transparent;
   flex: 0 0 7px;
@@ -210,7 +187,8 @@ textarea {
 .settings-panel {
   box-sizing: border-box;
   display: grid;
-  font-size: var(--theme-text-md);
+  /* Not .menu's own --theme-text-sm: this panel sits inside a popover styled with both .menu and .floating-popover (theme.css and tabbedapp/styles.css respectively), and at equal specificity .floating-popover's own --theme-text-xs wins there by source order, overriding .menu's. The image-tool-menu popover beside this one carries the same two classes, so --theme-text-xs is the size its own menu-item text actually renders at - matching it here, not .menu's nominal (but locally overridden) token, is what makes this panel's text match that sibling menu's. */
+  font-size: var(--theme-text-xs);
   gap: var(--theme-space-sm);
   min-width: 12rem;
   width: max-content;
@@ -229,8 +207,7 @@ textarea {
   width: max-content;
 }
 
-/* --theme-control-border, not --theme-border: this line is the only thing
-   that says where the control is, so it owes WCAG 1.4.11's 3:1. */
+/* --theme-control-border, not --theme-border: this line is the only thing that says where the control is, so it owes WCAG 1.4.11's 3:1. */
 .color-swatch,
 .color-picker-button {
   border-color: var(--theme-control-border);
@@ -327,6 +304,7 @@ textarea {
   border-radius: var(--theme-radius-sm);
   box-sizing: border-box;
   color: var(--theme-ink);
+  /* --theme-text-xs, matching .settings-field above: see the comment on .settings-panel for why xs (not .menu's own sm) is this popover's actual text size. */
   font-size: var(--theme-text-xs);
   font-weight: var(--theme-weight-medium);
   justify-content: space-between;

@@ -1,7 +1,4 @@
-/* Shared by pdfdocumenteditor's own root and tabbedapp's own wrapper around
-   it: two different elements, but the identical outer shell either one needs
-   on its own - a project-internal candidate for promotion to theme.css if a
-   third surface ever needs the same shape. */
+/* Shared by pdfdocumenteditor's own root and tabbedapp's own wrapper around it: two different elements, but the identical outer shell either one needs on its own - a project-internal candidate for promotion to theme.css if a third surface ever needs the same shape. */
 .document-shell {
   background: var(--theme-canvas);
   color: var(--theme-ink);

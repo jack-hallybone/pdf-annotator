@@ -41,8 +41,12 @@ import {
 } from "./freeTextLayout";
 import type { PdfPageMapping } from "./pageIdentity";
 import { ANNOTATION_BOOKMARK_KEY } from "./annotationBookmarkKey";
-import { normalizeAnnotationComment } from "./annotationComments";
-import { loadEditablePdf, saveEditedPdf } from "./pdfPageOperations";
+import {
+  loadEditablePdf,
+  pageNodeAnnots,
+  saveEditedPdf,
+} from "./pdfPageOperations";
+import { strippedDocumentText, strippedLiveText } from "./untrustedText";
 import type { InkAnnotation, PdfAnnotation, PdfPoint, PdfRect } from "./types";
 
 const printFlag = 4;
@@ -112,10 +116,11 @@ type WritePdfAnnotationsOptions = {
   replaceAnnotationSourceIds?: Iterable<string>;
   replacePageIndexes?: Iterable<number>;
   onMalformedExistingAnnotations?: (count: number) => void;
+  // An annotation whose own pageIndex no longer exists in this document (a stale annotation outrun by a structural edit) is left out rather than written to the wrong page or thrown away unnoticed - the caller decides whether that is worth telling the reader.
+  onUnwritablePageIndex?: (count: number) => void;
 };
 
-// For a caller that is not making these bytes its next baseline; every save
-// must use writeAnnotatedPdf and carry its `sources` back into the session.
+// For a caller that is not making these bytes its next baseline; every save must use writeAnnotatedPdf and carry its `sources` back into the session.
 export async function writePdfAnnotations(
   bytes: Uint8Array,
   annotations: PdfAnnotation[],
@@ -131,8 +136,7 @@ export async function writeAnnotatedPdf(
 ): Promise<{ bytes: Uint8Array; sources: WrittenAnnotationSources }> {
   assertAnnotationsTextIsSupported(annotations);
   const pdfDoc = await loadEditablePdf(bytes);
-  // Before anything is removed, updated or pushed: this is the layout the
-  // identities handed in were minted against.
+  // Before anything is removed, updated or pushed: this is the layout the identities handed in were minted against.
   const entriesBefore = captureAnnotsEntryPositions(pdfDoc);
   const replacePageIndexes = options.replacePageIndexes
     ? new Set(options.replacePageIndexes)
@@ -200,9 +204,11 @@ export async function writeAnnotatedPdf(
   }
 
   let freeTextFont: PDFFont | null = null;
+  let unwritablePageIndexCount = 0;
 
   for (const annotation of [...annotations].sort(annotationWriteOrder)) {
     if (!isWritablePageIndex(pdfDoc, annotation.pageIndex)) {
+      unwritablePageIndexCount += 1;
       continue;
     }
 
@@ -296,8 +302,7 @@ export async function writeAnnotatedPdf(
       const fontSize = pdfFontSize(annotation.fontSize);
       const [r, g, b] = pdfColor(annotation.color);
       const rotation = annotation.rotation ?? 0;
-      // freeTextContentRect lays out against an un-rotated rect, so it needs
-      // the local footprint, not `annotation.rect`'s rotated on-page one.
+      // freeTextContentRect lays out against an un-rotated rect, so it needs the local footprint, not `annotation.rect`'s rotated on-page one.
       const rect = freeTextContentRect(
         rotatedAnnotationRect(annotation.rect, rotation),
         text,
@@ -351,7 +356,9 @@ export async function writeAnnotatedPdf(
     }
 
     if (annotation.kind === "stickyNote") {
-      if (annotation.text.trim().length === 0) {
+      // Defence in depth to match freeText's normalizedFreeText call above: PageAnnotationOverlays.tsx already strips hidden characters as the reader types or pastes, but this is what actually reaches /Contents. Not strippedDocumentText: like freeText's own text, a note's body is never trimmed, only stripped, or the in-memory clean baseline (never trimmed either) would stop matching what a reopened file comes back with.
+      const text = strippedLiveText(annotation.text);
+      if (text.trim().length === 0) {
         continue;
       }
 
@@ -365,7 +372,7 @@ export async function writeAnnotatedPdf(
           Type: "Annot",
           Subtype: "Text",
           Rect: rectToArray(annotation.rect),
-          Contents: pdfTextString(annotation.text),
+          Contents: pdfTextString(text),
           ...annotationBase(annotation.id),
           ...annotationBookmarkEntry(annotation),
           Name: "Note",
@@ -376,7 +383,7 @@ export async function writeAnnotatedPdf(
           },
         },
         takeUpdateTarget(),
-        clearedAnnotationKeys(annotation, annotation.text),
+        clearedAnnotationKeys(annotation, text),
       );
       continue;
     }
@@ -415,9 +422,12 @@ export async function writeAnnotatedPdf(
     }
   }
 
+  if (unwritablePageIndexCount > 0) {
+    options.onUnwritablePageIndex?.(unwritablePageIndexCount);
+  }
+
   const output = await saveEditedPdf(pdfDoc);
-  // After saveEditedPdf, not before: stripping signature widgets shifts every
-  // direct dictionary behind them.
+  // After saveEditedPdf, not before: stripping signature widgets shifts every direct dictionary behind them.
   return {
     bytes: output,
     sources: writtenAnnotationSources(
@@ -459,8 +469,7 @@ function isWritablePageIndex(pdfDoc: PDFDocument, pageIndex: number) {
 function annotationBase(id: string) {
   const date = PDFString.of(pdfDate());
   return {
-    // PDFString.of does not escape PDF literal delimiters, and ids can enter
-    // via the exported host API, so /NM is written as a hex string.
+    // PDFString.of does not escape PDF literal delimiters, and ids can enter via the exported host API, so /NM is written as a hex string.
     NM: PDFHexString.fromText(id),
     M: date,
     CreationDate: date,
@@ -472,8 +481,7 @@ type AppearanceDict = NonNullable<
   Parameters<PDFPage["doc"]["context"]["flateStream"]>[1]
 >;
 
-// Every appearance is the same Form XObject envelope; only the content stream,
-// the box and the resources differ.
+// Every appearance is the same Form XObject envelope; only the content stream, the box and the resources differ.
 function registerAppearanceStream(
   page: PDFPage,
   content: string,
@@ -646,8 +654,7 @@ function encodedAppearanceText(font: PDFFont, text: string) {
 }
 
 function pdfTextString(text: string) {
-  // PDFString.of() does not escape '(', ')' or '\', so a note as ordinary as
-  // ":)" terminates the literal early and corrupts the object.
+  // PDFString.of() does not escape '(', ')' or '\', so a note as ordinary as ":)" terminates the literal early and corrupts the object.
   const literal = PDFString.of(text);
   if (/[()\\]/.test(text) || literal.decodeText() !== text) {
     return PDFHexString.fromText(text);
@@ -1019,8 +1026,7 @@ function resolveAnnotationUpdateTargets(
   pdfDoc: PDFDocument,
   annotations: PdfAnnotation[],
   requestedSourceIds: string[],
-  // Only the copy path passes it: reports what it cannot pin down instead of
-  // throwing.
+  // Only the copy path passes it: reports what it cannot pin down instead of throwing.
   onUnwritable?: (annotationId: string) => void,
 ) {
   const targets = new Map<string, ExistingAnnotationTarget>();
@@ -1116,8 +1122,7 @@ type UnwritableAnnotations = {
   annotationIds: ReadonlySet<string>;
   /** Requested removals that name nothing this file can be sure of. */
   removalSourceIds: ReadonlySet<string>;
-  // Annotations left out, counted once each: not the size of the two sets
-  // above, since an edited annotation whose identity is lost is in both.
+  // Annotations left out, counted once each: not the size of the two sets above, since an edited annotation whose identity is lost is in both.
   omittedAnnotationCount: number;
 };
 
@@ -1138,8 +1143,7 @@ export async function unwritableAnnotations(
     (annotationId) => annotationIds.add(annotationId),
   );
 
-  // A removal keyed to an omitted annotation has to go too: it would take the
-  // dictionary out while nothing is written in its place.
+  // A removal keyed to an omitted annotation has to go too: it would take the dictionary out while nothing is written in its place.
   const omittedKeys = new Set(
     annotations
       .filter((annotation) => annotationIds.has(annotation.id))
@@ -1191,8 +1195,7 @@ export async function unwritableAnnotations(
   };
 }
 
-// The write half of the /Annots position rule: an edit whose source could not
-// be pinned down stops the save.
+// The write half of the /Annots position rule: an edit whose source could not be pinned down stops the save.
 function assertSourceIdIsResolved(sourceId: string, pageIndex: number) {
   const reason = unresolvedSourceReason(sourceId);
   if (!reason) {
@@ -1206,8 +1209,7 @@ function assertSourceIdIsResolved(sourceId: string, pageIndex: number) {
   );
 }
 
-// The dictionary an edit updates has to be the kind that edit writes: updating
-// in place sets /Subtype, so a drifted position would retype a neighbour.
+// The dictionary an edit updates has to be the kind that edit writes: updating in place sets /Subtype, so a drifted position would retype a neighbour.
 function assertTargetSubtypeMatches(
   target: ExistingAnnotationTarget,
   annotation: PdfAnnotation,
@@ -1238,8 +1240,7 @@ function annotationSubtypeForKind(kind: PdfAnnotation["kind"]) {
   }
 }
 
-// Removals carry the same rule: a deletion whose source could not be pinned
-// down stops the save rather than quietly staying in the file.
+// Removals carry the same rule: a deletion whose source could not be pinned down stops the save rather than quietly staying in the file.
 function assertReplacementKeysAreResolved(replacementKeys: Set<string>) {
   for (const key of replacementKeys) {
     const reason = unresolvedSourceReason(key);
@@ -1255,8 +1256,7 @@ function assertReplacementKeysAreResolved(replacementKeys: Set<string>) {
   }
 }
 
-// Re-mints identities from what was written, since the written bytes become the
-// baseline without being re-imported.
+// Re-mints identities from what was written, since the written bytes become the baseline without being re-imported.
 
 /** What this write did to one identity that existed in the input bytes. */
 type WrittenAnnotationSource =
@@ -1281,8 +1281,7 @@ type AnnotsEntryPositions = {
   positions: Map<unknown, AnnotsEntryPosition>;
 };
 
-// Keyed by the entry object itself, the one thing that survives an update in
-// place: addAnnotation mutates the dictionary already in the array.
+// Keyed by the entry object itself, the one thing that survives an update in place: addAnnotation mutates the dictionary already in the array.
 function captureAnnotsEntryPositions(
   pdfDoc: PDFDocument,
 ): AnnotsEntryPositions {
@@ -1290,14 +1289,7 @@ function captureAnnotsEntryPositions(
   const positions = new Map<unknown, AnnotsEntryPosition>();
 
   for (const [pageIndex, page] of pdfDoc.getPages().entries()) {
-    let annots: PDFArray | undefined;
-    try {
-      annots = page.node.Annots();
-    } catch {
-      // A present-but-wrong-typed /Annots: nothing on this page can be
-      // followed, so every identity here falls through to unresolved.
-      continue;
-    }
+    const annots = pageNodeAnnots(page);
     if (!annots) {
       continue;
     }
@@ -1365,8 +1357,7 @@ function writtenAnnotationSources(
   return sources;
 }
 
-// `pageMapping` is required, not defaulted: assuming the two numberings agree
-// lands a later save's edit on a neighbour.
+// `pageMapping` is required, not defaulted: assuming the two numberings agree lands a later save's edit on a neighbour.
 export function remapAnnotationSources<T extends PdfAnnotation>(
   annotations: T[],
   sources: WrittenAnnotationSources,
@@ -1390,14 +1381,12 @@ export function remapAnnotationSources<T extends PdfAnnotation>(
   return changed ? next : annotations;
 }
 
-// An applied removal is dropped: carrying its position forward lets it delete
-// whatever moved into the slot.
+// An applied removal is dropped: carrying its position forward lets it delete whatever moved into the slot.
 export function remapRemovedAnnotationSources(
   removedSourceIds: Iterable<string>,
   sources: WrittenAnnotationSources,
   pageMapping: PdfPageMapping,
-  // Null means not known, and the page test below is skipped rather than made
-  // against a guess.
+  // Null means not known, and the page test below is skipped rather than made against a guess.
   pageOfRemovedSource: (sourceId: string) => number | null = () => null,
 ): string[] {
   const next: string[] = [];
@@ -1431,9 +1420,7 @@ function remappedSourceId(
     return sourceId;
   }
 
-  // Asked of the annotation's page, not only the page a `direct:` identity
-  // spells: an indirect reference carries no page, and that is the page an undo
-  // re-creates its object on.
+  // Asked of the annotation's page, not only the page a `direct:` identity spells: an indirect reference carries no page, and that is the page an undo re-creates its object on.
   if (
     annotationPageIndex !== null &&
     pageMapping.backward(annotationPageIndex) === null
@@ -1448,26 +1435,22 @@ function remappedSourceId(
 
   const source = trackedWrittenSource(written, sources);
   if (!source) {
-    // Either an identity this writer never tracks, or one already stale in the
-    // input, which shiftedSourceId tells apart.
+    // Either an identity this writer never tracks, or one already stale in the input, which shiftedSourceId tells apart.
     return shiftedSourceId(sourceId, annotationPageIndex ?? 0);
   }
 
   if (source.kind === "removed") {
-    // Known removed, not merely unconfirmed, so the identity is dropped rather
-    // than retired as `unresolved:`; the writer then writes it fresh.
+    // Known removed, not merely unconfirmed, so the identity is dropped rather than retired as `unresolved:`; the writer then writes it fresh.
     return undefined;
   }
 
   const restated = identitySourceId(source.sourceId, pageMapping);
   if (restated === null) {
-    // The write moved it onto a page these identities' document does not have,
-    // so nothing here can name it.
+    // The write moved it onto a page these identities' document does not have, so nothing here can name it.
     return shiftedSourceId(sourceId, annotationPageIndex ?? 0);
   }
 
-  // Left exactly as it was: restating an unchanged identity in the writer's own
-  // spelling would churn every work signature for nothing.
+  // Left exactly as it was: restating an unchanged identity in the writer's own spelling would churn every work signature for nothing.
   return sourceIdKeys(restated)[0] === sourceIdKeys(sourceId)[0]
     ? sourceId
     : restated;
@@ -1535,9 +1518,7 @@ function shiftedSourceId(sourceId: string, pageIndex: number) {
   );
 }
 
-// One walk, because two questions are asked of it and must answer over the same
-// members: a filter that drifted between them would let a key read as unique
-// while the write found a second match.
+// One walk, because two questions are asked of it and must answer over the same members: a filter that drifted between them would let a key read as unique while the write found a second match.
 function* fileAnnotations(
   pdfDoc: PDFDocument,
   onPage: (pageIndex: number) => boolean,
@@ -1546,7 +1527,7 @@ function* fileAnnotations(
     if (!onPage(pageIndex)) {
       continue;
     }
-    const annots = page.node.Annots();
+    const annots = pageNodeAnnots(page);
     if (!annots) {
       continue;
     }
@@ -1589,8 +1570,7 @@ function findExistingAnnotationTargets(
     pdfDoc,
     (page) => preferredPageIndex === null || page === preferredPageIndex,
   )) {
-    // An update target has to be something the writer can name back: a
-    // reference or a dictionary written straight into the array.
+    // An update target has to be something the writer can name back: a reference or a dictionary written straight into the array.
     if (!(entry instanceof PDFRef) && !(entry instanceof PDFDict)) {
       continue;
     }
@@ -1605,8 +1585,7 @@ function findExistingAnnotationTargets(
   return matches;
 }
 
-// Only a key naming a place in the file can be checked against the document:
-// one drawn and deleted before any save legitimately matches nothing.
+// Only a key naming a place in the file can be checked against the document: one drawn and deleted before any save legitimately matches nothing.
 function namesAPlaceInTheFile(replacementKey: string) {
   return (
     replacementKey.startsWith("ref:") || replacementKey.startsWith("direct:")
@@ -1659,8 +1638,7 @@ function replacementKeyCounts(
   return counts;
 }
 
-// The other end of the same count: the check above refuses a removal key
-// matching two annotations, and this one refuses a key matching none.
+// The other end of the same count: the check above refuses a removal key matching two annotations, and this one refuses a key matching none.
 function assertReplacementKeysWereFound(
   replacementKeys: Set<string>,
   counts: Map<string, number>,
@@ -1681,8 +1659,7 @@ function removeSupportedExistingAnnotations(
   replacePageIndexes: Set<number> | null,
   replaceAnnotationSourceIds: Set<string> | null,
 ) {
-  // Keyed by "pageIndex:index" so the same malformed annotation isn't
-  // double-counted across the two passes below.
+  // Keyed by "pageIndex:index" so the same malformed annotation isn't double-counted across the two passes below.
   const malformedAnnotationKeys = new Set<string>();
 
   for (const [pageIndex, page] of pdfDoc.getPages().entries()) {
@@ -1690,9 +1667,13 @@ function removeSupportedExistingAnnotations(
       continue;
     }
 
-    const annots = page.node.Annots();
+    const annots = pageNodeAnnots(page);
 
     if (!annots) {
+      // A present-but-wrong-typed /Annots leaves nothing on this page that can be inspected; counted once for the page rather than left silent.
+      if (page.node.has(PDFName.of("Annots"))) {
+        malformedAnnotationKeys.add(`${pageIndex}:*`);
+      }
       continue;
     }
 
@@ -1719,8 +1700,7 @@ function removeSupportedExistingAnnotations(
           }
         }
       } catch {
-        // pdf-lib's lookupMaybe throws on a present-but-wrong-typed value,
-        // which must not abort the save.
+        // pdf-lib's lookupMaybe throws on a present-but-wrong-typed value, which must not abort the save.
         malformedAnnotationKeys.add(`${pageIndex}:${index}`);
       }
     }
@@ -1745,8 +1725,7 @@ function removeSupportedExistingAnnotations(
           annots.remove(index);
         }
       } catch {
-        // Same as above - a single malformed existing annotation must not
-        // block removal/preservation decisions for the rest of the page.
+        // Same as above - a single malformed existing annotation must not block removal/preservation decisions for the rest of the page.
         malformedAnnotationKeys.add(`${pageIndex}:${index}`);
       }
     }
@@ -1807,8 +1786,7 @@ function isRemovableAnnotationSubtype(
     return true;
   }
 
-  // Never bulk-remove Stamp annotations from other software: this app's own
-  // image stamps are removable only through a matched /NM id.
+  // Never bulk-remove Stamp annotations from other software: this app's own image stamps are removable only through a matched /NM id.
   return subtype === "Stamp" && replaceAnnotationSourceIds !== null;
 }
 
@@ -1862,16 +1840,21 @@ function annotationSourceKeys(
   ref: unknown,
   annotation?: PDFDict,
 ) {
-  const values = [
-    ref instanceof PDFRef ? ref.toString() : null,
-    !(ref instanceof PDFRef)
-      ? directSourceId(pageIndex, annotationIndex)
-      : null,
-    pdfStringEntry(annotation, "NM"),
-    annotationGeometrySourceKey(annotation),
-    `page:${pageIndex}:annotation-${annotationIndex}`,
-  ].filter((value): value is string => Boolean(value));
-  return values.flatMap(sourceIdKeys);
+  try {
+    const values = [
+      ref instanceof PDFRef ? ref.toString() : null,
+      !(ref instanceof PDFRef)
+        ? directSourceId(pageIndex, annotationIndex)
+        : null,
+      pdfStringEntry(annotation, "NM"),
+      annotationGeometrySourceKey(annotation),
+      `page:${pageIndex}:annotation-${annotationIndex}`,
+    ].filter((value): value is string => Boolean(value));
+    return values.flatMap(sourceIdKeys);
+  } catch {
+    // A wrong-typed /Rect, /NM or /Contents makes pdf-lib throw rather than return undefined; such a neighbour is unprovable, not a match, and must not stop the scan for every other annotation on the page.
+    return [];
+  }
 }
 
 function annotationGeometrySourceKey(annotation?: PDFDict) {
@@ -1935,8 +1918,7 @@ function sourceIdKeys(sourceId: string): string[] {
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length > 1) {
-    // Exactly one primary identity: treating every alias as an or condition
-    // can delete a second annotation sharing /NM or geometry.
+    // Exactly one primary identity: treating every alias as an or condition can delete a second annotation sharing /NM or geometry.
     const referencePart = parts.find((part) => canonicalPdfReferenceKey(part));
     const precisePart = parts.find((part) => !isFallbackSourceIdPart(part));
     const geometryPart = parts.find((part) =>
@@ -1960,8 +1942,7 @@ function sourceIdKeys(sourceId: string): string[] {
     return [`direct:${normalized.slice(7)}`];
   }
   if (normalized.toLowerCase().startsWith(UNRESOLVED_SOURCE_ID_PREFIX)) {
-    // Deliberately a key annotationSourceKeys never produces, so an unconfirmed
-    // identity matches nothing and the save stops on it.
+    // Deliberately a key annotationSourceKeys never produces, so an unconfirmed identity matches nothing and the save stops on it.
     return [`${UNRESOLVED_SOURCE_ID_PREFIX}${normalized.slice(11)}`];
   }
   if (normalized.toLowerCase().startsWith("page:")) {
@@ -1982,10 +1963,9 @@ function isUnsafeFallbackSourceIdPart(sourceId: string) {
 
 const preservedExistingAnnotationKeys = new Set(["CreationDate", "F", "NM"]);
 
-// Paired with clearedAnnotationKeys: addAnnotation only sets the keys it is
-// handed, so an emptied comment must be removed or the old note comes back.
+// Paired with clearedAnnotationKeys: addAnnotation only sets the keys it is handed, so an emptied comment must be removed or the old note comes back. Character rules but no length bound - this is the reader's own writing, and any OTHER edit to the annotation rewrites it verbatim; only the UI input that produces `comment` bounds its length.
 function annotationCommentEntry(comment: string) {
-  const normalized = normalizeAnnotationComment(comment);
+  const normalized = strippedDocumentText(comment);
   return normalized ? { Contents: pdfTextString(normalized) } : {};
 }
 
@@ -1996,9 +1976,11 @@ function annotationBookmarkEntry(annotation: PdfAnnotation) {
 /** The keys this annotation's current state means must not be in the file. */
 function clearedAnnotationKeys(annotation: PdfAnnotation, comment: string) {
   const cleared: string[] = [];
-  if (!normalizeAnnotationComment(comment)) {
+  if (!strippedDocumentText(comment)) {
     cleared.push("Contents");
   }
+  // /RC is a rich-text mirror of /Contents that some readers prefer over the plain string; this app never writes one, so any /Contents write or clear - a comment change, or the annotation's own text for freeText/stickyNote - drops it too, or a stale /RC keeps showing text /Contents no longer has.
+  cleared.push("RC");
   if (!annotation.bookmarked) {
     cleared.push(ANNOTATION_BOOKMARK_KEY);
   }
@@ -2042,7 +2024,7 @@ function addAnnotation(
     return;
   }
 
-  let annots = page.node.Annots();
+  let annots = pageNodeAnnots(page);
 
   if (!annots) {
     annots = context.obj([]);
@@ -2063,14 +2045,14 @@ function moveExistingAnnotationTarget(
   }
 
   const sourcePage = destinationPage.doc.getPage(target.pageIndex);
-  const sourceAnnots = sourcePage.node.Annots();
+  const sourceAnnots = pageNodeAnnots(sourcePage);
   if (!sourceAnnots) {
     throw new PdfAnnotationIntegrityError(
       "The original annotation could not be found while moving it. Saving was stopped to protect the document.",
     );
   }
 
-  let destinationAnnots = destinationPage.node.Annots();
+  let destinationAnnots = pageNodeAnnots(destinationPage);
   if (!destinationAnnots) {
     destinationAnnots = destinationPage.doc.context.obj([]);
     destinationPage.node.set(PDFName.of("Annots"), destinationAnnots);
@@ -2079,37 +2061,45 @@ function moveExistingAnnotationTarget(
   const popupEntries: Array<PDFDict | PDFRef> = [];
   if (target.entry instanceof PDFRef) {
     for (let index = sourceAnnots.size() - 1; index >= 0; index -= 1) {
-      const popup = sourceAnnots.lookupMaybe(index, PDFDict);
-      const parent = popup?.get(PDFName.of("Parent"));
-      if (
-        popup &&
-        annotationSubtype(popup) === "Popup" &&
-        parent instanceof PDFRef &&
-        parent.toString() === target.entry.toString()
-      ) {
-        const entry = sourceAnnots.get(index);
-        if (entry instanceof PDFRef || entry instanceof PDFDict) {
-          popup.set(PDFName.of("P"), destinationPage.ref);
-          popupEntries.push(entry);
-          sourceAnnots.remove(index);
+      try {
+        const popup = sourceAnnots.lookupMaybe(index, PDFDict);
+        const parent = popup?.get(PDFName.of("Parent"));
+        if (
+          popup &&
+          annotationSubtype(popup) === "Popup" &&
+          parent instanceof PDFRef &&
+          parent.toString() === target.entry.toString()
+        ) {
+          const entry = sourceAnnots.get(index);
+          if (entry instanceof PDFRef || entry instanceof PDFDict) {
+            popup.set(PDFName.of("P"), destinationPage.ref);
+            popupEntries.push(entry);
+            sourceAnnots.remove(index);
+          }
         }
+      } catch {
+        // A malformed neighbour is not this target's popup; it must not stop the search for the rest of the page's entries.
       }
     }
   }
 
   let removed = false;
   for (let index = sourceAnnots.size() - 1; index >= 0; index -= 1) {
-    const entry = sourceAnnots.get(index);
-    const annotation = sourceAnnots.lookupMaybe(index, PDFDict);
-    if (
-      (target.entry instanceof PDFRef &&
-        entry instanceof PDFRef &&
-        entry.toString() === target.entry.toString()) ||
-      (!(target.entry instanceof PDFRef) && annotation === target.annotation)
-    ) {
-      sourceAnnots.remove(index);
-      removed = true;
-      break;
+    try {
+      const entry = sourceAnnots.get(index);
+      const annotation = sourceAnnots.lookupMaybe(index, PDFDict);
+      if (
+        (target.entry instanceof PDFRef &&
+          entry instanceof PDFRef &&
+          entry.toString() === target.entry.toString()) ||
+        (!(target.entry instanceof PDFRef) && annotation === target.annotation)
+      ) {
+        sourceAnnots.remove(index);
+        removed = true;
+        break;
+      }
+    } catch {
+      // Same as above - a malformed neighbour is not this target and must not stop the search for it elsewhere on the page.
     }
   }
 
@@ -2126,8 +2116,7 @@ function moveExistingAnnotationTarget(
   target.pageIndex = destinationPage.doc.getPages().indexOf(destinationPage);
 }
 
-// A stroke straddles its path, so a BBox on the tight bounds clips half the
-// ink.
+// A stroke straddles its path, so a BBox on the tight bounds clips half the ink.
 function appearanceBounds(points: PdfPoint[], padding: number): PdfRect {
   const bounds = boundsForPoints(points);
   return {

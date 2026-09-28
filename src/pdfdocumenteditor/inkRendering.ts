@@ -1,5 +1,4 @@
-// Ink is canvas-backed rather than SVG because a page can hold thousands of
-// stroke points.
+// Ink is canvas-backed rather than SVG because a page can hold thousands of stroke points.
 import { rgbToCss } from "./annotationColors";
 import { inkPathCommands } from "./annotationGeometry";
 import { safeCanvasPixelRatio } from "./pdfRender";
@@ -63,9 +62,7 @@ export function renderInkCanvasLayer({
   context.globalAlpha = 1;
 }
 
-// Not SVG rects: the CSS Compositing spec forces isolation on every outermost
-// <svg>, so a mix-blend-mode inside one can never blend with the page raster
-// underneath.
+// Not SVG rects: the CSS Compositing spec forces isolation on every outermost <svg>, so a mix-blend-mode inside one can never blend with the page raster underneath.
 export function renderTextHighlightCanvas({
   annotations,
   canvas,

@@ -7,13 +7,10 @@ import type {
 } from "../src/pdfdocumenteditor/types";
 import "./rendererAssetStubs";
 
-// The hook reaches pdfRender through inkRendering, so this import has to be
-// dynamic: it must run after the stubs the side-effect import above registers.
+// The hook reaches pdfRender through inkRendering, so this import has to be dynamic: it must run after the stubs the side-effect import above registers.
 const { useDraftInk } = await import("../src/pdfdocumenteditor/useDraftInk");
 
-// The hook's canvases are never attached here, so every paint path bails at its
-// own null-canvas guard and what is left under test is the draft state machine
-// PdfPageView's handlers branch on.
+// The hook's canvases are never attached here, so every paint path bails at its own null-canvas guard and what is left under test is the draft state machine PdfPageView's handlers branch on.
 
 // The draft path only ever reads viewport.userUnit.
 const viewport = { userUnit: 1 } as PageViewport;

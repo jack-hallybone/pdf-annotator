@@ -12,13 +12,11 @@ import { pathToViewportD } from "../pdfGeometry";
 import type { PageViewport, PdfPoint } from "../types";
 import { clamp } from "../viewerConfig";
 
-/* eslint-disable react-refresh/only-export-components --
- * The style and pointer helpers are colocated with the components using them. */
+/* eslint-disable react-refresh/only-export-components -- The style and pointer helpers are colocated with the components using them. */
 export const SELECTION_ACCENT = "var(--app-selection)";
 export const TEXT_HIGHLIGHT_STYLE = { mixBlendMode: "multiply" as const };
 
-// The popover paints its colour at this alpha over the page, which is opaque
-// white in both schemes, so that is what its text must stay legible against.
+// The popover paints its colour at this alpha over the page, which is opaque white in both schemes, so that is what its text must stay legible against.
 const NOTE_POPOVER_FILL_ALPHA = 0.24;
 const NOTE_POPOVER_BACKDROP: RgbColor = [1, 1, 1];
 
@@ -125,8 +123,7 @@ export function NotePopover({
   const backgroundColor = color
     ? rgbToCssWithAlpha(color, NOTE_POPOVER_FILL_ALPHA)
     : undefined;
-  // The border keeps the note's hue, darkened only as far as the 3:1 WCAG
-  // floor for a UI boundary, since a pale note has no visible edge otherwise.
+  // The border keeps the note's hue, darkened only as far as the 3:1 WCAG floor for a UI boundary, since a pale note has no visible edge otherwise.
   const borderColor = color
     ? rgbToCss(
         ensureContrastAgainst(
@@ -136,9 +133,7 @@ export function NotePopover({
         ),
       )
     : undefined;
-  // The text sits on a tint of the note colour, so it cannot use the theme
-  // ink: in dark mode that is near-white over a pastel, unreadable across the
-  // whole palette.
+  // The text sits on a tint of the note colour, so it cannot use the theme ink: in dark mode that is near-white over a pastel, unreadable across the whole palette.
   const textColor = foregroundOn(
     color
       ? flattenOver(color, NOTE_POPOVER_BACKDROP, NOTE_POPOVER_FILL_ALPHA)

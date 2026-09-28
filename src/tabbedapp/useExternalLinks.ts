@@ -11,11 +11,9 @@ import type { ShowNoticeOptions } from "./useTabbedAppNotices";
 
 export type PendingExternalLink = {
   trustKey: string;
-  // What `trustKey` covers, in words, derived beside the key so what the user
-  // is told cannot drift from what is stored.
+  // What `trustKey` covers, in words, derived beside the key so what the user is told cannot drift from what is stored.
   trustScopeLabel: string;
-  // Never the raw PDF url: this is sanitized, and is the same string both the
-  // dialog renders and openExternalLink opens.
+  // Never the raw PDF url: this is sanitized, and is the same string both the dialog renders and openExternalLink opens.
   url: string;
 };
 
@@ -36,8 +34,7 @@ type ExternalLinksApi = {
   reset: () => void;
 };
 
-// A PDF-embedded link is never opened silently, and the trust list "always"
-// writes to is per-document, in memory, and never persisted.
+// A PDF-embedded link is never opened silently, and the trust list "always" writes to is per-document, in memory, and never persisted.
 export function useExternalLinks({
   onOpenExternalLink,
   fileName,
@@ -53,8 +50,7 @@ export function useExternalLinks({
 
   const openExternalLink = useCallback(
     async (url: string) => {
-      // Re-checked at the point that calls window.open: the guarantee that no
-      // javascript: or data: URL is ever opened belongs here, not upstream.
+      // Re-checked at the point that calls window.open: the guarantee that no javascript: or data: URL is ever opened belongs here, not upstream.
       const safeUrl = safePdfExternalUrl(url);
       if (!safeUrl) {
         showNotice(
@@ -106,8 +102,7 @@ export function useExternalLinks({
 
   const confirmExternalLink = useCallback(
     ({ always = false }: { always?: boolean } = {}) => {
-      // Read the pending link inside the updater so this callback needn't
-      // depend on it (a stale closure would confirm the wrong link).
+      // Read the pending link inside the updater so this callback needn't depend on it (a stale closure would confirm the wrong link).
       setPendingExternalLink((link) => {
         if (!link) {
           return null;
@@ -160,8 +155,7 @@ export function useExternalLinks({
   };
 }
 
-// Null for anything outside the allowlist, so a link that would be refused
-// never reaches the dialog.
+// Null for anything outside the allowlist, so a link that would be refused never reaches the dialog.
 function externalLinkRequest(url: string): PendingExternalLink | null {
   const safeUrl = safePdfExternalUrl(url);
   if (!safeUrl) {
@@ -171,8 +165,7 @@ function externalLinkRequest(url: string): PendingExternalLink | null {
   try {
     const parsed = new URL(safeUrl);
     if (parsed.protocol === "mailto:") {
-      // Per recipient list, never per scheme: a blanket `mailto:` key would
-      // let one approved address approve every other mailto in the document.
+      // Per recipient list, never per scheme: a blanket `mailto:` key would let one approved address approve every other mailto in the document.
       return {
         trustKey: `mailto:${parsed.pathname}`,
         trustScopeLabel: parsed.pathname,

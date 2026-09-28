@@ -7,9 +7,7 @@ import { useTabDragReorder } from "../src/tabbedapp/useTabDragReorder";
 
 type Doc = { id: string };
 
-// The hook decides placement by measuring the real tab elements and jsdom has no
-// layout, where an all-zero rect would collapse "before" and "after" into one
-// answer, so the fixture hands each tab an explicit rect.
+// The hook decides placement by measuring the real tab elements and jsdom has no layout, where an all-zero rect would collapse "before" and "after" into one answer, so the fixture hands each tab an explicit rect.
 const TAB_WIDTH = 100;
 
 function buildTabsNav(ids: string[]) {
@@ -181,9 +179,7 @@ test("dropping before an earlier tab moves the dragged tab back", () => {
   assert.deepEqual(documentOrder(result.current.documents), ["c", "a", "b"]);
 });
 
-// Both cases below move a tab rightwards, the only direction where removing the
-// dragged tab shifts the insertion point: without the index correction the tab
-// lands one slot further along than the indicator promised.
+// Both cases below move a tab rightwards, the only direction where removing the dragged tab shifts the insertion point: without the index correction the tab lands one slot further along than the indicator promised.
 test("dropping one place to the right lands where the indicator was", () => {
   const { result } = renderDragHook();
 

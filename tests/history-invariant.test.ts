@@ -20,15 +20,12 @@ import { markersIn } from "./pdfMarkers";
 import type { SensitivePdfDocumentEditorSession } from "../src/pdfdocumenteditor/PdfDocumentEditor";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// An undo stack is the one structure that is supposed to keep what the reader
-// deleted, so a cap on its length has satisfied nothing if the entries that left
-// still hold what they held, and the payload is watched through a WeakRef.
+// An undo stack is the one structure that is supposed to keep what the reader deleted, so a cap on its length has satisfied nothing if the entries that left still hold what they held, and the payload is watched through a WeakRef.
 
 setFlagsFromString("--expose-gc");
 const collectGarbage = runInNewContext("gc") as () => void;
 
-// From a fresh macrotask each round: a synchronous `gc()` inside the frame that
-// built the payloads can still see them on that frame's own stack.
+// From a fresh macrotask each round: a synchronous `gc()` inside the frame that built the payloads can still see them on that frame's own stack.
 async function collectUntilEmpty(expected: WeakRef<object>[]) {
   for (let attempt = 0; attempt < 25; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -125,8 +122,7 @@ test("an evicted annotation entry releases the note only it still held", async (
 });
 
 test("a stack past its image budget releases the images it evicted", async () => {
-  // Eight entries is well inside MAX_HISTORY_ENTRIES and none is a document entry,
-  // so every bound this stack had reported it empty while it held 96 MiB.
+  // Eight entries is well inside MAX_HISTORY_ENTRIES and none is a document entry, so every bound this stack had reported it empty while it held 96 MiB.
   const stampBytes = 12 * 1024 * 1024;
   const pushes = 8;
   let stack: HistoryEntry[] = [];
@@ -255,8 +251,7 @@ const chromeState = {
 };
 
 test("the scan can see a marker the writer really does put in the file", async () => {
-  // The control: without it every case below passes on a scanner that finds
-  // nothing anywhere.
+  // The control: without it every case below passes on a scanner that finds nothing anywhere.
   const pdfBytes = await blankPdf();
   const live = highlight("live-note", `${MARKER}-LIVE`);
   const { bytes } = await documentEditorSessionOutput(

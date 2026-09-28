@@ -1,8 +1,4 @@
-/*
- * pdf-lib's `lookupMaybe(key, Type)` throws when an entry exists but holds a
- * different legal PDF type, which is common: an /V form value may be a string,
- * name, array, stream or dictionary.
- */
+/* pdf-lib's `lookupMaybe(key, Type)` throws when an entry exists but holds a different legal PDF type, which is common: an /V form value may be a string, name, array, stream or dictionary. */
 import { PDFArray, PDFDict, PDFName, PDFNumber } from "pdf-lib";
 
 export function resolvedDictEntry(dict: PDFDict, key: PDFName) {

@@ -22,9 +22,7 @@ import { clamp } from "./viewerConfig";
 
 type DraftInkPath = {
   kind: "draw" | "freehandHighlight";
-  // Finalize and cleanup must key off this fixed origin rather than the live
-  // tool: pointer capture routes every later event through both surfaces, so a
-  // mid-gesture tool switch otherwise leaves the draft stuck for ever.
+  // Finalize and cleanup must key off this fixed origin rather than the live tool: pointer capture routes every later event through both surfaces, so a mid-gesture tool switch otherwise leaves the draft stuck for ever.
   origin: "pageDiv" | "svg";
   path: PdfPoint[];
 };
@@ -51,10 +49,7 @@ type DraftInkApi = {
   end: () => void;
 };
 
-/*
- * The functions are plain closures over the current render's props; only the
- * unmount cleanup needs a ref, because its effect never re-subscribes.
- */
+/* The functions are plain closures over the current render's props; only the unmount cleanup needs a ref, because its effect never re-subscribes. */
 export function useDraftInk({
   displaySize,
   scale,
@@ -166,8 +161,7 @@ export function useDraftInk({
   }
 
   useEffect(
-    // The canvases outlive the frame callback, so unmounting mid-stroke must
-    // not leave a scheduled repaint or painted pixels behind.
+    // The canvases outlive the frame callback, so unmounting mid-stroke must not leave a scheduled repaint or painted pixels behind.
     () => () => {
       const frame = draftInkFrameRef.current;
       if (frame !== null) {

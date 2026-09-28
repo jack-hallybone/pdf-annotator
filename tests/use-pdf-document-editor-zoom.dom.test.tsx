@@ -5,8 +5,7 @@ import { act, renderHook } from "@testing-library/react";
 import { usePdfDocumentEditorZoom } from "../src/pdfdocumenteditor/usePdfDocumentEditorZoom";
 import type { LoadedPage } from "../src/pdfdocumenteditor/types";
 
-// An empty, container-less host: the scroll anchoring and fit paths
-// early-return without a container, leaving the scale arithmetic and clamping.
+// An empty, container-less host: the scroll anchoring and fit paths early-return without a container, leaving the scale arithmetic and clamping.
 function useZoomHarness() {
   const scrollContainerRef = useRef<HTMLElement | null>(null);
   const pagesRef = useRef<LoadedPage[]>([]);

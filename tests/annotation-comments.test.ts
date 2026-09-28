@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PDFBool, PDFDict, PDFDocument, PDFName } from "pdf-lib";
+import { PDFBool, PDFDict, PDFDocument, PDFName, PDFString } from "pdf-lib";
 import {
   MAX_ANNOTATION_COMMENT_LENGTH,
   normalizeAnnotationComment,
@@ -13,9 +13,7 @@ import { createWorkSignature } from "../src/pdfdocumenteditor/annotationState";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf } from "./pdfTestUtils";
 
-// A comment is a reader's own text on its way into a PDF string, and the star
-// beside it is a private key in the same dictionary, so both are tested against
-// a file read structurally at the pdf-lib level.
+// A comment is a reader's own text on its way into a PDF string, and the star beside it is a private key in the same dictionary, so both are tested against a file read structurally at the pdf-lib level.
 
 function highlight(
   overrides: Partial<Extract<PdfAnnotation, { kind: "textHighlight" }>> = {},
@@ -66,9 +64,7 @@ function contentsText(dict: PDFDict) {
   return typeof decode === "function" ? decode.call(value) : null;
 }
 
-// A comment goes into a PDF literal string and pdf-lib's PDFString.of() escapes
-// none of "(", ")" or "\", so a note as ordinary as ":)" would close the literal
-// early were it not for pdfTextString's hex fallback.
+// A comment goes into a PDF literal string and pdf-lib's PDFString.of() escapes none of "(", ")" or "\", so a note as ordinary as ":)" would close the literal early were it not for pdfTextString's hex fallback.
 test("a hostile comment survives the write intact and leaves a parsable PDF", async () => {
   const nasty =
     "close ) open ( backslash \\ null-ish \\u0007 caf\\u00e9 \\u2603 " +
@@ -84,16 +80,22 @@ test("a hostile comment survives the write intact and leaves a parsable PDF", as
   assert.equal(contentsText(dict)?.includes("\n"), true);
 });
 
-// An unbounded /Contents: a string out of an untrusted PDF has no length limit
-// at all, and would be re-encoded on every save and re-read on every open.
-test("a comment is bounded before it reaches the file", async () => {
+// /Contents on a comment is unbounded, like a note's own text: the comment is the reader's writing, and an edit to anything else about the same mark rewrites /Contents from this value, so bounding it here would silently cut a long comment the next time the mark itself moved or changed colour.
+test("a long comment survives a write unchanged", async () => {
   const long = "x".repeat(MAX_ANNOTATION_COMMENT_LENGTH * 3);
   const output = await writePdfAnnotations(await blankPdf(), [
     highlight({ comment: long }),
   ]);
 
   const written = contentsText(await onlyHighlightDict(output));
-  assert.equal(written?.length, MAX_ANNOTATION_COMMENT_LENGTH);
+  assert.equal(written, long);
+});
+
+// The comments panel re-commits what it shows on every blur, so a comment from a file that runs past the panel's typing bound must come back whole.
+test("re-committing a long comment leaves the annotation unchanged", () => {
+  const long = "x".repeat(MAX_ANNOTATION_COMMENT_LENGTH * 3);
+  const annotation = highlight({ comment: long });
+  assert.equal(withAnnotationComment(annotation, long), annotation);
 });
 
 test("clearing a comment removes /Contents rather than leaving the old note", async () => {
@@ -115,6 +117,40 @@ test("clearing a comment removes /Contents rather than leaving the old note", as
   );
 
   assert.equal(contentsText(await onlyHighlightDict(cleared)), null);
+});
+
+// /RC is a rich-text mirror of /Contents some readers show in preference to it; this app never writes one, so it must not survive a write that changes or clears /Contents, or a viewer that prefers /RC keeps showing the old text.
+test("editing or clearing a comment drops a stale /RC alongside /Contents", async () => {
+  const base = await writePdfAnnotations(await blankPdf(), [
+    highlight({ comment: "first thoughts" }),
+  ]);
+
+  // A rich-text mirror as a third-party PDF, or an older version of this same file, might carry - this app itself never writes one.
+  const pdfDoc = await loadTestPdf(base);
+  const annots = pdfDoc.getPage(0).node.Annots();
+  assert.ok(annots);
+  const dict = annots.lookupMaybe(0, PDFDict);
+  assert.ok(dict);
+  dict.set(PDFName.of("RC"), PDFString.of("<p>first thoughts</p>"));
+  const withRc = await pdfDoc.save();
+  assert.ok((await onlyHighlightDict(withRc)).get(PDFName.of("RC")));
+
+  const edited = await writePdfAnnotations(
+    withRc,
+    [highlight({ comment: "second thoughts" })],
+    {
+      replaceAnnotationSourceIds: ["comment-test-highlight"],
+      replacePageIndexes: [0],
+    },
+  );
+  assert.equal(
+    contentsText(await onlyHighlightDict(edited)),
+    "second thoughts",
+  );
+  assert.equal(
+    (await onlyHighlightDict(edited)).get(PDFName.of("RC")),
+    undefined,
+  );
 });
 
 test("unstarring removes the private key rather than leaving it true", async () => {

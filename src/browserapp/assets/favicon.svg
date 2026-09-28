@@ -4,8 +4,7 @@
     path[fill="#FFFE4E"] { fill: #fffe4e; }
     @media (prefers-color-scheme: dark) {
       path[stroke="#1C1917"] { stroke: #ebe6e0; }
-      /* Orange, not a tinted yellow: it clears the same 3:1 floor against
-         this lighter stroke and reads better than an olive-muted yellow. */
+      /* Orange, not a tinted yellow: it clears the same 3:1 floor against this lighter stroke and reads better than an olive-muted yellow. */
       path[fill="#FFFE4E"] { fill: #c06823; }
     }
   </style>

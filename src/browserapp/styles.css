@@ -1,5 +1,4 @@
-/* Browser host styles: the home panel, install prompt, update banner and the
-   frame-guard block screen. */
+/* Browser host styles: the home panel, install prompt, update banner and the frame-guard block screen. */
 
 .browserapp-frame-block {
   background: var(--theme-canvas);
@@ -69,9 +68,7 @@
   padding: var(--theme-space-sm);
 }
 
-/* Both stay mounted, sharing one grid cell, so the frame always sizes to
-   the taller of the two - conditionally rendering just one made the card
-   change height (and everything below it jump) the moment a drag started. */
+/* Both stay mounted, sharing one grid cell, so the frame always sizes to the taller of the two - conditionally rendering just one made the card change height (and everything below it jump) the moment a drag started. */
 .browserapp-home-action-stack,
 .browserapp-home-drop-message {
   grid-area: 1 / 1;
@@ -106,8 +103,7 @@
   font-weight: var(--theme-weight-medium);
 }
 
-/* Borderless: the card already frames these, so a border on each is a second
-   frame inside the first. */
+/* Borderless: the card already frames these, so a border on each is a second frame inside the first. */
 .browserapp-home-open-button,
 .browserapp-home-template-button {
   background: none;
@@ -182,18 +178,15 @@
 }
 
 .browserapp-home-footer {
-  align-items: center;
+  align-items: flex-start;
 }
 
-/* Sizing is .tap-target's: a standalone link, so the inline exception to
-   SC 2.5.8 does not apply and 12px text needs padding out to a 24px target. */
+/* Sizing is .tap-target's: a standalone link, so the inline exception to SC 2.5.8 does not apply and 12px text needs padding out to a 24px target. */
 .browserapp-home-credit {
   text-decoration-color: rgb(from var(--theme-ink) r g b / 0.24);
 }
 
-/* Same box shape as .tap-target above, so the footer's three lines read at
-   one even rhythm - this one just isn't a tap target, so it stays off that
-   class and keeps its own copy of the shape. */
+/* Same box shape as .tap-target above, so the version reads at the same rhythm as the two footer links beside it - this one just isn't a tap target, so it stays off that class and keeps its own copy of the shape. */
 .browserapp-release-version {
   align-items: center;
   display: inline-flex;

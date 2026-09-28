@@ -16,8 +16,7 @@ export function resizeFreeTextWidth(
   handle: "left" | "right",
 ) {
   const rotation = annotation.rotation ?? 0;
-  // The resize math assumes an un-rotated rect, and rotatedAnnotationRect is
-  // its own inverse, so it recovers the local bounds from the on-page ones.
+  // The resize math assumes an un-rotated rect, and rotatedAnnotationRect is its own inverse, so it recovers the local bounds from the on-page ones.
   const localRect = rotatedAnnotationRect(annotation.rect, rotation);
   const localPoint = unrotatePointForAnnotation(
     point,
@@ -245,8 +244,7 @@ export function annotationBounds(annotation: PdfAnnotation): PdfRect {
     case "freehandHighlight":
       return boundsForPointPaths(annotation.paths);
 
-    // `rect` stores the un-rotated footprint for these two kinds; every caller
-    // of annotationBounds needs the on-screen one.
+    // `rect` stores the un-rotated footprint for these two kinds; every caller of annotationBounds needs the on-screen one.
     case "freeText":
     case "imageStamp":
       return rotatedAnnotationRect(annotation.rect, annotation.rotation ?? 0);
@@ -256,8 +254,7 @@ export function annotationBounds(annotation: PdfAnnotation): PdfRect {
   }
 }
 
-// The [a b c d] part of the four rotations this app writes, keyed by clockwise
-// degrees.
+// The [a b c d] part of the four rotations this app writes, keyed by clockwise degrees.
 const ROTATION_APPEARANCE_MATRIX_ABCD: Record<
   number,
   [number, number, number, number]
@@ -268,8 +265,7 @@ const ROTATION_APPEARANCE_MATRIX_ABCD: Record<
   270: [0, 1, -1, 0],
 };
 
-// The translation puts the rotated BBox back at the origin, so the viewer's
-// BBox-to-Rect fit cannot rescale it.
+// The translation puts the rotated BBox back at the origin, so the viewer's BBox-to-Rect fit cannot rescale it.
 export function appearanceRotationMatrix(
   rotation: number,
   width: number,
@@ -291,8 +287,7 @@ export function appearanceRotationMatrix(
   }
 }
 
-// `null` is distinct from `0`: an unrecognized Matrix means the caller must
-// decline to import rather than guess unrotated.
+// `null` is distinct from `0`: an unrecognized Matrix means the caller must decline to import rather than guess unrotated.
 export function rotationFromAppearanceMatrix(
   a: number,
   b: number,
@@ -333,8 +328,7 @@ function rotationTrig(rotation: number) {
   }
 }
 
-// The on-screen footprint after the annotation's own rotation: unchanged at
-// 0/180, width/height swapped around the same centre at 90/270.
+// The on-screen footprint after the annotation's own rotation: unchanged at 0/180, width/height swapped around the same centre at 90/270.
 export function rotatedAnnotationRect(
   rect: PdfRect,
   rotation: number,
@@ -356,8 +350,7 @@ export function rotatedAnnotationRect(
   };
 }
 
-// PDF space is Y-up and the on-screen rotation clockwise in Y-down space, so
-// the angle is taken as-is rather than negated.
+// PDF space is Y-up and the on-screen rotation clockwise in Y-down space, so the angle is taken as-is rather than negated.
 export function unrotatePointForAnnotation(
   point: PdfPoint,
   rect: PdfRect,

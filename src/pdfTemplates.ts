@@ -13,16 +13,14 @@ import {
   type PdfTemplateKind,
 } from "./pdfTemplateGeometry";
 
-// Drawing only - the shared geometry lives in pdfTemplateGeometry.ts so the tab
-// shell can read it without pulling pdf-lib into the initial chunk.
+// Drawing only - the shared geometry lives in pdfTemplateGeometry.ts so the tab shell can read it without pulling pdf-lib into the initial chunk.
 const templateLineColor = rgb(0.58, 0.66, 0.7);
 const templateDividerColor = rgb(0.5, 0.56, 0.58);
 const templateMarginColor = rgb(0.68, 0.72, 0.74);
 
 export async function createPdfTemplate(kind: PdfTemplateKind) {
   const pdfDoc = await PDFDocument.create();
-  // Overrides pdf-lib's own default Producer/Creator string: a template this
-  // app creates from nothing must not name anything else, personal or not.
+  // Overrides pdf-lib's own default Producer/Creator string: a template this app creates from nothing must not name anything else, personal or not.
   pdfDoc.setAuthor("");
   pdfDoc.setCreator("PDF Annotator");
   pdfDoc.setKeywords([]);

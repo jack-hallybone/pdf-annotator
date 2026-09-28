@@ -4,19 +4,14 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import "./rendererAssetStubs";
 
-// PdfPageView's hand-written comparator excludes every callback prop on purpose
-// because the host passes inline arrows, and adding a data prop while
-// forgetting the comparator silently freezes that page, so the prop inventory is
-// read out of the source and a new prop fails until it is classified.
+// PdfPageView's hand-written comparator excludes every callback prop on purpose because the host passes inline arrows, and adding a data prop while forgetting the comparator silently freezes that page, so the prop inventory is read out of the source and a new prop fails until it is classified.
 
 const sourcePath = fileURLToPath(
   new URL("../src/pdfdocumenteditor/PdfPageView.tsx", import.meta.url),
 );
 const source = readFileSync(sourcePath, "utf8");
 
-// PdfPageView pulls in pdf.js's web viewer and pdfRuntime's Vite `?url` asset,
-// which the side-effect import above stubs, so this import has to be dynamic to
-// run after that registration rather than alongside it.
+// PdfPageView pulls in pdf.js's web viewer and pdfRuntime's Vite `?url` asset, which the side-effect import above stubs, so this import has to be dynamic to run after that registration rather than alongside it.
 const { PdfPageView } = await import("../src/pdfdocumenteditor/PdfPageView");
 
 type Props = Record<string, unknown>;
@@ -58,8 +53,7 @@ function declaredProps() {
     .filter((member) => !member.isCallback)
     .map((member) => member.name);
 
-  // If the declaration is ever reformatted past this parser, fail here rather than
-  // quietly testing an empty prop list.
+  // If the declaration is ever reformatted past this parser, fail here rather than quietly testing an empty prop list.
   assert.ok(data.length > 5, "parsed suspiciously few data props");
   assert.ok(callbacks.length > 5, "parsed suspiciously few callback props");
   assert.ok(data.includes("annotations"), "expected a known data prop");

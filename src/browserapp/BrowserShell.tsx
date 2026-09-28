@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-// From its own module, not the tabbedapp barrel: the barrel also exports
-// TabbedAppDocument, and a static path to it here would defeat the shell's own lazy
-// import.
+// From its own module, not the tabbedapp barrel: the barrel also exports TabbedAppDocument, and a static path to it here would defeat the shell's own lazy import.
 import { TabbedAppShell } from "../tabbedapp/TabbedAppShell";
 import type {
   TabbedAppOpenDocumentSummary,

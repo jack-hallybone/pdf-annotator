@@ -18,15 +18,12 @@ import {
 } from "./documentModelHarness";
 import type { PdfMergeFile } from "../src/pdfdocumenteditor/host";
 import { UNPROVEN_PAGE_DELETE_NOTICE } from "../src/pdfdocumenteditor/pdfDocumentEditorHelpers";
+import { MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS } from "../src/pdfdocumenteditor/annotationImport";
+import { MAX_PDF_FILE_BYTES } from "../src/pdfdocumenteditor/pdfFile";
 
-// The document owner, mounted on its own with a stub viewport, on the three
-// defects specific to the split: a parked session or undo entry folding the
-// viewport back into the document state, a proxy committed without bumping
-// documentVersion, and a `primaryView()` where an `eachView()` belongs.
+// The document owner, mounted on its own with a stub viewport, on the three defects specific to the split: a parked session or undo entry folding the viewport back into the document state, a proxy committed without bumping documentVersion, and a `primaryView()` where an `eachView()` belongs.
 
-// `fileName` is what the window title, the tab strip, the rename dialog's
-// default and every suggested save name are built from, so the character rules
-// belong at this one entry rather than at those four surfaces.
+// `fileName` is what the window title, the tab strip, the rename dialog's default and every suggested save name are built from, so the character rules belong at this one entry rather than at those four surfaces.
 test("a document's name loses the characters that make it read backwards", async () => {
   const { result } = await mountLoadedModel(1, "report\u202Efdp.exe\u061C.pdf");
 
@@ -104,10 +101,7 @@ test("a structural edit is undone through a snapshot with no viewport in it", as
   );
 });
 
-// Nothing stops the document being taken out from under an edit, because the
-// shell releases a document's renderer the moment it leaves view. The merge is
-// the operation a test can drive this through: its host file picker is the one
-// await it can hold open.
+// Nothing stops the document being taken out from under an edit, because the shell releases a document's renderer the moment it leaves view. The merge is the operation a test can drive this through: its host file picker is the one await it can hold open.
 test("an edit superseded while it runs commits nothing", async () => {
   const notices: string[] = [];
   const mergeFile: PdfMergeFile = {
@@ -131,8 +125,7 @@ test("an edit superseded while it runs commits nothing", async () => {
 
   await act(async () => {
     const merging = model().handleMergePdf();
-    // Registered after the merge is already awaiting this same promise, so it runs
-    // in the window between the merge's own check and the envelope's.
+    // Registered after the merge is already awaiting this same promise, so it runs in the window between the merge's own check and the envelope's.
     void picked.then(() => model().releaseRenderResources());
     pickMergeFile(mergeFile);
     await merging;
@@ -149,8 +142,79 @@ test("an edit superseded while it runs commits nothing", async () => {
   assert.deepEqual(notices, []);
 });
 
-// Two viewports at the model's own level; tests-e2e/split-view.spec.ts proves
-// the capability end to end.
+// A merge source never goes through readPdfFile or the main load path's own annotation-text budget check, so these hold it to the same two safety limits a file opened directly is held to, instead of skipping them.
+test("a merge source bigger than the file safety limit is refused before it is merged in", async () => {
+  const notices: string[] = [];
+  const mergeFile: PdfMergeFile = {
+    bytes: new Uint8Array(MAX_PDF_FILE_BYTES + 1),
+    name: "huge.pdf",
+  };
+  const { result } = await mountLoadedModel(
+    1,
+    undefined,
+    undefined,
+    notices,
+    null,
+    () => Promise.resolve(mergeFile),
+  );
+  const model = () => result.current.model;
+  const pageCountBefore = model().pageCount;
+
+  await act(async () => {
+    await model().handleMergePdf();
+  });
+
+  assert.equal(model().pageCount, pageCountBefore);
+  assert.ok(
+    notices.some((notice) => notice.includes("safety limit")),
+    `expected a safety-limit notice, got: ${JSON.stringify(notices)}`,
+  );
+});
+
+test("a merge source whose notes and comments are over the character safety limit is refused before it is merged in", async () => {
+  const notices: string[] = [];
+  const mergeFile: PdfMergeFile = {
+    bytes: await hugeAnnotationTextPdf(),
+    name: "huge-notes.pdf",
+  };
+  const { result } = await mountLoadedModel(
+    1,
+    undefined,
+    undefined,
+    notices,
+    null,
+    () => Promise.resolve(mergeFile),
+  );
+  const model = () => result.current.model;
+  const pageCountBefore = model().pageCount;
+
+  await act(async () => {
+    await model().handleMergePdf();
+  });
+
+  assert.equal(model().pageCount, pageCountBefore);
+  assert.ok(
+    notices.some((notice) => notice.includes("safety limit")),
+    `expected a safety-limit notice, got: ${JSON.stringify(notices)}`,
+  );
+});
+
+async function hugeAnnotationTextPdf() {
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const { context } = pdfDoc;
+  const hugeText = "a".repeat(MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS + 1);
+  const note = context.obj({
+    Contents: PDFString.of(hugeText),
+    Rect: [72, 72, 200, 200],
+    Subtype: "FreeText",
+    Type: "Annot",
+  });
+  page.node.set(PDFName.of("Annots"), context.obj([note]));
+  return pdfDoc.save({ useObjectStreams: false });
+}
+
+// Two viewports at the model's own level; tests-e2e/split-view.spec.ts proves the capability end to end.
 test("a document operation reaches every attached viewport", async () => {
   const { result } = await mountLoadedModel(2);
   result.current.first.bridge.current.activePageIndexRef.current = 3;
@@ -184,9 +248,7 @@ test("a parked session carries ONE viewport's position, not one per view", async
   assert.notDeepEqual(session.view, SECOND_STUB_VIEW);
 });
 
-// Which page a description belongs to is settled by the content streams, and a
-// stream the app cannot read leaves that open. `deleted-page-residue.test.ts`
-// owns whether the report is right; this owns whether the app passes it on.
+// Which page a description belongs to is settled by the content streams, and a stream the app cannot read leaves that open. `deleted-page-residue.test.ts` owns whether the report is right; this owns whether the app passes it on.
 async function unprovableDeletePdf() {
   const pdfDoc = await PDFDocument.create();
   const { context } = pdfDoc;
@@ -304,10 +366,7 @@ for (const { bytes, name, says } of [
   });
 }
 
-// A note's text is the one string here that is never shortened, so nothing else
-// bounds what a document can put into `annotations`. A check that runs after the
-// document is committed has already paid for the memory it refuses, and the
-// sizes are literals, so raising the limit fails here.
+// A note's text is the one string here that is never shortened, so nothing else bounds what a document can put into `annotations`. A check that runs after the document is committed has already paid for the memory it refuses, and the sizes are literals, so raising the limit fails here.
 async function pdfWithNoteText(characters: number) {
   const pdfDoc = await PDFDocument.create();
   const page = pdfDoc.addPage([612, 792]);

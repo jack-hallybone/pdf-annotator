@@ -1,9 +1,7 @@
 import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFString } from "pdf-lib";
 import { markedContent, numberTree } from "./parts";
 
-// `/Pg` is the optional half of placement (Table 323): the placement a reader
-// uses is a page's `/StructParents` key into the tree root's `/ParentTree`,
-// indexed by `/MCID`, and that key is claimed by whatever object holds it.
+// `/Pg` is the optional half of placement (Table 323): the placement a reader uses is a page's `/StructParents` key into the tree root's `/ParentTree`, indexed by `/MCID`, and that key is claimed by whatever object holds it.
 const PLACEMENT_KEYS = {
   annotation: 2,
   gonePage: 0,
@@ -24,8 +22,7 @@ export async function placementProbePdf(
   const element = (extra: Record<string, unknown>) =>
     context.register(context.obj({ S: "P", Type: "StructElem", ...extra }));
 
-  // No `/Pg` of their own, none inherited: the `/ParentTree` is the only thing
-  // that places any of these three.
+  // No `/Pg` of their own, none inherited: the `/ParentTree` is the only thing that places any of these three.
   const byPageKey = element({
     Alt: PDFString.of("SECRET-placed-by-the-deleted-page-key"),
     K: [0],
@@ -155,8 +152,7 @@ export async function placementProbePdf(
     PDFName.of("StructParents"),
     PDFNumber.of(PLACEMENT_KEYS.gonePage),
   );
-  // pdf-lib's `copyPages` - what merge, insert and extract all use - hands the copy
-  // the same `/Resources`, so two pages sharing one dictionary is the ordinary case.
+  // pdf-lib's `copyPages` - what merge, insert and extract all use - hands the copy the same `/Resources`, so two pages sharing one dictionary is the ordinary case.
   const goneResources = context.register(
     context.obj({
       Font: context.obj({ F1: font }),

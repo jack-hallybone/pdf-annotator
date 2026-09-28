@@ -1,9 +1,6 @@
 import { useEffect, type RefObject } from "react";
 
-/*
- * `aria-modal="true"` is only a declaration; Tab still walks out into the page
- * behind.
- */
+/* `aria-modal="true"` is only a declaration; Tab still walks out into the page behind. */
 
 const FOCUSABLE = [
   "a[href]",
@@ -28,8 +25,7 @@ export function useFocusTrap(
 
     const restoreTo = document.activeElement;
 
-    // Read fresh every time: a list captured on open would send focus to a
-    // control that has since been disabled or removed.
+    // Read fresh every time: a list captured on open would send focus to a control that has since been disabled or removed.
     const focusable = () =>
       [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
         (element) => {
@@ -74,8 +70,7 @@ export function useFocusTrap(
 
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
-      // The fallback is read at cleanup, not captured on open: it may have
-      // re-rendered since.
+      // The fallback is read at cleanup, not captured on open: it may have re-rendered since.
       const target =
         restoreTo instanceof HTMLElement && restoreTo.isConnected
           ? restoreTo

@@ -4,14 +4,12 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument, rgb } from "pdf-lib";
 
-// Two viewports over one document: src/tabbedapp renders one, so without this
-// the capability is "the types permit it and nothing throws".
+// Two viewports over one document: src/tabbedapp renders one, so without this the capability is "the types permit it and nothing throws".
 
-const HARNESS_URL = "/tests-e2e/split-view/index.html";
+// deploy.yml runs this suite with BASE_PATH set, and the dev server then serves everything under that sub-path.
+const HARNESS_URL = `${process.env.BASE_PATH ?? ""}/tests-e2e/split-view/index.html`;
 
-// Big enough that page residency is lazy and eviction can happen at all:
-// viewerConfig keeps every page of a document of EAGER_PAGE_LIMIT (25) pages or
-// fewer, and only evicts past MAX_LOADED_MAIN_PAGES (100) loaded proxies.
+// Big enough that page residency is lazy and eviction can happen at all: viewerConfig keeps every page of a document of EAGER_PAGE_LIMIT (25) pages or fewer, and only evicts past MAX_LOADED_MAIN_PAGES (100) loaded proxies.
 const EVICTION_PAGE_COUNT = 130;
 const RETENTION_LIMIT = 100;
 
@@ -21,8 +19,7 @@ type ViewId = "a" | "b";
 
 type BothViews<T> = { a: T; b: T };
 
-// Each page is a solid block over most of its area, so "painted" and "blank"
-// are never a judgement call at any sample point.
+// Each page is a solid block over most of its area, so "painted" and "blank" are never a judgement call at any sample point.
 async function fixture(pageCount: number) {
   const doc = await PDFDocument.create();
   for (let index = 0; index < pageCount; index += 1) {
@@ -51,8 +48,7 @@ async function openSplitHarness(page: Page, fixturePath: string) {
     { timeout: 90_000 },
   );
 
-  // Both panes have painted, not merely laid a canvas out: a blank second
-  // viewport would satisfy every assertion below about "the same".
+  // Both panes have painted, not merely laid a canvas out: a blank second viewport would satisfy every assertion below about "the same".
   for (const view of ["a", "b"] as const) {
     await expect(
       page.locator(`[data-view="${view}"] .canvasWrapper canvas`).first(),
@@ -60,8 +56,7 @@ async function openSplitHarness(page: Page, fixturePath: string) {
   }
 }
 
-// A switch over a name rather than a callback: the dev server's CSP has no
-// 'unsafe-eval', so a helper compiled inside the page would throw there only.
+// A switch over a name rather than a callback: the dev server's CSP has no 'unsafe-eval', so a helper compiled inside the page would throw there only.
 function bothViews(
   page: Page,
   reading:
@@ -88,8 +83,7 @@ function bothViews(
   }, reading) as Promise<BothViews<number | boolean>>;
 }
 
-// Inside the page surface and inside the pane that holds it: at the default zoom
-// a page's box reaches outside its pane.
+// Inside the page surface and inside the pane that holds it: at the default zoom a page's box reaches outside its pane.
 async function visiblePagePoint(
   page: Page,
   view: ViewId,
@@ -130,8 +124,7 @@ async function visiblePagePoint(
   );
 }
 
-// A real gesture rather than a command on the handle, which would prove only
-// that the document mutates.
+// A real gesture rather than a command on the handle, which would prove only that the document mutates.
 async function drawStroke(page: Page, view: ViewId, atY = 0.3) {
   await page.evaluate(() => window.splitViewHarness!.setTool("draw"));
   await page
@@ -152,9 +145,7 @@ async function drawStroke(page: Page, view: ViewId, atY = 0.3) {
   await page.evaluate(() => window.splitViewHarness!.setTool("select"));
 }
 
-// The page raster, not the overlays: a slot also holds ink, appearance and
-// annotation canvases. Composited onto white, so an unpainted page is one colour.
-// The eviction test carries its own copy: a page function cannot close over this.
+// The page raster, not the overlays: a slot also holds ink, appearance and annotation canvases. Composited onto white, so an unpainted page is one colour. The eviction test carries its own copy: a page function cannot close over this.
 async function paintedInk(page: Page, view: ViewId, pageIndex: number) {
   return page.evaluate(
     ({ pageIndex, view }) => {
@@ -338,21 +329,15 @@ test.describe("two viewports over one document", () => {
   });
 });
 
-// The watch list is taken from the slots the DOM says overlap B's scroll box - a
-// pane only five pages tall would agree with the defect. "B did not move" is B's
-// scrollTop, because an active page is itself a reading off page geometry.
+// The watch list is taken from the slots the DOM says overlap B's scroll box - a pane only five pages tall would agree with the defect. "B did not move" is B's scrollTop, because an active page is itself a reading off page geometry.
 
-// A window tall enough that half of it holds well over five pages at MIN_ZOOM.
-// The panes are `height: 100vh`, so this is the pane height.
+// A window tall enough that half of it holds well over five pages at MIN_ZOOM. The panes are `height: 100vh`, so this is the pane height.
 const EVICTION_VIEWPORT = { height: 1800, width: 1280 };
 
 // viewerConfig's MIN_ZOOM: the most pages a pane can be made to show.
 const WIDE_VIEW_ZOOM = 0.2;
 
-// Far enough that B's screen is full and the page table warm, and short enough
-// of MAX_LOADED_MAIN_PAGES that no eviction has run yet. This walk ages B's
-// pages in the one shared LRU while A moves, which is the state eviction gets
-// wrong.
+// Far enough that B's screen is full and the page table warm, and short enough of MAX_LOADED_MAIN_PAGES that no eviction has run yet. This walk ages B's pages in the one shared LRU while A moves, which is the state eviction gets wrong.
 const WARM_UP_PAGE = 20;
 
 // Well over the five pages an active-page band could ever cover.
@@ -414,8 +399,7 @@ test.describe("page residency across two viewports", () => {
           return ink;
         };
 
-        // Read off the DOM rather than derived from B's active page, which would make the
-        // residency claim and the assertion the same guess.
+        // Read off the DOM rather than derived from B's active page, which would make the residency claim and the assertion the same guess.
         const paneB = document.querySelector<HTMLElement>('[data-view="b"]')!;
         const rootB = paneB.querySelector<HTMLElement>(
           ".pdfdocumenteditor-scroll-root",
@@ -491,8 +475,7 @@ test.describe("page residency across two viewports", () => {
 
         await walkViewA(warmUpPage + 1, pageCount - 1);
 
-        // goToPage awaits the page's proxy before it scrolls, so under load a navigate
-        // can resolve after the walk has moved on and scroll A backwards.
+        // goToPage awaits the page's proxy before it scrolls, so under load a navigate can resolve after the walk has moved on and scroll A backwards.
         const parkDeadline = performance.now() + 20_000;
         while (
           !harness.pageLoaded("a", pageCount - 1) &&
@@ -533,9 +516,7 @@ test.describe("page residency across two viewports", () => {
       },
     );
 
-    // A run where eviction never engaged, where view B was displaying little enough
-    // for the old band to cover it, where the watch list was taken after the damage,
-    // or where view A never moved would report an intact view B while proving nothing.
+    // A run where eviction never engaged, where view B was displaying little enough for the old band to cover it, where the watch list was taken after the damage, or where view A never moved would report an intact view B while proving nothing.
     expect(
       measurement.loadedFromA,
       "eviction never ran, so nothing was ever at risk",
@@ -549,8 +530,7 @@ test.describe("page residency across two viewports", () => {
     expect(measurement.scrollTopAfter).toEqual(measurement.scrollTopBefore);
     expect(measurement.visibleFirst).toBeLessThan(4);
 
-    // The pane is taller than the band: a claim built from an active page and
-    // LAZY_PAGE_BUFFER either side covers five pages, and view B displays more.
+    // The pane is taller than the band: a claim built from an active page and LAZY_PAGE_BUFFER either side covers five pages, and view B displays more.
     expect(
       measurement.visiblePages,
       "view B's pane is not taller than the five-page band this test exists " +

@@ -1,5 +1,4 @@
-// Where a page sits in the scroll viewport, how big it is on screen, and how a
-// pointer event maps back to a point in PDF user space.
+// Where a page sits in the scroll viewport, how big it is on screen, and how a pointer event maps back to a point in PDF user space.
 import { useLayoutEffect, useState } from "react";
 import type { RefObject } from "react";
 import { viewportPointToPdfPoint } from "./pdfGeometry";

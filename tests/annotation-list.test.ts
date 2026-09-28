@@ -9,8 +9,7 @@ import {
 } from "../src/tabbedapp/annotationList";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
-// The annotations panel's data, away from the browser: what order the list is
-// in, which rows a filter keeps, and which swatches the filter row offers.
+// The annotations panel's data, away from the browser: what order the list is in, which rows a filter keeps, and which swatches the filter row offers.
 
 function highlight(
   id: string,
@@ -38,9 +37,7 @@ function highlight(
 const YELLOW: [number, number, number] = [1, 0.9, 0.2];
 const GREEN: [number, number, number] = [0.2, 0.7, 0.3];
 
-// The order a file stores annotations in is the order the producing tool wrote
-// them, so a reader working down a page gets a list that jumps around it, and
-// PDF y grows upward.
+// The order a file stores annotations in is the order the producing tool wrote them, so a reader working down a page gets a list that jumps around it, and PDF y grows upward.
 test("rows run by page, then down the page, then across it", () => {
   const byPage = new Map<number, PdfAnnotation[]>([
     [
@@ -120,8 +117,7 @@ test("colour and star filters narrow the list, and no colours means every colour
     ),
     ["a"],
   );
-  // A star is a flag on an annotation, so it composes with the colour filter
-  // instead of being a parallel kind that could not be filtered beside anything.
+  // A star is a flag on an annotation, so it composes with the colour filter instead of being a parallel kind that could not be filtered beside anything.
   assert.deepEqual(
     filterAnnotationRows(rows, {
       bookmarkedOnly: true,
@@ -138,8 +134,7 @@ test("toggling a swatch adds it and toggling again removes it", () => {
   assert.deepEqual(toggleColorFilter(one, "#ffe633").colorKeys, []);
 });
 
-// Filtering to green and then deleting the last green mark takes the swatch with
-// it, leaving an empty list and no control to switch the filter back off.
+// Filtering to green and then deleting the last green mark takes the swatch with it, leaving an empty list and no control to switch the filter back off.
 test("a filter for a colour no longer in the document is dropped", () => {
   const rows = annotationListRows(
     new Map([[0, [highlight("a", 0, 700, 72, YELLOW)]]]),
@@ -180,8 +175,7 @@ test("an image stamp has no colour, and a colour filter excludes it", () => {
   );
 });
 
-// /Contents used to hold the text an annotation covers, and a comment shown in
-// the quote column would mean a reader's own note reading as page text.
+// /Contents used to hold the text an annotation covers, and a comment shown in the quote column would mean a reader's own note reading as page text.
 test("the comment and the covered text stay separate", () => {
   const rows = annotationListRows(
     new Map([

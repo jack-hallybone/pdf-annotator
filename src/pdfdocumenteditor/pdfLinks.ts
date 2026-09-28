@@ -38,9 +38,7 @@ export function createPdfLinkService({
       link.role = "link";
       link.tabIndex = 0;
       link.target = "_blank";
-      // The element has no text of its own, and pdf.js gives it only a
-      // `title`, which is the last resort in the accessible-name algorithm and
-      // never reaches a touch user.
+      // The element has no text of its own, and pdf.js gives it only a `title`, which is the last resort in the accessible-name algorithm and never reaches a touch user.
       link.title = safeUrl;
       link.setAttribute("aria-label", `Open link: ${safeUrl}`);
       link.classList.add("pdfdocumenteditor-external-link");
@@ -90,8 +88,7 @@ export function createPdfLinkService({
   };
 }
 
-// Exported so the point that calls window.open re-applies the same allowlist
-// rather than trusting that a caller upstream sanitized first.
+// Exported so the point that calls window.open re-applies the same allowlist rather than trusting that a caller upstream sanitized first.
 export function safePdfExternalUrl(url: string) {
   try {
     const parsed = new URL(url);

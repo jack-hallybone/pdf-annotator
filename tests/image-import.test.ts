@@ -45,9 +45,7 @@ test("reads WebP VP8X dimensions", () => {
   });
 });
 
-// The pixel caps say how big a stamp may be drawn and this says how much it may
-// weigh, driven with an encoder standing in for the canvas because the loop is
-// the bound and the canvas is not.
+// The pixel caps say how big a stamp may be drawn and this says how much it may weigh, driven with an encoder standing in for the canvas because the loop is the bound and the canvas is not.
 
 /** An encoder whose output tracks pixel count, as a PNG's does. */
 function encoderAt(bytesPerPixel: number) {
@@ -63,8 +61,7 @@ function encoderAt(bytesPerPixel: number) {
 }
 
 test("an image that encodes past the byte cap is re-encoded smaller until it fits", async () => {
-  // 1800x1333 of four-channel noise measures 12.25 MiB through the real
-  // encoder; this is that shape.
+  // 1800x1333 of four-channel noise measures 12.25 MiB through the real encoder; this is that shape.
   const { encode, sizes } = encoderAt((12.25 * 1024 * 1024) / (1800 * 1333));
 
   const encoded = await encodedWithinByteBudget(
@@ -87,8 +84,7 @@ test("an image that encodes past the byte cap is re-encoded smaller until it fit
 });
 
 test("an image already inside the cap is encoded once, at its full size", async () => {
-  // A flat screenshot measures 68 KiB at the same dimensions: the common case
-  // must not be re-encoded or shrunk.
+  // A flat screenshot measures 68 KiB at the same dimensions: the common case must not be re-encoded or shrunk.
   const { encode, sizes } = encoderAt((68 * 1024) / (1800 * 1333));
 
   const encoded = await encodedWithinByteBudget(
@@ -104,8 +100,7 @@ test("an image already inside the cap is encoded once, at its full size", async 
 });
 
 test("an encoder that never fits is refused rather than answered with an oversized stamp", async () => {
-  // The bound is the measurement, so an encoder whose output ignores the size it
-  // is asked for has to end in a refusal, not in a stamp over the cap.
+  // The bound is the measurement, so an encoder whose output ignores the size it is asked for has to end in a refusal, not in a stamp over the cap.
   await assert.rejects(
     () =>
       encodedWithinByteBudget({ height: 1333, width: 1800 }, async () =>

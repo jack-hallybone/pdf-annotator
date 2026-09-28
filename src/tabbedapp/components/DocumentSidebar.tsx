@@ -67,10 +67,7 @@ const SIDEBAR_ICON_BUTTON_CLASS = "icon-button ghost icon-center";
 const PAGE_MENU_ITEM_CLASS = "menu-item page-menu-item";
 type SidebarPageInsertKind = "blank" | "lined";
 
-/**
- * "contents" exists only while the open document has an outline; most PDFs
- * have none.
- */
+/** "contents" exists only while the open document has an outline; most PDFs have none. */
 export type DocumentSidebarTab = "pages" | "annotations" | "contents";
 
 type DocumentSidebarProps = {
@@ -180,12 +177,10 @@ export function DocumentSidebar({
     if (open && tab === "annotations" && !annotationsComplete) {
       onEnsureAllAnnotations();
     }
-    // pdfDoc, because a new document needs a new pass even when the flag is
-    // already false from its predecessor's.
+    // pdfDoc, because a new document needs a new pass even when the flag is already false from its predecessor's.
   }, [annotationsComplete, onEnsureAllAnnotations, open, pdfDoc, tab]);
 
-  // Opening a document with no outline while the contents tab is showing
-  // would otherwise leave the sidebar on a tab that no longer exists.
+  // Opening a document with no outline while the contents tab is showing would otherwise leave the sidebar on a tab that no longer exists.
   useEffect(() => {
     if (tab === "contents" && outline.length === 0) {
       onChangeTab("pages");
@@ -241,8 +236,7 @@ export function DocumentSidebar({
     );
 
     if (!activeThumbnail) {
-      // Not mounted: jump to an estimate rather than force it into the
-      // window, which would render everything in between.
+      // Not mounted: jump to an estimate rather than force it into the window, which would render everything in between.
       const maxScrollTop = Math.max(
         0,
         scrollContainer.scrollHeight - scrollContainer.clientHeight,
@@ -283,8 +277,7 @@ export function DocumentSidebar({
     return null;
   }
 
-  // This window must not be widened to span the active page: the effect above
-  // scrolls toward it instead, which moves the window on its own.
+  // This window must not be widened to span the active page: the effect above scrolls toward it instead, which moves the window on its own.
   const pageCount = pages.length;
   const startIndex = Math.max(
     0,
@@ -301,8 +294,7 @@ export function DocumentSidebar({
   const topSpacerHeight = Math.max(0, startIndex) * estimatedRowHeight;
   const bottomSpacerHeight =
     Math.max(0, pageCount - 1 - endIndex) * estimatedRowHeight;
-  // Only while that panel shows: this sorts every annotation, and the sidebar
-  // re-renders on every scroll of the page list.
+  // Only while that panel shows: this sorts every annotation, and the sidebar re-renders on every scroll of the page list.
   const rows =
     tab === "annotations"
       ? annotationListRows(annotationsByPage)
@@ -766,8 +758,7 @@ function PageInsertIcon({ lined }: { lined: boolean }) {
       viewBox="0 0 24 24"
       width={14}
     >
-      {/* file-plus-corner's own outline and folded corner, so the "+" reads
-          the same badge as the plain add-page icon beside it. */}
+      {/* file-plus-corner's own outline and folded corner, so the "+" reads the same badge as the plain add-page icon beside it. */}
       <path d="M11.35 22H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.706.706l3.588 3.588A2.4 2.4 0 0 1 20 8v5.35" />
       <path d="M14 2v5a1 1 0 0 0 1 1h5" />
       <path d="M14 19h6" />
@@ -795,8 +786,7 @@ function scheduleTemporaryPageCleanup(page: PDFPageProxy) {
   }
 }
 
-// One observer per rootMargin rather than one per thumbnail, of which a long
-// document has hundreds.
+// One observer per rootMargin rather than one per thumbnail, of which a long document has hundreds.
 const sharedIntersectionObservers = new Map<
   string,
   {

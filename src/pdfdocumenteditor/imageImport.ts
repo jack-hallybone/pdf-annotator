@@ -12,11 +12,7 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 ]);
 const MAX_IMAGE_DIMENSION = 1800;
 const MAX_IMAGE_PIXELS = 2_400_000;
-/*
- * What one stamp may weigh, which the pixel caps above do not bound:
- * `imageData` is base64 held for as long as the tab lives, and every undo entry
- * naming the stamp names that string.
- */
+/* What one stamp may weigh, which the pixel caps above do not bound: `imageData` is base64 held for as long as the tab lives, and every undo entry naming the stamp names that string. */
 export const MAX_IMAGE_STAMP_BYTES = 2 * 1024 * 1024;
 const MAX_IMAGE_ENCODE_ATTEMPTS = 6;
 const MAX_SOURCE_IMAGE_BYTES = 32 * 1024 * 1024;
@@ -57,8 +53,7 @@ export async function prepareImageStampFromClipboardItems(
   return null;
 }
 
-// The async Clipboard API, for a button-triggered paste rather than a native
-// paste event - the browser's own permission prompt is the cost of that.
+// The async Clipboard API, for a button-triggered paste rather than a native paste event - the browser's own permission prompt is the cost of that.
 export async function prepareImageStampFromSystemClipboard() {
   const clipboardItems = await navigator.clipboard.read();
   for (const item of clipboardItems) {
@@ -81,9 +76,7 @@ async function prepareImageStampBlob(blob: Blob): Promise<PreparedImageStamp> {
     throw new Error("Images larger than 32 MiB are not supported.");
   }
 
-  // JPEG permits arbitrarily large metadata before its start-of-frame marker,
-  // so the whole (already size-capped) file is scanned and an oversized image
-  // cannot reach createImageBitmap with its dimensions still unknown.
+  // JPEG permits arbitrarily large metadata before its start-of-frame marker, so the whole (already size-capped) file is scanned and an oversized image cannot reach createImageBitmap with its dimensions still unknown.
   const headerScanBytes =
     blob.type === "image/jpeg" ? blob.size : IMAGE_HEADER_SCAN_BYTES;
   const headerDimensions = readImageHeaderDimensions(
@@ -117,10 +110,7 @@ async function prepareImageStampBlob(blob: Blob): Promise<PreparedImageStamp> {
   }
 }
 
-/**
- * The bound is the measurement, never the estimate: only an encoding already
- * weighed against `MAX_IMAGE_STAMP_BYTES` is returned.
- */
+/** The bound is the measurement, never the estimate: only an encoding already weighed against `MAX_IMAGE_STAMP_BYTES` is returned. */
 export async function encodedWithinByteBudget(
   dimensions: ImageHeaderDimensions,
   encode: (dimensions: ImageHeaderDimensions) => Promise<string>,

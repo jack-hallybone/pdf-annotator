@@ -15,8 +15,7 @@ import type { InkAnnotation } from "../src/pdfdocumenteditor/types";
 
 const penTools = tools.filter((item) => item.tool === "draw");
 
-// The dock is three pens a reader tells apart by position, and a label must not
-// promise a colour the reader is free to change in the pen's own settings.
+// The dock is three pens a reader tells apart by position, and a label must not promise a colour the reader is free to change in the pen's own settings.
 test("the dock offers exactly three pens, labelled by position", () => {
   assert.deepEqual(
     penTools.map((item) => item.label),
@@ -41,11 +40,7 @@ test("the dock offers exactly three pens, labelled by position", () => {
   });
 });
 
-// The pen a mark was made with is a property of the dock, not of the mark:
-// remembering which pen drew an annotation would write a dock index into a file
-// the reader hands to someone else, where Pen 2 is a different colour. Scanning
-// the bytes alone is not enough - an index could be written as a number - so the
-// written Ink dictionary's whole key set is pinned.
+// The pen a mark was made with is a property of the dock, not of the mark: remembering which pen drew an annotation would write a dock index into a file the reader hands to someone else, where Pen 2 is a different colour. Scanning the bytes alone is not enough - an index could be written as a number - so the written Ink dictionary's whole key set is pinned.
 test("a pen's identity never reaches annotation data", async () => {
   const blank = await PDFDocument.create();
   blank.addPage([200, 200]);

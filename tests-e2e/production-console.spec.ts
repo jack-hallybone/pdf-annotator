@@ -6,14 +6,14 @@ import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 
-// Measured on the built artifact, because the dev server rewrites module URLs,
-// injects its own client and sets headers GitHub Pages never sends.
+// Measured on the built artifact, because the dev server rewrites module URLs, injects its own client and sets headers GitHub Pages never sends.
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const rendererOut = fileURLToPath(new URL("../dist/", import.meta.url));
+// deploy.yml builds for the Pages sub-path in BASE_PATH, as vite.config.ts reads it, so this serves and opens the build under it too.
+const BASE = process.env.BASE_PATH ?? "";
 
-// The filenames are named rather than globbed, so dropping a warm-up fails here;
-// the directory is read off the build, whose digest changes with pdfjs-dist.
+// The filenames are named rather than globbed, so dropping a warm-up fails here; the directory is read off the build, whose digest changes with pdfjs-dist.
 const pdfjsDir = readdirSync(rendererOut).filter((entry) =>
   /^pdfjs-[0-9a-f]{12}$/.test(entry),
 );
@@ -24,7 +24,7 @@ if (pdfjsDir.length !== 1) {
   );
 }
 const WARMED_WASM = ["openjpeg.wasm", "jbig2.wasm", "qcms_bg.wasm"].map(
-  (file) => `/${pdfjsDir[0]}/wasm/${file}`,
+  (file) => `${BASE}/${pdfjsDir[0]}/wasm/${file}`,
 );
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -48,18 +48,9 @@ const serverHits = new Map<string, number>();
 test.beforeAll(async () => {
   test.setTimeout(300_000);
 
-  // Always, never "only if dist is missing": an assertion about the
-  // shipped file is worth nothing if an older source tree left that file behind.
-  // Root-served, always: `serve()` below maps every path 1:1 onto dist/, with
-  // no notion of a base path, so a leaked BASE_PATH/VITE_SITE_URL (CI sets
-  // both on the same step that runs this, for the outer build that ships)
-  // bakes a subpath into every asset URL this server can't answer to.
-  const env = { ...process.env };
-  delete env.BASE_PATH;
-  delete env.VITE_SITE_URL;
+  // Always, never "only if dist is missing": an assertion about the shipped file is worth nothing if an older source tree left that file behind.
   execFileSync("npm", ["run", "build"], {
     cwd: projectRoot,
-    env,
     stdio: "inherit",
   });
 
@@ -98,9 +89,10 @@ async function serve(url: string) {
     (serverHits.get(`${path}${requested.search}`) ?? 0) + 1,
   );
 
+  const local = path.startsWith(`${BASE}/`) ? path.slice(BASE.length) : path;
   const file = join(
     rendererOut,
-    normalize(path.endsWith("/") ? `${path}index.html` : path),
+    normalize(local.endsWith("/") ? `${local}index.html` : local),
   );
   if (!file.startsWith(rendererOut.replace(/\/$/, "") + sep)) {
     return { status: 403, type: "text/plain", body: "forbidden" };
@@ -144,7 +136,7 @@ test("the built app loads with a silent console and fetches each asset once", as
     pageRequests.set(path, (pageRequests.get(path) ?? 0) + 1);
   });
 
-  await page.goto(`${origin}/`, { waitUntil: "load" });
+  await page.goto(`${origin}${BASE}/`, { waitUntil: "load" });
   await expect(page.locator(".browserapp-home-card")).toBeVisible();
 
   await page.evaluate(
@@ -158,8 +150,7 @@ test("the built app loads with a silent console and fetches each asset once", as
       }),
   );
 
-  // The warm-up runs on an idle callback with a 600 ms timeout and Chromium
-  // reports an unused preload a few seconds after load.
+  // The warm-up runs on an idle callback with a 600 ms timeout and Chromium reports an unused preload a few seconds after load.
   await page.waitForTimeout(5_000);
 
   // A page that never loaded would satisfy every assertion below by doing nothing.
@@ -170,9 +161,7 @@ test("the built app loads with a silent console and fetches each asset once", as
   expect(pageErrors).toEqual([]);
   expect(consoleMessages).toEqual([]);
 
-  // The warm-up has been dropped, so only the worker's install should ask for
-  // these. The stamped count is asserted as 0 rather than deleted: these files are
-  // content-hashed by directory, so nothing may file them under a query key again.
+  // The warm-up has been dropped, so only the worker's install should ask for these. The stamped count is asserted as 0 rather than deleted: these files are content-hashed by directory, so nothing may file them under a query key again.
   for (const asset of WARMED_WASM) {
     expect(
       pageRequests.get(asset),

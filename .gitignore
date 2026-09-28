@@ -12,8 +12,7 @@ node_modules
 .env
 .env.*
 .npmrc
-# ...except the root one, which carries `ignore-scripts=true` and no secret, and
-# a setting that is not in the checkout is one CI and a fresh clone never see.
+# ...except the root one, which carries `ignore-scripts=true` and no secret - a setting not in the checkout is one CI and a fresh clone never see.
 !/.npmrc
 *.pem
 *.key

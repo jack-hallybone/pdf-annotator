@@ -2,6 +2,8 @@
 import "../pdfdocumenteditor/styles.css";
 import "./styles.css";
 
+// Usable without ../browserapp: nothing under src/tabbedapp may import from it.
+
 export { TabbedAppDocument } from "./TabbedAppDocument";
 export { TabbedAppShell } from "./TabbedAppShell";
 export { TabbedAppNoticeStack } from "./components/TabbedAppNotices";
@@ -20,6 +22,7 @@ export type {
 } from "./TabbedAppDocument";
 export type {
   TabbedAppCloseDocumentsRequest,
+  TabbedAppOpenDocumentRequest,
   TabbedAppOpenDocumentSummary,
   TabbedAppHomeRenderProps,
   TabbedAppShellHandle,

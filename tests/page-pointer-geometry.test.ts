@@ -13,10 +13,7 @@ import {
 import type { TextHitRect } from "../src/pdfdocumenteditor/pagePointerGeometry";
 import type { PageViewport } from "../src/pdfdocumenteditor/types";
 
-// A pointer arrives in client coordinates and has to come back out in PDF user
-// space, so three transforms stack on every sample - subtract where the page
-// sits on screen, divide by how big it is drawn, flip through pdf.js's viewport
-// - and getting any of them wrong offsets every annotation without erroring.
+// A pointer arrives in client coordinates and has to come back out in PDF user space, so three transforms stack on every sample - subtract where the page sits on screen, divide by how big it is drawn, flip through pdf.js's viewport - and getting any of them wrong offsets every annotation without erroring.
 
 const PAGE_WIDTH_PT = 612;
 const PAGE_HEIGHT_PT = 792;
@@ -90,8 +87,7 @@ test("a pointer over the page maps to the PDF point beneath it", () => {
   const viewport = viewportAtZoom(1);
   const bounds = pageRect(100, 50, PAGE_WIDTH_PT, PAGE_HEIGHT_PT);
 
-  // One inch in and one inch down from the page's top-left corner, so 72 across
-  // and 72 up from the bottom edge.
+  // One inch in and one inch down from the page's top-left corner, so 72 across and 72 up from the bottom edge.
   const event = pointerEvent({ clientX: 172, clientY: 122 }, bounds);
 
   assert.deepEqual(eventToPdfPoint(event, viewport), { x: 72, y: 720 });
@@ -133,9 +129,7 @@ test("zooming in makes the same PDF point twice as far across the screen", () =>
 });
 
 test("the page's measured size, not the viewport's, sets the scale", () => {
-  // A CSS transform (the smooth-zoom preview) can leave the element drawn at a
-  // different size than the viewport it was rendered for, and the element on
-  // screen is what the pointer is over.
+  // A CSS transform (the smooth-zoom preview) can leave the element drawn at a different size than the viewport it was rendered for, and the element on screen is what the pointer is over.
   const viewport = viewportAtZoom(1);
   const halfSize = pageRect(0, 0, PAGE_WIDTH_PT / 2, PAGE_HEIGHT_PT / 2);
 

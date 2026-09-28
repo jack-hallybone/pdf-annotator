@@ -8,10 +8,7 @@ import {
 } from "pdf-lib";
 import { markedContent } from "./parts";
 
-// Any reference between the two sides does it: one object a page's subtree
-// reaches and the other side owns is enough to make that side's structure-parent
-// key read as one both claim, so these ten routes are a breadth check rather
-// than a taxonomy.
+// Any reference between the two sides does it: one object a page's subtree reaches and the other side owns is enough to make that side's structure-parent key read as one both claim, so these ten routes are a breadth check rather than a taxonomy.
 export const SHARED_ROUTES = [
   "aa",
   "bead",
@@ -47,10 +44,7 @@ export const SHARED_ROUTE_SECRETS = sharedRouteMarkers("SECRET");
 
 type SharedDirection = "into the deleted page" | "into the page that stays";
 
-// `direction` decides which page owns the object holding the structure-parent
-// key. The placed element always describes the owner's page, so it is `SECRET-`
-// when the owner is the page being deleted and `KEEP-` when it is the one that
-// stays.
+// `direction` decides which page owns the object holding the structure-parent key. The placed element always describes the owner's page, so it is `SECRET-` when the owner is the page being deleted and `KEEP-` when it is the one that stays.
 export async function sharedObjectProbePdf(
   route: SharedRoute,
   placedElementNamesTheDeletedPage: boolean,

@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import UPNG_ from "@pdf-lib/upng";
 
-// Node's ESM loader does not unwrap a nested `.default` the way bundlers do, and
-// @pdf-lib/upng's CJS build sets `exports.default` under `__esModule`.
+// Node's ESM loader does not unwrap a nested `.default` the way bundlers do, and @pdf-lib/upng's CJS build sets `exports.default` under `__esModule`.
 const UPNG = (UPNG_ as unknown as { default?: typeof UPNG_ }).default ?? UPNG_;
 import {
   PDFArray,
@@ -27,9 +26,7 @@ import { writePdfAnnotations } from "../src/pdfdocumenteditor/pdfWriter";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import { loadTestPdf, readFixture } from "./pdfTestUtils";
 
-// annotationImport.ts imports `pdfjs-dist`, whose browser build touches
-// `DOMMatrix` at module top level, so the polyfills are installed first and the
-// module is loaded with a dynamic import, which is not hoisted.
+// annotationImport.ts imports `pdfjs-dist`, whose browser build touches `DOMMatrix` at module top level, so the polyfills are installed first and the module is loaded with a dynamic import, which is not hoisted.
 installBrowserPolyfills();
 const { extractAppearanceRotationAndRect, extractStampImage } =
   await import("../src/pdfdocumenteditor/annotationImport");
@@ -93,8 +90,7 @@ function installBrowserPolyfills() {
   };
 }
 
-// A 2x2 solid, fully-opaque red PNG built from raw pixels rather than a base64
-// literal, so there is no ambiguity about what each pixel decodes to.
+// A 2x2 solid, fully-opaque red PNG built from raw pixels rather than a base64 literal, so there is no ambiguity about what each pixel decodes to.
 const RED_2X2_PNG_BASE64 = (() => {
   const rgba = new Uint8ClampedArray(2 * 2 * 4);
   for (let pixel = 0; pixel < 4; pixel += 1) {
@@ -343,8 +339,7 @@ test("extractAppearanceRotationAndRect declines when BBox and Rect disagree (a s
   });
 
   const mutated = await mutateFormDict(output, 0, id, (formDict, context) => {
-    // A BBox at double size rather than matching Rect 1:1 - a "translate only"
-    // assumption this app's own writer satisfies and a third-party tool need not.
+    // A BBox at double size rather than matching Rect 1:1 - a "translate only" assumption this app's own writer satisfies and a third-party tool need not.
     formDict.set(PDFName.of("BBox"), context.obj([0, 0, 80, 200]));
   });
 

@@ -1,14 +1,11 @@
-// MIT and ISC require their copyright notice to travel with copies and
-// Apache-2.0 requires a copy of the licence, but a bundler strips comments, so
-// the built app satisfies none of that on its own.
+// MIT and ISC require their copyright notice to travel with copies and Apache-2.0 requires a copy of the licence, but a bundler strips comments, so the built app satisfies none of that on its own.
 
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const LICENCE_FILE = /^(licen[cs]e|copying|notice)(\.(md|txt))?$/i;
 
-// npm hoists, but a nested copy can be a different version under a different
-// licence, so walk up the way Node's own resolution does.
+// npm hoists, but a nested copy can be a different version under a different licence, so walk up the way Node's own resolution does.
 function findPackageDir(name, fromDir) {
   let current = fromDir;
   for (;;) {
@@ -41,9 +38,7 @@ function licenceName(manifest) {
   return null;
 }
 
-// The `dependencies` tree only: devDependencies never reach a user, and the one
-// optionalDependency is @napi-rs/canvas, which pdf.js reaches through
-// createRequire, so the specifier is bundled but the package's code is not.
+// The `dependencies` tree only: devDependencies never reach a user, and the one optionalDependency is @napi-rs/canvas, which pdf.js reaches through createRequire, so the specifier is bundled but the package's code is not.
 export function collectThirdPartyPackages(repoRoot) {
   const collected = new Map();
   const missing = [];

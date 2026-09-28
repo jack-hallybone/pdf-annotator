@@ -1,8 +1,7 @@
 import { annotationColors } from "./annotationColors";
 import type { ToolSettings } from "./types";
 
-// The core owns these because they are annotation data; which buttons exist
-// and which is selected belong to the host.
+// The core owns these because they are annotation data; which buttons exist and which is selected belong to the host.
 export const defaultToolSettings: ToolSettings = {
   highlightColor: annotationColors.yellow,
   highlightOpacity: 0.5,

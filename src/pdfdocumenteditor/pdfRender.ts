@@ -1,7 +1,4 @@
-/*
- * Every PDF.js value in this app comes from `pdfjs-dist/legacy/...`, never the
- * package root or `pdfjs-dist/build|web/...`; eslint.config.js enforces it.
- */
+/* Every PDF.js value in this app comes from `pdfjs-dist/legacy/...`, never the package root or `pdfjs-dist/build|web/...`; eslint.config.js enforces it. */
 import {
   AnnotationMode,
   GlobalWorkerOptions,
@@ -11,8 +8,7 @@ import "pdfjs-dist/legacy/web/pdf_viewer.css";
 import { pdfWorkerUrl, pdfjsAssetBase } from "../pdfRuntime";
 import { clamp } from "./viewerConfig";
 
-// Whatever calls getDocument must import this module, or pdf.js looks for its
-// worker in the wrong place and every page comes up blank.
+// Whatever calls getDocument must import this module, or pdf.js looks for its worker in the wrong place and every page comes up blank.
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 const pdfjsAssetBaseUrl = pdfjsAssetBase();
@@ -23,8 +19,7 @@ export const PDFJS_DOCUMENT_OPTIONS = {
   enableXfa: false,
   iccUrl: `${pdfjsAssetBaseUrl}iccs/`,
   isImageDecoderSupported: false,
-  // Inert on PDF.js 6, but kept as a no-cost opt-out should an eval path
-  // return under this name.
+  // Inert on PDF.js 6, but kept as a no-cost opt-out should an eval path return under this name.
   isEvalSupported: false,
   standardFontDataUrl: `${pdfjsAssetBaseUrl}standard_fonts/`,
   useWasm: true,

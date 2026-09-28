@@ -77,9 +77,7 @@ test("resizeImageStampRect from bottom-right anchors the top-left and preserves 
   assert.equal(Math.min(resized.rect.x1, resized.rect.x2), 100);
 });
 
-// unrotatePointForAnnotation maps a world point to the annotation's local frame,
-// and applying it with the complementary angle (360 - rotation) is its own
-// inverse, which is how these drive a resize by a known local delta.
+// unrotatePointForAnnotation maps a world point to the annotation's local frame, and applying it with the complementary angle (360 - rotation) is its own inverse, which is how these drive a resize by a known local delta.
 function worldPointFromLocal(
   localPoint: { x: number; y: number },
   worldRect: { x1: number; y1: number; x2: number; y2: number },
@@ -98,8 +96,7 @@ test("resizeImageStampRect keeps the anchor corner fixed in local space when the
   const worldRect = rotatedAnnotationRect(localRect, rotation);
   const annotation = imageStamp({ rect: worldRect, rotation }) as never;
 
-  // Drag the top-left handle so the local far corner (x1, y2) moves to (100, 250);
-  // the anchor (opposite corner, x2/y1) must stay exactly where it started.
+  // Drag the top-left handle so the local far corner (x1, y2) moves to (100, 250); the anchor (opposite corner, x2/y1) must stay exactly where it started.
   const dragPoint = worldPointFromLocal(
     { x: 100, y: 250 },
     worldRect,
@@ -137,8 +134,7 @@ test("resizeFreeTextWidth keeps the anchor edge fixed in local space when the an
     rotation,
   } as unknown as Extract<PdfAnnotation, { kind: "freeText" }>;
 
-  // Drag the right handle so the local right edge moves from x2=300 to x2=380;
-  // the left edge (x1=100) and top/bottom must stay exactly where they started.
+  // Drag the right handle so the local right edge moves from x2=300 to x2=380; the left edge (x1=100) and top/bottom must stay exactly where they started.
   const dragPoint = worldPointFromLocal(
     { x: 380, y: 125 },
     worldRect,

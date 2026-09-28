@@ -1,7 +1,6 @@
 import type { PageSize } from "../types";
 
-// Holds a page's space in the scroll flow until it renders, so the scrollbar
-// does not jump as pages arrive.
+// Holds a page's space in the scroll flow until it renders, so the scrollbar does not jump as pages arrive.
 export function PdfPagePlaceholder({
   pageIndex,
   pageSize,

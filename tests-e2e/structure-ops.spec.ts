@@ -3,21 +3,16 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 
-// Page-structure regression net: every case checks the outcome twice - what the
-// app shows, and what pdf-lib finds in the bytes it writes - so a pipeline that
-// updates one without the other cannot pass.
+// Page-structure regression net: every case checks the outcome twice - what the app shows, and what pdf-lib finds in the bytes it writes - so a pipeline that updates one without the other cannot pass.
 
 const fixturePath = fileURLToPath(
   new URL("../tests/fixtures/test-annotated.pdf", import.meta.url),
 );
 
-// Playwright cannot drive the File System Access picker; the shell's hidden
-// input fires the same open path.
+// Playwright cannot drive the File System Access picker; the shell's hidden input fires the same open path.
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
-// Every wait below is on a full document reload - reparse, re-render, thumbnail
-// re-raster - so these are seconds-scale where the rest of the suite is
-// milliseconds.
+// Every wait below is on a full document reload - reparse, re-render, thumbnail re-raster - so these are seconds-scale where the rest of the suite is milliseconds.
 const RELOAD_TIMEOUT_MS = 45_000;
 
 test.describe.configure({ timeout: 180_000 });
@@ -109,9 +104,7 @@ async function expectThumbnailLandscape(page: Page, pageNumber: number) {
     .toBe(true);
 }
 
-// "Delete page" stays disabled at a page count of one, so every test grows the
-// fixture first, and rotating page 1 first gives it an identity the
-// delete/undo/redo assertions can follow.
+// "Delete page" stays disabled at a page count of one, so every test grows the fixture first, and rotating page 1 first gives it an identity the delete/undo/redo assertions can follow.
 async function growDocument(page: Page): Promise<DocumentShape> {
   const fixture = await fixtureShape();
   expect(fixture.pageCount).toBe(1);

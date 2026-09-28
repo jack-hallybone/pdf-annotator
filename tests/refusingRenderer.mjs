@@ -1,9 +1,6 @@
-// A renderer that refuses to open one document, because a suite that cannot make
-// a reload fail cannot see whether a page edit put its identities back.
+// A renderer that refuses to open one document, because a suite that cannot make a reload fail cannot see whether a page edit put its identities back.
 
-// Import this before any `await import()` of renderer code: the redirect below is
-// consulted when a specifier is resolved, and a static import graph is resolved
-// in full before any of it runs.
+// Import this before any `await import()` of renderer code: the redirect below is consulted when a specifier is resolved, and a static import graph is resolved in full before any of it runs.
 import { registerHooks } from "node:module";
 import "./rendererAssetStubs";
 import { getDocument as openDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -26,8 +23,7 @@ export function refuseNextDocumentLoad() {
   refusals += 1;
 }
 
-// Refusals armed and not yet used: a case that never reaches the reload fails
-// rather than passing quietly on a path it did not drive.
+// Refusals armed and not yet used: a case that never reaches the reload fails rather than passing quietly on a path it did not drive.
 export function pendingDocumentRefusals() {
   return refusals;
 }

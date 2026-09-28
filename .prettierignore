@@ -10,14 +10,8 @@ test-results
 *.pdf
 src/browserapp/assets
 
-# The vendored fleet files. Not ignored because they are generated — they are tracked source —
-# but because this project does not OWN them: they are pasted, byte-identical, into every carrier
-# in the fleet, and `npm run format` rewriting one here would fork this copy from the other ten.
-# Measured: with these lines absent, a formatting break planted in theme.css is reported by
-# `format:check`, so prettier does see them and .gitignore does not cover them.
+# The shared fleet stylesheet, byte-identical in every project carrying it: `npm run format` would fork this copy, and .gitignore does not keep prettier off it.
 src/theme.css
-scripts/stamp_version.mjs
 
-# Generated from the dependency tree; reformatting it would fork it from what
-# the generator emits.
+# Generated from the dependency tree; reformatting it would fork it from what the generator emits.
 THIRD-PARTY-NOTICES.md

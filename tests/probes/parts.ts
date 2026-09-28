@@ -1,7 +1,6 @@
 import { type PDFContext, type PDFObject } from "pdf-lib";
 
-// Both spellings the specification allows: one node holding every key in
-// `/Nums`, or a root whose `/Kids` each hold some behind a `/Limits`.
+// Both spellings the specification allows: one node holding every key in `/Nums`, or a root whose `/Kids` each hold some behind a `/Limits`.
 export function numberTree(
   context: PDFContext,
   entries: [number, PDFObject][],

@@ -6,9 +6,7 @@ import { renderHook } from "@testing-library/react";
 import { useLatestRef } from "../src/useLatestRef";
 import { useRenderLatestRef } from "../src/pdfdocumenteditor/useRenderLatestRef";
 
-// This hook writes during render while its sibling `useLatestRef` catches up a
-// commit later, and a test that only rerenders and then reads cannot tell them
-// apart, because rerendering flushes effects.
+// This hook writes during render while its sibling `useLatestRef` catches up a commit later, and a test that only rerenders and then reads cannot tell them apart, because rerendering flushes effects.
 
 test("the ref is already current DURING the render that supplied the value", () => {
   const seenDuringRender: number[] = [];
@@ -41,9 +39,7 @@ test("it does not share useLatestRef timing", () => {
   rerender(2);
   rerender(3);
 
-  // Both hooks agree on the first render and disagree from then on, so making
-  // either one match the other fails here rather than shipping as a silent
-  // one-commit lag.
+  // Both hooks agree on the first render and disagree from then on, so making either one match the other fails here rather than shipping as a silent one-commit lag.
   assert.deepEqual(duringRenderFromRenderHook, [1, 2, 3]);
   assert.deepEqual(duringRenderFromEffectHook, [1, 1, 2]);
 });
@@ -75,10 +71,7 @@ test("an unchanged value is still rewritten, so nothing survives a re-render", (
 });
 
 test("PdfPageView mirrors through the render-time hook, not the deferred one", () => {
-  // The swap that breaks the component's own guarantee is invisible: `useLatestRef`
-  // has the same signature, a near-identical name and no type or lint difference,
-  // and nothing renderable under jsdom observes the lag, so the choice is pinned
-  // at the source level instead.
+  // The swap that breaks the component's own guarantee is invisible: `useLatestRef` has the same signature, a near-identical name and no type or lint difference, and nothing renderable under jsdom observes the lag, so the choice is pinned at the source level instead.
   const source = readFileSync(
     fileURLToPath(
       new URL("../src/pdfdocumenteditor/PdfPageView.tsx", import.meta.url),

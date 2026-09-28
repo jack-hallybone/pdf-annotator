@@ -1,7 +1,4 @@
-/*
- * Exactly one viewport claims an event: one aimed inside a viewport is that
- * viewport's, and one aimed at nothing belongs to the view last touched.
- */
+/* Exactly one viewport claims an event: one aimed inside a viewport is that viewport's, and one aimed at nothing belongs to the view last touched. */
 
 const attachedRoots = new Set<HTMLElement>();
 let lastTouchedRoot: HTMLElement | null = null;
@@ -27,10 +24,7 @@ export function markGestureRootTouched(root: HTMLElement) {
   }
 }
 
-/**
- * Undecidable cases resolve to the last-touched view rather than to every view:
- * a gesture handled twice is worse than one handled by the wrong view.
- */
+/** Undecidable cases resolve to the last-touched view rather than to every view: a gesture handled twice is worse than one handled by the wrong view. */
 export function viewOwnsWindowGesture(
   root: HTMLElement | null,
   target: EventTarget | null,

@@ -4,8 +4,7 @@ import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 
-// Redo used to have two bindings that both undid: Ctrl+Z ignored Shift, so
-// Ctrl+Shift+Z matched it before ever reaching the Ctrl+Y branch below.
+// Redo used to have two bindings that both undid: Ctrl+Z ignored Shift, so Ctrl+Shift+Z matched it before ever reaching the Ctrl+Y branch below.
 
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 const TAB = ".tabbedapp-document-tab";
@@ -49,8 +48,7 @@ test("Ctrl+O opens the same file picker as the Open PDFs button", async ({
   page,
 }) => {
   await page.addInitScript(() => {
-    // Forces the hidden <input type="file"> fallback: Playwright can drive a
-    // filechooser event but not a window.showOpenFilePicker() call.
+    // Forces the hidden <input type="file"> fallback: Playwright can drive a filechooser event but not a window.showOpenFilePicker() call.
     Object.defineProperty(window, "showOpenFilePicker", {
       configurable: true,
       value: undefined,

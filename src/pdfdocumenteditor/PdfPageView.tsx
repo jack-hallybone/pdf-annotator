@@ -222,14 +222,10 @@ type PdfPageViewProps = {
   ) => void;
 };
 
-// Stable no-op for layers that render AnnotationShape without drag support;
-// module-level so it never breaks AnnotationShape's memoization.
+// Stable no-op for layers that render AnnotationShape without drag support; module-level so it never breaks AnnotationShape's memoization.
 const noopAnnotationDragHandler = () => undefined;
 
-/*
- * No PDF bytes, annotation contents or file names are passed - the page number
- * and the thrown error are all that is logged.
- */
+/* No PDF bytes, annotation contents or file names are passed - the page number and the thrown error are all that is logged. */
 function logPageDisplayFailure(
   what: string,
   pageIndex: number,
@@ -280,9 +276,7 @@ function PdfPageViewComponent({
   const textHighlightCanvasRef = useRef<HTMLCanvasElement>(null);
   const annotationLayerRef = useRef<HTMLDivElement>(null);
   const existingAnnotationsPageRef = useRef<PDFPageProxy | null>(null);
-  // A page promoted to "visible" mid-scroll starts its queued work early
-  // through these handles, rather than the priority sitting in an effect
-  // dependency array.
+  // A page promoted to "visible" mid-scroll starts its queued work early through these handles, rather than the priority sitting in an effect dependency array.
   const pendingPageTasksRef = useRef<Set<PendingPageTask>>(new Set());
   const suppressNextTextHighlightRef = useRef(false);
   const dismissedSelectionPointerIdRef = useRef<number | null>(null);
@@ -315,10 +309,7 @@ function PdfPageViewComponent({
   const [lassoPath, setLassoPath] = useState<PdfPoint[] | null>(null);
   const [textSelectionHighlightAction, setTextSelectionHighlightAction] =
     useState<TextSelectionHighlightAction | null>(null);
-  // Mirrors (named `<mirrored name>Ref`, written during render - see
-  // useRenderLatestRef) so the stable pointer handlers and the window listeners
-  // registered once read current values through .current instead of closing
-  // over them.
+  // Mirrors (named `<mirrored name>Ref`, written during render - see useRenderLatestRef) so the stable pointer handlers and the window listeners registered once read current values through .current instead of closing over them.
   const onNavigateDestinationRef = useRenderLatestRef(onNavigateDestination);
   const onExternalLinkRequestRef = useRenderLatestRef(onExternalLinkRequest);
   const onNavigatePageRef = useRenderLatestRef(onNavigatePage);
@@ -337,8 +328,7 @@ function PdfPageViewComponent({
   const getActiveTextGeometryRef = useRenderLatestRef(getActiveTextGeometry);
   const viewport = useMemo(() => page.getViewport({ scale }), [page, scale]);
   const viewportRef = useRenderLatestRef(viewport);
-  // Escape generates no pointerup or pointercancel, so nothing in the pointer
-  // gesture tracking below sees it.
+  // Escape generates no pointerup or pointercancel, so nothing in the pointer gesture tracking below sees it.
   const cancelActiveGestureRef = useRenderLatestRef(cancelActiveGesture);
   const renderPriorityRef = useRenderLatestRef(renderPriority);
   const renderKey = `${page.pageNumber}:${scale}`;
@@ -624,8 +614,7 @@ function PdfPageViewComponent({
             await renderRasterFallbackWithRecovery();
           } catch (fallbackError) {
             if (!isRenderCancellation(fallbackError)) {
-              // Both, and the primary one first: the fallback usually
-              // fails for the same reason the page view did.
+              // Both, and the primary one first: the fallback usually fails for the same reason the page view did.
               logPageDisplayFailure("page render", pageIndex, error);
               logPageDisplayFailure(
                 "raster fallback",
@@ -693,10 +682,7 @@ function PdfPageViewComponent({
     viewport,
   ]);
 
-  /*
-   * The only thing a priority change is allowed to do: start work this page has
-   * queued but not begun.
-   */
+  /* The only effect allowed to depend on `renderPriority` directly - elsewhere read `renderPriorityRef`, or the effect re-runs on every priority change and blanks the canvas mid-scroll. What it's allowed to do: start work this page has queued but not begun. */
   useEffect(() => {
     if (renderPriority === "idle") {
       return;
@@ -747,9 +733,7 @@ function PdfPageViewComponent({
     };
   }, [baseLayerReady, onNoticeRef, page, pageIndex, renderPriorityRef]);
 
-  // Only the set of imported image-stamp ids decides whether to hide a
-  // native-rendered stamp below, so this narrow key keeps the overlay from
-  // re-rendering on every unrelated annotation edit.
+  // Only the set of imported image-stamp ids decides whether to hide a native-rendered stamp below, so this narrow key keeps the overlay from re-rendering on every unrelated annotation edit.
   const importedImageStampIdsKey = annotations
     .filter((annotation) => annotation.kind === "imageStamp")
     .map((annotation) => annotation.id)
@@ -916,10 +900,7 @@ function PdfPageViewComponent({
   useEffect(() => {
     const annotationLayer = annotationLayerRef.current;
 
-    // pdf.js populates `div` asynchronously inside layer.render() below, so
-    // without this guard an invocation superseded by a newer one would still
-    // write its nodes into the div once it resolves, landing on top of what the
-    // newer render already put there.
+    // pdf.js populates `div` asynchronously inside layer.render() below, so without this guard an invocation superseded by a newer one would still write its nodes into the div once it resolves, landing on top of what the newer render already put there.
     let cancelled = false;
 
     async function renderAnnotationLayer() {
@@ -962,8 +943,7 @@ function PdfPageViewComponent({
         linkService: linkService as unknown as PdfJsAnnotationLinkService,
         downloadManager:
           downloadManager as unknown as PdfJsAnnotationDownloadManager,
-        // No embedded PDF script execution and no interactive form widgets:
-        // this app only displays existing annotations, never runs their scripts.
+        // No embedded PDF script execution and no interactive form widgets: this app only displays existing annotations, never runs their scripts.
         enableScripting: false,
         renderForms: false,
       });
@@ -1180,9 +1160,7 @@ function PdfPageViewComponent({
       event.target === event.currentTarget &&
       selectedPageAnnotations.length > 0
     ) {
-      // Image stamps render in a separate SVG layer beneath this interaction
-      // layer, so a click that visually lands on a stamp still hits this
-      // layer's own empty background.
+      // Image stamps render in a separate SVG layer beneath this interaction layer, so a click that visually lands on a stamp still hits this layer's own empty background.
       if (tool === "select") {
         const point = eventToPdfPoint(event, viewport);
         const hitStamp = [...imageDisplayAnnotations]
@@ -1300,9 +1278,7 @@ function PdfPageViewComponent({
         if (!selectedAnnotationIdSet.has(hitAnnotation.id)) {
           onSelectAnnotations([hitAnnotation.id]);
         }
-        // The highlight tool shares this select-and-drag affordance with the
-        // select tool; the draw tool deliberately does not, since ink strokes
-        // are too thin to click precisely while trying to draw nearby.
+        // The highlight tool shares this select-and-drag affordance with the select tool; the draw tool deliberately does not, since ink strokes are too thin to click precisely while trying to draw nearby.
         if (tool === "select" || tool === "highlight") {
           beginMoveAnnotationAtPoint({
             annotationId: hitAnnotation.id,
@@ -1377,9 +1353,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    // Gated on the draft state itself, not the live `tool`: once a pointer is
-    // captured this handler keeps receiving its move and up events even if the
-    // tool changes mid-gesture.
+    // Gated on the draft state itself, not the live `tool`: once a pointer is captured this handler keeps receiving its move and up events even if the tool changes mid-gesture.
     if (draftTextHighlight) {
       event.preventDefault();
       const segment = nearestTextSegmentFromPointerEventWithGeometry(
@@ -1501,8 +1475,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    // Gated on the draft state itself, not the live `tool` - see the
-    // matching comment in handlePagePointerMove above.
+    // Gated on the draft state itself, not the live `tool` - see the matching comment in handlePagePointerMove above.
     if (draftTextHighlight) {
       releasePointer(event, event.pointerId);
       const geometry = getActiveTextGeometry();
@@ -1664,8 +1637,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    // Gated on the draft's own origin, not the live `tool` - see the matching
-    // comment in handlePagePointerMove.
+    // Gated on the draft's own origin, not the live `tool` - see the matching comment in handlePagePointerMove.
     if (draftInk.current()?.origin !== "svg") {
       return;
     }
@@ -1715,9 +1687,7 @@ function PdfPageViewComponent({
     }
   }
 
-  // Escape-key counterpart to handlePointerCancel above: the same cleanup, but
-  // unconditional (Escape carries no pointerId) and treating an in-progress
-  // annotation move as finished in place rather than abandoned.
+  // Escape-key counterpart to handlePointerCancel above: the same cleanup, but unconditional (Escape carries no pointerId) and treating an in-progress annotation move as finished in place rather than abandoned.
   function cancelActiveGesture() {
     const activeDragSelection = dragSelectionRef.current;
     if (activeDragSelection) {
@@ -1810,9 +1780,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    // Gated on the draft's own origin and kind, not the live `tool`: the
-    // gesture may have started under a different tool, so every style and shape
-    // decision below uses the kind captured at pointerdown.
+    // Gated on the draft's own origin and kind, not the live `tool`: the gesture may have started under a different tool, so every style and shape decision below uses the kind captured at pointerdown.
     const svgDraft = draftInk.current();
     if (svgDraft?.origin === "svg") {
       const draftKind = svgDraft.kind;
@@ -1844,12 +1812,10 @@ function PdfPageViewComponent({
             draftKind === "draw"
               ? toolSettings.drawWidth
               : toolSettings.highlightWidth,
-          // What kind of ink this is travels in /IT (Ink vs InkHighlight);
-          // /Contents is the reader's own note.
+          // What kind of ink this is travels in /IT (Ink vs InkHighlight); /Contents is the reader's own note.
           comment: "",
         };
-        // Paint the finalized, smoothed stroke before clearing the raw draft
-        // layer so pen-up does not leave a visible gap on dense pages.
+        // Paint the finalized, smoothed stroke before clearing the raw draft layer so pen-up does not leave a visible gap on dense pages.
         eraser.prepaintCommittedInkAnnotation(annotation);
       }
 
@@ -1925,9 +1891,7 @@ function PdfPageViewComponent({
     onToolChange("select");
   }
 
-  // Stable (its deps are pageIndex plus stable ref objects) so it can be passed
-  // to AnnotationShape without re-rendering every annotation on the page; reads
-  // current values through refs instead of closing over them.
+  // Stable (its deps are pageIndex plus stable ref objects) so it can be passed to AnnotationShape without re-rendering every annotation on the page; reads current values through refs instead of closing over them.
   const beginMoveAnnotationAtPoint = useCallback(
     ({
       annotationId,
@@ -1997,8 +1961,7 @@ function PdfPageViewComponent({
     [beginMoveAnnotationAtPoint, readOnlyRef, toolRef, viewportRef],
   );
 
-  // AnnotationShape's callback props must all be stable, or the memoized shapes
-  // re-render on every unrelated entry of the annotation array.
+  // AnnotationShape's callback props must all be stable, or the memoized shapes re-render on every unrelated entry of the annotation array.
   const handleAnnotationSelect = useCallback(
     (annotationId: string) => {
       onActivateRef.current(pageIndex);
@@ -2443,9 +2406,7 @@ function PdfPageViewComponent({
               className="text-selection-highlight-button"
               onClick={createHighlightFromTextSelection}
               onPointerDown={(event) => event.stopPropagation()}
-              // The button previews the highlight it will create, so it
-              // wears the highlighter's own colour rather than the app
-              // accent.
+              // The button previews the highlight it will create, so it wears the highlighter's own colour rather than the app accent.
               style={
                 {
                   left: textSelectionHighlightAction.x,
@@ -2472,10 +2433,7 @@ function PdfPageViewComponent({
 
 export const PdfPageView = memo(PdfPageViewComponent, arePdfPageViewPropsEqual);
 
-/*
- * The memo contract, in one rule: every data prop must be compared here, and
- * every callback prop must not be.
- */
+/* The memo contract, in one rule: every data prop must be compared here, and every callback prop must not be. */
 function arePdfPageViewPropsEqual(
   previous: PdfPageViewProps,
   next: PdfPageViewProps,
@@ -2540,9 +2498,7 @@ function sameInkCanvasRenderFrame(
     previous.scale === scale &&
     previous.viewportWidth === viewport.width &&
     previous.viewportHeight === viewport.height &&
-    // Width and height alone cannot distinguish a rotation on a square page,
-    // which would let the single-added-stroke fast path paint just the new
-    // stroke onto a stale, pre-rotation canvas.
+    // Width and height alone cannot distinguish a rotation on a square page, which would let the single-added-stroke fast path paint just the new stroke onto a stale, pre-rotation canvas.
     previous.viewportRotation === viewport.rotation
   );
 }
@@ -2591,12 +2547,7 @@ function isCanvasBackedInkAnnotation(
   );
 }
 
-/*
- * Reading --app-selection back as a property value can return a raw hex
- * string directly, but a hidden probe keeps this working regardless of how
- * a project defines the token (e.g. light-dark(), which a canvas 2D context
- * ignores).
- */
+/* Reading --app-selection back as a property value can return a raw hex string directly, but a hidden probe keeps this working regardless of how a project defines the token (e.g. light-dark(), which a canvas 2D context ignores). */
 function resolvedSelectionColor(element: Element | null) {
   const scope =
     element?.closest(`.${DOCUMENT_EDITOR_ROOT_CLASS}`) ??
@@ -2608,8 +2559,7 @@ function resolvedSelectionColor(element: Element | null) {
   const resolved = getComputedStyle(probe).color.trim();
   probe.remove();
 
-  // For the case where the probe returns nothing at all (a detached tree, a
-  // document with no stylesheet).
+  // For the case where the probe returns nothing at all (a detached tree, a document with no stylesheet).
   return resolved || "#1a56b0";
 }
 
@@ -2704,11 +2654,7 @@ function isPdfLinkTarget(target: EventTarget) {
   );
 }
 
-/*
- * The used background of the page element, not the token behind it: a custom
- * property carries a host's `light-dark(#a, #b)` through verbatim, and an
- * invalid fillStyle is silently ignored.
- */
+/* The used background of the page element, not the token behind it: a custom property carries a host's `light-dark(#a, #b)` through verbatim, and an invalid fillStyle is silently ignored. */
 function pageBackgroundColor(element: HTMLElement | null) {
   const value = element ? getComputedStyle(element).backgroundColor : "";
   return value && value !== "transparent" && value !== "rgba(0, 0, 0, 0)"

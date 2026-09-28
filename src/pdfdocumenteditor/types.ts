@@ -38,10 +38,7 @@ export type ToolSettings = {
   noteColor: [number, number, number];
 };
 
-/**
- * `comment` is the annotation's /Contents, the reader's own note, never the
- * text it sits on: that is `coveredText`, re-derived and never written.
- */
+/** `comment` is the annotation's /Contents, the reader's own note, never the text it sits on: that is `coveredText`, re-derived and never written. */
 export type TextHighlightAnnotation = {
   id: string;
   sourceId?: string;
@@ -123,11 +120,7 @@ export type PdfAnnotation =
 export type PageViewport = ReturnType<PDFPageProxy["getViewport"]>;
 export type LoadedPage = PDFPageProxy | null;
 
-/**
- * A range rather than a page number: how many pages a view displays is a
- * property of its height and zoom alone, and a band around an active page is
- * wrong about every other pane.
- */
+/** A range rather than a page number: how many pages a view displays is a property of its height and zoom alone, and a band around an active page is wrong about every other pane. */
 export type VisiblePageRange = {
   /** Last page displayed, inclusive, and never less than `start`. */
   end: number;

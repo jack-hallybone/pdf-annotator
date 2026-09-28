@@ -1,5 +1,4 @@
-// Source keys match an existing PDF annotation, read from pdf-lib or pdf.js in
-// slightly different raw shapes, to an in-memory PdfAnnotation.
+// Source keys match an existing PDF annotation, read from pdf-lib or pdf.js in slightly different raw shapes, to an in-memory PdfAnnotation.
 
 export function normalizedRectValues(values: number[]) {
   return [
@@ -36,10 +35,17 @@ export function clampPdfNumber(
   return Math.min(max, Math.max(min, value));
 }
 
-/*
- * A direct dictionary has no name, so its position in /Annots is its identity,
- * and pdf.js's display array is neither the raw array nor a prefix of it.
- */
+// A page or annotation coordinate this large cannot come from a real document. Left unclamped, a hostile or corrupt /Rect, quad point or ink point this big is still finite here, but dividing it by pdfWriter.ts's coordinate precision on a later save overflows to Infinity, which pdf-lib then writes as a numeric literal no PDF reader can parse.
+export const MAX_PDF_COORDINATE_MAGNITUDE = 1_000_000;
+
+export function clampPdfCoordinateMagnitude(value: number) {
+  return Math.min(
+    MAX_PDF_COORDINATE_MAGNITUDE,
+    Math.max(-MAX_PDF_COORDINATE_MAGNITUDE, value),
+  );
+}
+
+/* A direct dictionary has no name, so its position in /Annots is its identity, and pdf.js's display array is neither the raw array nor a prefix of it. */
 export const DIRECT_SOURCE_ID_PREFIX = "direct:";
 export const UNRESOLVED_SOURCE_ID_PREFIX = "unresolved:";
 
@@ -72,10 +78,7 @@ export function directSourcePosition(sourceId: string) {
     : null;
 }
 
-/*
- * `5 0 R` in the file, `5R` or `50R1` out of pdf.js: three spellings of one
- * indirect reference, canonicalised so the two libraries' answers compare.
- */
+/* `5 0 R` in the file, `5R` or `50R1` out of pdf.js: three spellings of one indirect reference, canonicalised so the two libraries' answers compare. */
 export function canonicalPdfReferenceKey(sourceId: string) {
   const compact = sourceId.trim();
   const spaced = /^(\d+)\s+(\d+)\s+r$/i.exec(compact);
@@ -89,9 +92,7 @@ export function canonicalPdfReferenceKey(sourceId: string) {
   return null;
 }
 
-/**
- * The reference key of a whole identity, or null when it names a position.
- */
+/** The reference key of a whole identity, or null when it names a position. */
 export function referenceSourceKey(sourceId: string) {
   for (const part of sourceId.split("|")) {
     const key = canonicalPdfReferenceKey(part.trim());

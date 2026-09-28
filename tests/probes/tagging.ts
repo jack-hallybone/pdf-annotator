@@ -1,5 +1,4 @@
-// The probes for the words a tagged PDF puts on its pages: every carrier the
-// specification allows, a /ClassMap, and a description written as its own object.
+// The probes for the words a tagged PDF puts on its pages: every carrier the specification allows, a /ClassMap, and a description written as its own object.
 import {
   PDFDict,
   PDFDocument,
@@ -9,9 +8,7 @@ import {
   PDFString,
 } from "pdf-lib";
 
-// Built from ISO 32000-1 Table 323 and 32000-2's structure additions, over the
-// mechanisms as well as the keys, so the probe is over the specification rather
-// than over the fix.
+// Built from ISO 32000-1 Table 323 and 32000-2's structure additions, over the mechanisms as well as the keys, so the probe is over the specification rather than over the fix.
 export async function taggedProbePdf(useObjectStreams: boolean) {
   const doc = await PDFDocument.create();
   const { context } = doc;
@@ -32,9 +29,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
     }),
   );
 
-  // Every shape 14.7.5 allows, one element each: `attributeObject` and
-  // `attributeStream` are what an attribute object may be, `/A` and `/C` the two
-  // ways it may be attached.
+  // Every shape 14.7.5 allows, one element each: `attributeObject` and `attributeStream` are what an attribute object may be, `/A` and `/C` the two ways it may be attached.
   const attributeObject = (marker: string) =>
     context.obj({ O: "Table", Summary: PDFString.of(marker) });
   const attributeStream = (marker: string) =>
@@ -47,8 +42,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
 
   const onKept = element({
     Alt: PDFString.of("KEEP-alt-of-the-kept-page"),
-    // One class only this element names and one it shares with an element on the
-    // page that leaves; both must survive.
+    // One class only this element names and one it shares with an element on the page that leaves; both must survive.
     C: context.register(
       context.obj([
         PDFName.of("KEEP-class-name"),
@@ -120,8 +114,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
     ID: context.register(PDFString.of("SECRET-element-id")),
     K: [0],
     Lang: PDFString.of("SECRET-lang"),
-    // A namespace the tree root does not declare; `declaredNamespace` below is the
-    // same shape with the root's `/Namespaces` naming it.
+    // A namespace the tree root does not declare; `declaredNamespace` below is the same shape with the root's `/Namespaces` naming it.
     NS: context.register(
       context.obj({
         NS: PDFString.of("SECRET-namespace-uri"),
@@ -137,9 +130,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
     "SECRET-extension-key": PDFString.of("SECRET-extension-value"),
     T: PDFString.of("SECRET-title"),
   });
-  // ISO 32000-2 puts text on the tree root as well, declared for the whole
-  // document and named by no page. A file specification carries its name four
-  // times over - `/F`, `/UF`, `/Desc` and the bytes - so a survivor keeps all four.
+  // ISO 32000-2 puts text on the tree root as well, declared for the whole document and named by no page. A file specification carries its name four times over - `/F`, `/UF`, `/Desc` and the bytes - so a survivor keeps all four.
   const embedded = (marker: string) =>
     context.register(
       context.obj({
@@ -216,8 +207,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
               Names: [PDFString.of("KEEP-element-id"), onKept],
             }),
           ),
-          // Its greatest key is the identifier that leaves, so a /Limits the strip does
-          // not rewrite goes on carrying it, and both are objects of their own.
+          // Its greatest key is the identifier that leaves, so a /Limits the strip does not rewrite goes on carrying it, and both are objects of their own.
           context.register(
             context.obj({
               Limits: context.register(
@@ -307,9 +297,7 @@ export async function taggedProbePdf(useObjectStreams: boolean) {
   return doc.save({ updateFieldAppearances: false, useObjectStreams });
 }
 
-// Four shapes, each one change from the first, with the same class named in all
-// four: `in-tree` keeps it because an element on the page that stays names it,
-// while the others leave the walk unable to reach every element.
+// Four shapes, each one change from the first, with the same class named in all four: `in-tree` keeps it because an element on the page that stays names it, while the others leave the walk unable to reach every element.
 export async function classMapProbePdf(
   shape: "complete" | "cyclic" | "in-tree" | "parent-tree-only" | "ref-only",
 ) {
@@ -337,8 +325,7 @@ export async function classMapProbePdf(
     children.push(onKept);
   }
   if (shape === "cyclic") {
-    // Two elements that are each other's child: the walk cannot finish reading them,
-    // so it cannot say a class has no user left.
+    // Two elements that are each other's child: the walk cannot finish reading them, so it cannot say a class has no user left.
     const first = element({ Pg: gone.ref });
     const second = element({ K: [first], Pg: gone.ref });
     context.lookup(first, PDFDict).set(PDFName.of("K"), context.obj([second]));
@@ -384,9 +371,7 @@ export async function classMapProbePdf(
   return doc.save({ updateFieldAppearances: false });
 }
 
-// `/Alt` is allowed to be an object of its own, and taking the entry off the
-// element leaves the string object in the context. It cannot simply be deleted
-// either, because two elements may share one string.
+// `/Alt` is allowed to be an object of its own, and taking the entry off the element leaves the string object in the context. It cannot simply be deleted either, because two elements may share one string.
 export async function sharedAltProbePdf(shared: boolean) {
   const doc = await PDFDocument.create();
   const { context } = doc;

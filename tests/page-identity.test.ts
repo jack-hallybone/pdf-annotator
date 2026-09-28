@@ -20,8 +20,7 @@ import type {
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 import type { PdfDocumentEditorViewSnapshot } from "../src/pdfdocumenteditor/viewSnapshot";
 
-// `direct:<page>:<index>` names an annotation dictionary by where it sits, so a
-// page edit moves the very thing it names.
+// `direct:<page>:<index>` names an annotation dictionary by where it sits, so a page edit moves the very thing it names.
 
 function note(id: string, pageIndex: number, sourceId?: string): PdfAnnotation {
   return {
@@ -242,9 +241,7 @@ test("a page set loses the pages the edit removed", () => {
   );
 });
 
-// A structural entry restores the document its own operation produces, so
-// reading the writer's report at its numbers hands an undo entry the answer
-// meant for a different page.
+// A structural entry restores the document its own operation produces, so reading the writer's report at its numbers hands an undo entry the answer meant for a different page.
 test("a save reads each history entry in the written file's page numbering", () => {
   const sources: WrittenAnnotationSources = new Map([
     ["direct:0:0", { kind: "moved", sourceId: "direct:0:1" }],

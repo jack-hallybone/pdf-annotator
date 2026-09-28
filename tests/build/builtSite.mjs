@@ -1,5 +1,4 @@
-// A check that skipped over a missing artefact would read exactly like a clean
-// one, so the absence of a build is a failure here.
+// A check that skipped over a missing artefact would read exactly like a clean one, so the absence of a build is a failure here.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 

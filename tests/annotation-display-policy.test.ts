@@ -1,14 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-// Which layer an existing annotation is allowed into is a security boundary, not
-// a styling choice: the pdf.js annotation layer builds real HTML elements, so a
-// widget admitted there would be a scriptable form control built from an
-// untrusted document, where the appearance overlay paints inert pixels.
+// Which layer an existing annotation is allowed into is a security boundary, not a styling choice: the pdf.js annotation layer builds real HTML elements, so a widget admitted there would be a scriptable form control built from an untrusted document, where the appearance overlay paints inert pixels.
 
-// annotationDisplayPolicy.ts imports `pdfjs-dist`, whose browser build touches
-// `DOMMatrix` at module top level, so it is loaded with a dynamic import after
-// the polyfills: a static import would be hoisted above them.
+// annotationDisplayPolicy.ts imports `pdfjs-dist`, whose browser build touches `DOMMatrix` at module top level, so it is loaded with a dynamic import after the polyfills: a static import would be hoisted above them.
 installBrowserPolyfills();
 const { AnnotationType } = await import("pdfjs-dist");
 const {
@@ -51,9 +46,7 @@ test("only links are ever built as HTML in the pdf.js annotation layer", () => {
   }
 });
 
-// Widgets were excluded from the appearance overlay as well, so a signature
-// stamp - and every form field - silently vanished from a document that renders
-// it everywhere else.
+// Widgets were excluded from the appearance overlay as well, so a signature stamp - and every form field - silently vanished from a document that renders it everywhere else.
 test("widget appearances are painted in the appearance overlay", () => {
   assert.equal(
     shouldRenderExistingAnnotationInAppearanceOverlay(

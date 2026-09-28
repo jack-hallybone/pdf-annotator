@@ -4,16 +4,13 @@ import { join } from "node:path";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 
-// Two document panes over the same file would look identical and be two copies, so
-// the proof is a mark drawn in one panel appearing in the other panel's pixels,
-// and a scroll position one keeps while the other moves.
+// Two document panes over the same file would look identical and be two copies, so the proof is a mark drawn in one panel appearing in the other panel's pixels, and a scroll position one keeps while the other moves.
 
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 const TAB = ".tabbedapp-document-tab";
 const VIEW = ".pdfdocumenteditor";
 
-// Sampled small and composited onto white, as smoke.spec.ts does: a blank page
-// is one colour and no ink, so the stroke is the only thing that moves these.
+// Sampled small and composited onto white, as smoke.spec.ts does: a blank page is one colour and no ink, so the stroke is the only thing that moves these.
 const SAMPLE_WIDTH = 300;
 
 test("splitting the only open tab shows one document in both panels", async ({
@@ -118,8 +115,7 @@ test("splitting a background tab puts that document beside the active one, with 
   ]);
   await expect(page.locator(TAB)).toHaveCount(2);
 
-  // Tab 0 (first.pdf) is active; splitting tab 1 from its own context menu
-  // should not need a follow-up click to place it - that was the whole point.
+  // Tab 0 (first.pdf) is active; splitting tab 1 from its own context menu should not need a follow-up click to place it - that was the whole point.
   await splitFromTab(page, 1, "Split Right");
   await expect(page.locator(".tabbedapp-document")).toHaveCount(2);
   await expect(page.locator(".tabbedapp-panel")).toHaveCount(2);
@@ -190,14 +186,11 @@ test("splitting a third tab swaps out the previous secondary document", async ({
   await splitFromTab(page, 1, "Split Right"); // first.pdf + second.pdf
   await expect(page.locator(".tabbedapp-document")).toHaveCount(2);
 
-  // Ink drawn in the outgoing panel is unsaved model state that a swap must
-  // hand back to the shared document, or it is gone the moment the panel
-  // holding it unmounts - not merely hidden until the tab is reselected.
+  // Ink drawn in the outgoing panel is unsaved model state that a swap must hand back to the shared document, or it is gone the moment the panel holding it unmounts - not merely hidden until the tab is reselected.
   await drawInkIn(page, page.locator(".tabbedapp-panel").nth(1));
   await expect.poll(() => inkPixels(page.locator("body"))).toBeGreaterThan(0);
 
-  // The menu item is never hidden just because a split is already open - it
-  // swaps the secondary document instead of doing nothing.
+  // The menu item is never hidden just because a split is already open - it swaps the secondary document instead of doing nothing.
   await splitFromTab(page, 2, "Split Right"); // first.pdf + third.pdf
   await expect(page.locator(".tabbedapp-document")).toHaveCount(2);
   await expect(page.locator(".tabbedapp-panel")).toHaveCount(2);
@@ -207,10 +200,7 @@ test("splitting a third tab swaps out the previous secondary document", async ({
 
   // Bring second.pdf back and confirm the stroke it carried is still there.
   await page.locator(TAB).nth(1).getByRole("button").first().click();
-  await expect(page.locator(".tabbedapp-shell")).toHaveAttribute(
-    "data-busy",
-    "false",
-  );
+  await waitForShellSettled(page);
   await expect.poll(() => inkPixels(page.locator("body"))).toBeGreaterThan(0);
 });
 
@@ -278,9 +268,7 @@ test("dragging the resizer changes each panel's share, in step with the header s
     throw new Error("missing a box after dragging");
   }
 
-  // Moved right by ~220px, not merely moved at all - and the header row
-  // narrowed by the same amount, because one ratio drives both. Allow for
-  // the resizer's own width, which the panels give up and the header does not.
+  // Moved right by ~220px, not merely moved at all - and the header row narrowed by the same amount, because one ratio drives both. Allow for the resizer's own width, which the panels give up and the header does not.
   expect(leftPanel.width).toBeGreaterThan(rightPanel.width + 150);
   expect(Math.abs(leftPanel.width - tabbar.width)).toBeLessThanOrEqual(5);
   expect(Math.abs(rightPanel.width - secondHeader.width)).toBeLessThanOrEqual(
@@ -329,6 +317,27 @@ test("closing a column split works from its own second header", async ({
   await expect(page.locator(".tabbedapp-document")).toHaveCount(1);
 });
 
+test("closing the secondary panel's own tab collapses split view instead of leaving it stuck open", async ({
+  page,
+}) => {
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right"); // first.pdf + second.pdf
+  await expect(page.locator(".tabbedapp-panel")).toHaveCount(2);
+
+  // Close the secondary panel's own tab directly (its own [x] button, not the dedicated Close Split button) - this used to leave splitView on with a secondaryDocumentId naming a tab that no longer exists, so the shell rendered as a single pane while still internally flagged split.
+  await page.getByRole("button", { name: "Close second.pdf" }).click();
+  await waitForShellSettled(page);
+
+  await expect(page.locator(TAB)).toHaveCount(1);
+  await expect(page.locator(".tabbedapp-panel")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Close split view" }),
+  ).toHaveCount(0);
+});
+
 test("split down stacks the panels instead of placing them side by side", async ({
   page,
 }) => {
@@ -356,8 +365,116 @@ test("split down stacks the panels instead of placing them side by side", async 
   expect(Math.abs(topBox.width - bottomBox.width)).toBeLessThanOrEqual(2);
 });
 
-// Titled by the file, not by tab position, since a swap reorders which
-// documents are visible without reordering the tabs themselves.
+// Ctrl+S has one shared "which document" resolution feeding both the save and the print command, so this alone also stands for Ctrl+P.
+test("Ctrl+S in split view saves whichever panel has focus, not always the left one", async ({
+  page,
+}) => {
+  await stubSaveFilePicker(page);
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right");
+  await expect(page.locator(".tabbedapp-panel")).toHaveCount(2);
+
+  // openSplit leaves focus on the panel it just placed a document into, so this first save with no click at all already exercises the split: the unfixed code saved the left panel's document regardless of focus.
+  await page.keyboard.press("Control+s");
+  await expect.poll(() => savedFileNames(page)).toContain("second.pdf");
+
+  // Move focus to the left panel and confirm the shortcut now follows it there too, instead of always resolving to one hardcoded side.
+  await page
+    .locator(".tabbedapp-panel")
+    .nth(0)
+    .locator(".pdfdocumenteditor-page")
+    .first()
+    .click();
+  await page.keyboard.press("Control+s");
+  await expect.poll(() => savedFileNames(page)).toContain("first.pdf");
+});
+
+test("the tab menu's Save and Print stay available for the secondary panel's own document", async ({
+  page,
+}) => {
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right");
+
+  // Right-click the secondary panel's own tab (second.pdf), not the primary panel's - its Save/Print used to be disabled because "available" only ever compared the right-clicked tab against the left panel's document.
+  await page.locator(TAB).nth(1).click({ button: "right" });
+  await expect(
+    page.getByRole("menuitem", { name: "Save", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("menuitem", { name: "Print", exact: true }),
+  ).toBeEnabled();
+});
+
+// showSaveFilePicker needs a real dialog too, so it is stubbed with an in-memory file standing in for the chosen one. Mirrors the same helper in sidebar-and-save-all.spec.ts; kept local since these spec files share no helper module.
+async function stubSaveFilePicker(page: Page) {
+  await page.addInitScript(() => {
+    const files = new Map<string, Uint8Array>();
+    (
+      window as unknown as { __savedFiles: Map<string, Uint8Array> }
+    ).__savedFiles = files;
+
+    (
+      window as unknown as {
+        showSaveFilePicker: (options?: {
+          suggestedName?: string;
+        }) => Promise<unknown>;
+      }
+    ).showSaveFilePicker = async (options) => {
+      const name = options?.suggestedName ?? "saved.pdf";
+      return {
+        kind: "file" as const,
+        name,
+        async createWritable() {
+          const chunks: Uint8Array[] = [];
+          return {
+            async write(blob: Blob) {
+              chunks.push(new Uint8Array(await blob.arrayBuffer()));
+            },
+            async close() {
+              const total = chunks.reduce((sum, part) => sum + part.length, 0);
+              const merged = new Uint8Array(total);
+              let offset = 0;
+              for (const part of chunks) {
+                merged.set(part, offset);
+                offset += part.length;
+              }
+              files.set(name, merged);
+            },
+            async abort() {},
+          };
+        },
+        async getFile() {
+          const stored = files.get(name) ?? new Uint8Array();
+          return new File([stored.slice().buffer], name, {
+            type: "application/pdf",
+          });
+        },
+        async queryPermission() {
+          return "granted";
+        },
+        async requestPermission() {
+          return "granted";
+        },
+      };
+    };
+  });
+}
+
+async function savedFileNames(page: Page) {
+  return page.evaluate(() => [
+    ...(
+      window as unknown as { __savedFiles: Map<string, Uint8Array> }
+    ).__savedFiles.keys(),
+  ]);
+}
+
+// Titled by the file, not by tab position, since a swap reorders which documents are visible without reordering the tabs themselves.
 function activeTab(page: Page, title: string) {
   return page.locator(
     `${TAB}.tabbedapp-tab-button-active:has(.tabbedapp-tab-main[title="${title}"])`,
@@ -369,17 +486,11 @@ async function splitFromTab(
   tabIndex: number,
   item: "Split Right" | "Split Down",
 ) {
-  // A busy shell (still settling a newly mounted document pane) drops
-  // right-click silently, so this guards the click itself, not just the
-  // previous call's return: a swap can set busy again shortly AFTER that
-  // call's own trailing check already saw it clear, leaving this the only
-  // check still standing between it and the click.
-  await expect(page.locator(".tabbedapp-shell")).toHaveAttribute(
-    "data-busy",
-    "false",
-  );
   await page.locator(TAB).nth(tabIndex).click({ button: "right" });
   await page.getByRole("menuitem", { name: item }).click();
+
+  // A busy shell (still settling a newly mounted document pane) drops right-click silently, so a follow-up split or swap has to wait this out first.
+  await waitForShellSettled(page);
 }
 
 async function openDocuments(page: Page, files: string[]) {
@@ -388,6 +499,47 @@ async function openDocuments(page: Page, files: string[]) {
   await expect(page.locator(TAB)).toHaveCount(files.length);
   await expect(page.locator("canvas").first()).toBeVisible();
   await expect(page.locator(".page-jump-control")).toBeVisible();
+  await watchShellBusy(page);
+}
+
+// In dev, React StrictMode double-invokes a freshly mounted document pane's load effect, so the first mount's busy flag genuinely toggles true/false more than once in quick succession (a real second wave, not a flicker) - "data-busy is false right now" can catch the gap between two waves rather than the settled end, and a right-click issued into that gap is dropped the same as one issued while genuinely busy. This tracks every moment the shell goes busy so a wait can instead require it to have STAYED false.
+async function watchShellBusy(page: Page) {
+  await page.evaluate(() => {
+    const shell = document.querySelector(".tabbedapp-shell");
+    if (!shell) {
+      throw new Error("no .tabbedapp-shell to watch");
+    }
+    const w = window as unknown as { __lastShellBusyAt: number };
+    w.__lastShellBusyAt =
+      shell.getAttribute("data-busy") === "true" ? Date.now() : 0;
+    new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if ((mutation.target as Element).getAttribute("data-busy") === "true") {
+          w.__lastShellBusyAt = Date.now();
+        }
+      }
+    }).observe(shell, { attributes: true, attributeFilter: ["data-busy"] });
+  });
+}
+
+// Bigger than the gap a StrictMode double-invoke leaves between its two waves (observed under load at 15-20ms), small next to the 15s expect budget this polls within.
+const SHELL_SETTLE_MS = 250;
+
+async function waitForShellSettled(page: Page) {
+  await page.waitForFunction(
+    (settleMs) => {
+      const shell = document.querySelector(".tabbedapp-shell");
+      const lastBusyAt =
+        (window as unknown as { __lastShellBusyAt?: number })
+          .__lastShellBusyAt ?? 0;
+      return (
+        shell?.getAttribute("data-busy") === "false" &&
+        Date.now() - lastBusyAt >= settleMs
+      );
+    },
+    SHELL_SETTLE_MS,
+    { timeout: 15_000 },
+  );
 }
 
 async function expectSideBySide(left: Locator, right: Locator) {
@@ -404,8 +556,7 @@ async function expectSideBySide(left: Locator, right: Locator) {
 }
 
 async function drawInkIn(page: Page, view: Locator) {
-  // Scoped to the view: two different documents split side by side each
-  // carry their own tool dock, so a page-wide lookup is ambiguous.
+  // Scoped to the view: two different documents split side by side each carry their own tool dock, so a page-wide lookup is ambiguous.
   await view.getByRole("button", { name: "Pen 1", exact: true }).click();
   const box = await view
     .locator(".pdfdocumenteditor-page")
@@ -422,8 +573,7 @@ async function drawInkIn(page: Page, view: Locator) {
   await page.mouse.up();
 }
 
-// The annotation layers only, not the page canvas: the page here is blank and
-// what is measured is the mark.
+// The annotation layers only, not the page canvas: the page here is blank and what is measured is the mark.
 async function inkPixels(view: Locator) {
   return view.locator(".pdfdocumenteditor-ink-canvas-layer").evaluateAll(
     (canvases, { sampleWidth }) => {

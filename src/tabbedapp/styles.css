@@ -1,6 +1,4 @@
-/* This frame wraps the core rather than sitting inside it, so that a docked
-   notice can push the whole core down, floating chrome included. Its shape
-   is .document-shell (documentShell.css), shared with the core's own root. */
+/* This frame wraps the core rather than sitting inside it, so that a docked notice can push the whole core down, floating chrome included. Its shape is .document-shell (documentShell.css), shared with the core's own root. */
 .tabbedapp-document-viewport {
   min-height: 0;
 }
@@ -33,8 +31,7 @@
   font-weight: var(--theme-weight-medium);
 }
 
-/* Shared by the loading placeholder and the load failure, so the danger
-   colour belongs on the modifier rather than here. */
+/* Shared by the loading placeholder and the load failure, so the danger colour belongs on the modifier rather than here. */
 .loading-message {
   color: var(--theme-ink-muted);
   gap: var(--theme-space-md);
@@ -157,29 +154,20 @@
   top: var(--theme-space-md);
 }
 
-/* .toast.inline (theme.css) gives the in-flow, hug-content, collapse-when-
-   empty default; grid-row is ours, since only this shell knows its own grid. */
+/* .toast.inline (theme.css) gives the in-flow, hug-content, collapse-when- empty default; grid-row is ours, since only this shell knows its own grid. */
 .tabbedapp-notice-stack {
   grid-row: 2;
 }
 
-/* The stack is rendered unconditionally, so an empty one would still hold
-   open a row once docked in flow below. */
+/* The stack is rendered unconditionally, so an empty one would still hold open a row once docked in flow below. */
 .tabbedapp-notice-stack:empty {
   display: none;
 }
 
-/* Above 700px there's room to float the stack over the page instead of
-   docking it in flow, so this overrides .toast.inline's own placement back
-   to a floating, centred overlay - the same shape .toast itself has, but
-   scoped to the shell rather than fixed to the viewport, since grid-row's
-   containing block only resolves against an absolutely positioned ancestor. */
+/* Above 700px there's room to float the stack over the page instead of docking it in flow, so this overrides .toast.inline's own placement back to a floating, centred overlay - the same shape .toast itself has, but scoped to the shell rather than fixed to the viewport, since grid-row's containing block only resolves against an absolutely positioned ancestor. */
 @media (min-width: 701px) {
   .tabbedapp-notice-stack.toast.inline {
-    /* .stack's flex column defaults to stretch; an explicitly-sized child
-       (each notice is width: max-content) ignores stretch and falls back to
-       flex-start, so centring needs restating here. Mobile leaves stretch
-       alone: each notice there is width: auto, so stretch is what fills it. */
+    /* .stack's flex column defaults to stretch; an explicitly-sized child (each notice is width: max-content) ignores stretch and falls back to flex-start, so centring needs restating here. Mobile leaves stretch alone: each notice there is width: auto, so stretch is what fills it. */
     align-items: center;
     left: 50%;
     max-width: min(58rem, calc(100% - 1.5rem));
@@ -189,8 +177,7 @@
     width: min(58rem, calc(100% - 1.5rem));
     z-index: var(--theme-z-notice);
 
-    /* A wide centred box over much narrower children: without this its empty
-       space swallows clicks on the page chrome underneath. */
+    /* A wide centred box over much narrower children: without this its empty space swallows clicks on the page chrome underneath. */
     pointer-events: none;
   }
 
@@ -199,16 +186,13 @@
   }
 }
 
-/* Shape, tone and the action slot come from .panel/.banner; this is placement
-   only - a toast hugs its content rather than filling the width. */
+/* Shape, tone and the action slot come from .panel/.banner; this is placement only - a toast hugs its content rather than filling the width. */
 .tabbedapp-notice {
   max-width: 100%;
   width: max-content;
 }
 
-/* Not nowrap: a short notice still reads as one line because it fits, but a
-   long one (an error message, say, carrying a URL) wraps instead of
-   overflowing the toast. */
+/* Not nowrap: a short notice still reads as one line because it fits, but a long one (an error message, say, carrying a URL) wraps instead of overflowing the toast. */
 .tabbedapp-notice-text {
   overflow-wrap: anywhere;
 }
@@ -219,9 +203,7 @@
   padding: 0 var(--theme-space-md);
 }
 
-/* Below this width a floating notice has nowhere to float without covering
-   the toolbar, so .toast.inline's in-flow default is left standing and only
-   widened to fill the row (.toast.inline itself only hugs content). */
+/* Below this width a floating notice has nowhere to float without covering the toolbar, so .toast.inline's in-flow default is left standing and only widened to fill the row (.toast.inline itself only hugs content). */
 @media (max-width: 700px) {
   .tabbedapp-notice-stack.toast.inline {
     box-sizing: border-box;
@@ -275,10 +257,7 @@
   width: 2.25rem;
 }
 
-/* Below this width .history-controls (left-anchored) and .zoom-controls
-   (right-anchored) run into each other; page jumping stays reachable through
-   the sidebar and scrolling, so it drops rather than shrinks - narrowing
-   .zoom-controls this much is what clears the collision. */
+/* Below this width .history-controls (left-anchored) and .zoom-controls (right-anchored) run into each other; page jumping stays reachable through the sidebar and scrolling, so it drops rather than shrinks - narrowing .zoom-controls this much is what clears the collision. */
 @media (max-width: 25rem) {
   .page-jump-control {
     display: none;
@@ -326,8 +305,7 @@
   text-align: left;
 }
 
-/* padding: 0 cancels .panel's own: the header and scroll area below already
-   carry their own padding, sized on the assumption of a flush outer edge. */
+/* padding: 0 cancels .panel's own: the header and scroll area below already carry their own padding, sized on the assumption of a flush outer edge. */
 .document-sidebar {
   container: sidebar / inline-size;
   bottom: calc(var(--theme-space-sm) + var(--app-scrollbar-block));
@@ -339,8 +317,7 @@
   top: var(--theme-space-sm);
 }
 
-/* The extra inline-end padding keeps the tab strip clear of the resize
-   handle, whose 8px line sits on the sidebar's own edge. */
+/* The extra inline-end padding keeps the tab strip clear of the resize handle, whose 8px line sits on the sidebar's own edge. */
 .document-sidebar-header {
   border-bottom: 1px solid var(--theme-border);
   gap: var(--theme-space-xs);
@@ -348,8 +325,7 @@
   padding: var(--theme-space-sm);
 }
 
-/* One row that never wraps: below the width where labels fit, the container
-   query drops them instead. */
+/* One row that never wraps: below the width where labels fit, the container query drops them instead. */
 .document-sidebar-tabs {
   background: var(--theme-wash);
   border-radius: var(--theme-radius-md);
@@ -378,22 +354,17 @@
   font-weight: var(--theme-weight-semibold);
 }
 
-/* A bare inline span around an SVG inherits the font's line-height, which is
-   taller than the icon itself, so the icon sits off-centre within it unless
-   the span's own box is shrunk to the icon's real size. */
+/* A bare inline span around an SVG inherits the font's line-height, which is taller than the icon itself, so the icon sits off-centre within it unless the span's own box is shrunk to the icon's real size. */
 .document-sidebar-tab-icon {
   display: flex;
 }
 
-/* Keeps the close button off the 24px pointer-target floor (WCAG 2.2 SC
-   2.5.8) when three tabs are showing. */
+/* Keeps the close button off the 24px pointer-target floor (WCAG 2.2 SC 2.5.8) when three tabs are showing. */
 .document-sidebar-header > .icon-button {
   flex: none;
 }
 
-/* The same recipe as theme.css's own .sr-only, restated: a container query can
-   apply properties conditionally but never a class, so there's no way to
-   apply .sr-only itself only below this width. */
+/* The same recipe as theme.css's own .sr-only, restated: a container query can apply properties conditionally but never a class, so there's no way to apply .sr-only itself only below this width. */
 @container sidebar (max-width: 260px) {
   .document-sidebar-tab-label {
     position: absolute;
@@ -562,9 +533,7 @@
   width: 100%;
 }
 
-/* An 8px line with a 24px pointer target (WCAG 2.2 SC 2.5.8): the transparent
-   border widens the target while `background-clip: padding-box` keeps the fill
-   at 8px. */
+/* An 8px line with a 24px pointer target (WCAG 2.2 SC 2.5.8): the transparent border widens the target while `background-clip: padding-box` keeps the fill at 8px. */
 .sidebar-resize-handle {
   background-clip: padding-box;
   border: 0;
@@ -655,8 +624,7 @@
   width: 100%;
 }
 
-/* Scoped to .page-menu to reach (0,2,0), which beats the primitive's
-   `.menu > button` at (0,1,1) regardless of stylesheet order. */
+/* Scoped to .page-menu to reach (0,2,0), which beats the primitive's `.menu > button` at (0,1,1) regardless of stylesheet order. */
 .page-menu .page-menu-item-danger {
   color: var(--theme-danger);
 }
@@ -683,12 +651,7 @@ body,
   min-width: 320px;
 }
 
-/* A third, dedicated row for the notice stack: giving it a row of its own
-   to explicitly claim (below) is what lets that row's height actually come
-   from the notice's content when docked in flow. Left implicit, the notice's
-   own `grid-row: 2` claims the row auto-placement would have given
-   .tabbedapp-content, so content was auto-placed into a new row 3 instead
-   while row 2 sized to nothing - not the notice actually reserving space. */
+/* A third, dedicated row for the notice stack: giving it a row of its own to explicitly claim (below) is what lets that row's height actually come from the notice's content when docked in flow. Left implicit, the notice's own `grid-row: 2` claims the row auto-placement would have given .tabbedapp-content, so content was auto-placed into a new row 3 instead while row 2 sized to nothing - not the notice actually reserving space. */
 .tabbedapp-shell {
   background: var(--theme-canvas);
   color: var(--theme-ink);
@@ -703,24 +666,19 @@ body,
   display: none;
 }
 
-/* Row 1 of the shell's grid: the tab bar alone, or the tab bar sharing the
-   row with the second-header when Split Right narrows it to the ratio. */
+/* Row 1 of the shell's grid: the tab bar alone, or the tab bar sharing the row with the second-header when Split Right narrows it to the ratio. */
 .tabbedapp-header-row {
   display: flex;
   min-width: 0;
 }
 
-/* Carries the ratio itself, so the padding on what it holds (the tab bar's
-   own Save All clearance, the second-header's end padding) can never skew
-   the split - only an unpadded box can size to an exact fraction of 100%. */
+/* Carries the ratio itself, so the padding on what it holds (the tab bar's own Save All clearance, the second-header's end padding) can never skew the split - only an unpadded box can size to an exact fraction of 100%. */
 .tabbedapp-header-slot {
   display: flex;
   min-width: 0;
 }
 
-/* Same width as .tabbedapp-panel-resizer below (shared shape: .split-resizer,
-   splitResizer.css), so the line down its centre lands at the same x as the
-   page separator regardless of the split ratio. */
+/* Same width as .tabbedapp-panel-resizer below (shared shape: .split-resizer, splitResizer.css), so the line down its centre lands at the same x as the page separator regardless of the split ratio. */
 .tabbedapp-header-divider::after {
   bottom: 0;
   left: 50%;
@@ -736,35 +694,26 @@ body,
   gap: 0;
   min-width: 0;
   overflow: visible;
-  /* The right inset clears a slot for the two floating buttons (tab list,
-     then Save All), so neither overlaps the tab-management cluster the flex
-     row lays out. */
+  /* The right inset clears a slot for the two floating buttons (tab list, then Save All), so neither overlaps the tab-management cluster the flex row lays out. */
   padding: var(--theme-space-xs)
     calc(
       var(--theme-space-sm) +
         (var(--theme-control-md) + var(--theme-space-xs)) * 2
     )
     0 var(--theme-space-sm);
-  /* z-nav, not a bare high number: the bar only needs a stacking context of
-     its own, for the active/dragging tab's local z-index: 1 below - it must
-     never outrank a menu raised from one of its own tabs. */
+  /* z-dropdown, not z-nav: the bar still needs a stacking context of its own for the active/dragging tab's local z-index: 1, but z-nav (below z-floating) let the PDF viewer's own floating controls - a sibling subtree, not a descendant - paint over this bar's menus regardless of their own z-menu. A menu raised from one of this bar's own tabs (the open-tabs list, "+", per-tab context menu) is a descendant instead, so it keeps outranking the rest of this bar - and, now, the document below it too - no matter which tier the bar itself carries. */
   position: relative;
 }
 
 .tabbedapp-tabs {
-  /* Grows into the bar's spare width: a tab's own flex-basis has nothing to
-     grow into otherwise, and stays pinned to its floor even with room free.
-     The gap this leaves before "+" (a fixed sibling, kept outside so it
-     never scrolls away with an overflowing tab strip) is closed in JS - see
-     tabsNavRef's resize observer in the shell. */
+  /* Grows into the bar's spare width: a tab's own flex-basis has nothing to grow into otherwise, and stays pinned to its floor even with room free. The gap this leaves before "+" (a fixed sibling, kept outside so it never scrolls away with an overflowing tab strip) is closed in JS - see tabsNavRef's resize observer in the shell. */
   flex: 1 1 auto;
   gap: 0;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0;
-  /* Scrollable, not scrollbar-visible: the tab-list button already gives full,
-     non-scrolling access to every open tab. */
+  /* Scrollable, not scrollbar-visible: the tab-list button already gives full, non-scrolling access to every open tab. */
   scrollbar-width: none;
 }
 
@@ -772,16 +721,7 @@ body,
   display: none;
 }
 
-/* The only cue that the strip scrolls, now that its scrollbar is hidden -
-   reachable only with an extreme number of tabs, given how far one now
-   shrinks first. A gentle fade, not a tinted shadow: this bar is otherwise
-   flat and borderless, and a colour to fade from read as a stain on it.
-   Fading all the way to fully blank read as the strip simply ending rather
-   than continuing off-screen, so the faded end stays a tenth visible
-   instead of vanishing. Three rules, not one - a single mask-image can't be
-   independently toggled per edge, so each reachable combination (both
-   edges, right only, left only) is spelled out; fully scrolled either way
-   needs none. */
+/* The only cue that the strip scrolls, now that its scrollbar is hidden - reachable only with an extreme number of tabs, given how far one now shrinks first. A gentle fade, not a tinted shadow: this bar is otherwise flat and borderless, and a colour to fade from read as a stain on it. Fading all the way to fully blank read as the strip simply ending rather than continuing off-screen, so the faded end stays a tenth visible instead of vanishing. Three rules, not one - a single mask-image can't be independently toggled per edge, so each reachable combination (both edges, right only, left only) is spelled out; fully scrolled either way needs none. */
 .tabbedapp-tabs--overflowing:not(.tabbedapp-tabs--at-start):not(
     .tabbedapp-tabs--at-end
   ) {
@@ -837,9 +777,7 @@ body,
   cursor: progress;
 }
 
-/* All four are square icon buttons of one size: without this the split
-   toggle falls through to the theme's padded button and stands 42px tall in a
-   bar that aligns to the bottom edge. */
+/* All four are square icon buttons of one size: without this the split toggle falls through to the theme's padded button and stands 42px tall in a bar that aligns to the bottom edge. */
 .tabbedapp-home-tab,
 .tabbedapp-new-tab,
 .tabbedapp-split-toggle,
@@ -860,9 +798,7 @@ body,
   display: block;
 }
 
-/* Floats beside Save All rather than in the tab-management cluster: always
-   present, since a reader with many tabs needs it before the strip ever
-   overflows, not only after. */
+/* Floats beside Save All rather than in the tab-management cluster: always present, since a reader with many tabs needs it before the strip ever overflows, not only after. */
 .tabbedapp-tab-list-toggle-group {
   bottom: 0;
   position: absolute;
@@ -915,8 +851,7 @@ body,
   position: relative;
 }
 
-/* Floats in the slot the tab bar's own right padding reserves: set apart
-   from the tab-management cluster rather than lined up beside it. */
+/* Floats in the slot the tab bar's own right padding reserves: set apart from the tab-management cluster rather than lined up beside it. */
 .tabbedapp-save-all {
   border-color: transparent;
   border-radius: var(--theme-radius-pill);
@@ -935,8 +870,7 @@ body,
   display: block;
 }
 
-/* Same inset hover shape as the home/document tabs (a smaller pill, not the
-   full square), rather than a differently-sized hover veil for no reason. */
+/* Same inset hover shape as the home/document tabs (a smaller pill, not the full square), rather than a differently-sized hover veil for no reason. */
 .tabbedapp-new-tab::before,
 .tabbedapp-split-toggle::before,
 .tabbedapp-tab-list-toggle::before,
@@ -968,14 +902,7 @@ body,
   flex: 0 1 16rem;
   height: var(--theme-control-md);
   max-width: 16rem;
-  /* No floor for a readable title: the tab-list menu is the reliable place
-     to read one once tabs are this tight. Below this, the close button
-     (control-xs) plus its own inset and this tab's border is all that's
-     left - it floats over .tabbedapp-tab-main rather than beside it (see
-     .tabbedapp-tab-close), so that title's own padding never has to fit
-     in the floor too. The inset is doubled (not just the button's own
-     right inset) so the button sits centred at the floor instead of
-     flush against the left border with all the slack on the right. */
+  /* No floor for a readable title: the tab-list menu is the reliable place to read one once tabs are this tight. Below this, the close button (control-xs) plus its own inset and this tab's border is all that's left - it floats over .tabbedapp-tab-main rather than beside it (see .tabbedapp-tab-close), so that title's own padding never has to fit in the floor too. The inset is doubled (not just the button's own right inset) so the button sits centred at the floor instead of flush against the left border with all the slack on the right. */
   min-width: calc(var(--theme-control-xs) + 2 * var(--theme-space-xs) + 2px);
   overflow: visible;
   position: relative;
@@ -1000,8 +927,7 @@ body,
   background: var(--theme-wash);
 }
 
-/* These draw their own hover on ::before, so the theme's veil on the button
-   box has to be turned off or the tab shape shows through it too. */
+/* These draw their own hover on ::before, so the theme's veil on the button box has to be turned off or the tab shape shows through it too. */
 .tabbedapp-home-tab:hover:not(:disabled),
 .tabbedapp-document-tab:hover:not(:disabled),
 .tabbedapp-tab-main:hover:not(:disabled),
@@ -1040,10 +966,7 @@ body,
   width: 2px;
 }
 
-/* Pinned to where the floating buttons' own reserved padding begins, not
-   dropped into the flex flow: an uncrowded tab bar leaves a gap between the
-   "+" button and that padding, which would strand a flex-flow separator far
-   from the buttons it is meant to introduce. */
+/* Pinned to where the floating buttons' own reserved padding begins, not dropped into the flex flow: an uncrowded tab bar leaves a gap between the "+" button and that padding, which would strand a flex-flow separator far from the buttons it is meant to introduce. */
 .tabbedapp-tabbar-divider-end {
   bottom: 0;
   position: absolute;
@@ -1099,9 +1022,7 @@ body,
   font-weight: var(--theme-weight-medium);
   height: 100%;
   min-width: 0;
-  /* Right padding clears the close button floating over this edge (see
-     .tabbedapp-tab-close) - control-xs plus its own inset, not the plain
-     space-sm a title with nothing to clear would need. */
+  /* Right padding clears the close button floating over this edge (see .tabbedapp-tab-close) - control-xs plus its own inset, not the plain space-sm a title with nothing to clear would need. */
   padding: 0 calc(var(--theme-control-xs) + var(--theme-space-xs)) 0 0.6875rem;
   position: relative;
   text-align: left;
@@ -1112,9 +1033,7 @@ body,
   min-width: 0;
 }
 
-/* Floats over .tabbedapp-tab-main's own right padding rather than beside it
-   as a flex sibling, so a tab this narrow still fits the button without
-   also fitting a title's padding that has nothing left to pad. */
+/* Floats over .tabbedapp-tab-main's own right padding rather than beside it as a flex sibling, so a tab this narrow still fits the button without also fitting a title's padding that has nothing left to pad. */
 .tabbedapp-tab-close {
   border: 0;
   border-radius: var(--theme-radius-pill);
@@ -1178,11 +1097,7 @@ body,
   position: fixed;
 }
 
-/* Its own min/max-width, after .tabbedapp-tab-context-menu's generic one so
-   this wins - max-width matches the estimate clampTabListMenuPosition is
-   given for this menu: width: max-content alone sizes to the longest
-   title's UNtruncated width (truncation only clips after that's decided),
-   which could run past the position the clamp already committed to. */
+/* Its own min/max-width, after .tabbedapp-tab-context-menu's generic one so this wins - max-width matches the estimate clampTabListMenuPosition is given for this menu: width: max-content alone sizes to the longest title's UNtruncated width (truncation only clips after that's decided), which could run past the position the clamp already committed to. */
 .tabbedapp-tab-list-menu {
   max-height: 22rem;
   max-width: 22rem;
@@ -1194,9 +1109,7 @@ body,
 .tabbedapp-tabbar-actions {
   flex: 0 0 auto;
   margin-left: var(--theme-space-2xs);
-  /* A full tab strip grows nav right up to this reserved padding's edge
-     (see .tabbedapp-tabbar), leaving "+" nothing between it and the
-     divider that starts there without this. */
+  /* A full tab strip grows nav right up to this reserved padding's edge (see .tabbedapp-tabbar), leaving "+" nothing between it and the divider that starts there without this. */
   margin-right: var(--theme-space-xs);
   min-width: 0;
   position: relative;
@@ -1218,8 +1131,7 @@ body,
   height: 100%;
 }
 
-/* `min-width: 0` is what keeps the two panels equal: a flex item's default
-   minimum is its content, and a PDF page is wider than half the window. */
+/* `min-width: 0` is what keeps the two panels equal: a flex item's default minimum is its content, and a PDF page is wider than half the window. */
 .tabbedapp-panels {
   display: flex;
   height: 100%;
@@ -1238,9 +1150,7 @@ body,
   flex-direction: column;
 }
 
-/* The draggable seam between the two panels; a resize on either axis reads
-   `splitRatio` back into both panels' flex-grow and the header split above.
-   Shape is .split-resizer (splitResizer.css); this adds interaction only. */
+/* The draggable seam between the two panels; a resize on either axis reads `splitRatio` back into both panels' flex-grow and the header split above. Shape is .split-resizer (splitResizer.css); this adds interaction only. */
 .tabbedapp-panel-resizer {
   background: transparent;
   touch-action: none;
@@ -1285,8 +1195,7 @@ body,
   padding-inline: var(--theme-space-sm);
 }
 
-/* Same weight as a tab's title, muted rather than the full ink: named like a
-   tab, not competing with the reader's document for attention. */
+/* Same weight as a tab's title, muted rather than the full ink: named like a tab, not competing with the reader's document for attention. */
 .tabbedapp-second-header-title {
   color: var(--theme-ink-muted);
   flex: 1 1 auto;
@@ -1307,8 +1216,7 @@ body,
   padding-block: var(--theme-space-2xs);
 }
 
-/* A hairline along the top edge, not a ring: a border around the panel would
-   read as part of the reader's document. */
+/* A hairline along the top edge, not a ring: a border around the panel would read as part of the reader's document. */
 .tabbedapp-panel-active::after {
   background: var(--theme-accent);
   content: "";
@@ -1328,6 +1236,18 @@ body,
   justify-content: center;
 }
 
+.tabbedapp-document-pane-error {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  padding: var(--theme-space-lg);
+  text-align: center;
+
+  & .row {
+    justify-content: center;
+  }
+}
+
 .tabbedapp-modal-surface {
   border-radius: var(--theme-radius-lg);
 }
@@ -1341,8 +1261,7 @@ body,
   text-align: center;
 }
 
-/* Shared by every dialog listing PDFs by name: the close-changes prompt and
-   the save-destination prompt both need one. */
+/* Shared by every dialog listing PDFs by name: the close-changes prompt and the save-destination prompt both need one. */
 .tabbedapp-file-list-dialog {
   width: min(30rem, calc(100vw - var(--theme-space-lg) * 2));
 }

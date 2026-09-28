@@ -1,11 +1,11 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 import { PDFDocument } from "pdf-lib";
 
-// The drop here is a real one, dispatched through CDP and carrying real paths on
-// disk: a DataTransfer built inside the page has no drag data store behind it.
+// The drop here is a real one, dispatched through CDP and carrying real paths on disk: a DataTransfer built inside the page has no drag data store behind it.
 
 const TAB = ".tabbedapp-document-tab";
 const NAMES = ["alpha", "bravo", "charlie"];
@@ -47,6 +47,36 @@ test("three single-file launches - the Windows shape - open three tabs", async (
   await expect(page.locator(TAB)).toHaveText([/alpha/, /bravo/, /charlie/]);
 });
 
+test("editing a copy of a read-only file clears its dedup key, so re-dropping the original opens a fresh tab", async ({
+  page,
+}) => {
+  const path = await signedPdfOnDisk();
+  await openHome(page);
+
+  await dropFiles(page, [path]);
+  await expect(page.locator(TAB)).toHaveCount(1);
+  await expect(page.locator(".banner.warning")).toBeVisible();
+
+  await page.getByRole("button", { name: "Edit a copy" }).click();
+  await expect(page.locator(".banner.warning")).toHaveCount(0);
+  await expect(page.locator(TAB)).toHaveCount(1);
+
+  // Re-dropping the exact same file on disk: if the edited copy still carried the original's dedup key, this would be treated as the same file already open and would just refocus the (now-edited, no-longer-read-only) tab instead of opening a fresh, still-read-only view of the original.
+  await dropFiles(page, [path]);
+  await expect(page.locator(TAB)).toHaveCount(2);
+  await expect(page.locator(".banner.warning")).toBeVisible();
+});
+
+async function signedPdfOnDisk() {
+  const fixture = fileURLToPath(
+    new URL("../tests/fixtures/test-signed.pdf", import.meta.url),
+  );
+  const directory = await mkdtemp(join(tmpdir(), "pdfdocumenteditor-signed-"));
+  const path = join(directory, "test-signed.pdf");
+  await copyFile(fixture, path);
+  return path;
+}
+
 async function openHome(page: Page) {
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Open PDFs" })).toBeVisible();
@@ -69,9 +99,7 @@ async function pdfsOnDisk() {
   );
 }
 
-// CDP's Input.dispatchDragEvent takes paths on disk, so what the page receives
-// is the browser's own store - the one that stops answering, and the one whose
-// items can hand out file handles.
+// CDP's Input.dispatchDragEvent takes paths on disk, so what the page receives is the browser's own store - the one that stops answering, and the one whose items can hand out file handles.
 async function dropFiles(page: Page, files: string[]) {
   const client = await page.context().newCDPSession(page);
   const box = await page.locator("body").boundingBox();
@@ -104,9 +132,7 @@ declare global {
   }
 }
 
-// The handles are real FileSystemFileHandles, written into the origin's private
-// file system by the page, so the reading, sniffing and entry-identity
-// comparison the app does with them are all its own.
+// The handles are real FileSystemFileHandles, written into the origin's private file system by the page, so the reading, sniffing and entry-identity comparison the app does with them are all its own.
 async function stubLaunchQueue(
   page: Page,
   { filesPerLaunch }: { filesPerLaunch: number },
