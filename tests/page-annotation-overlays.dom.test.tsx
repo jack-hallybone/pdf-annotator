@@ -71,6 +71,7 @@ type Options = {
   partOfSelection?: boolean;
   readOnly?: boolean;
   selected?: boolean;
+  showPopover?: boolean;
   tool?: Tool;
   viewport?: PageViewport;
 };
@@ -94,7 +95,7 @@ function renderShape(annotation: PdfAnnotation, options: Options = {}) {
         readOnly={options.readOnly ?? false}
         scale={options.viewport ? 2 : 1}
         selected={options.selected ?? false}
-        showPopover={false}
+        showPopover={options.showPopover ?? false}
         tool={options.tool ?? "select"}
         viewport={options.viewport ?? viewport}
       />
@@ -118,6 +119,15 @@ test("an annotation is drawn where the page shows it, not at its PDF coordinates
   const body = shape.querySelector("rect");
   assert.equal(body?.getAttribute("width"), "60");
   assert.equal(body?.getAttribute("height"), "60");
+});
+
+test("a note with more lines than a call takes arguments still opens", () => {
+  const { container } = renderShape(
+    { ...note, text: "line\n".repeat(200_000) } as PdfAnnotation,
+    { showPopover: true },
+  );
+
+  assert.ok(container.querySelector("foreignObject"));
 });
 
 test("zooming redraws the annotation at the zoomed position and size", () => {

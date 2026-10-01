@@ -40,7 +40,7 @@ textarea {
 /* ── the document editor itself ──────────────────────────────────────────── */
 
 .pdfdocumenteditor {
-  /* --app-scrollbar-* are written from PdfDocumentEditor.tsx once the real scrollbar gutter is measured. */
+  /* --app-page-natural-width is written from PdfDocumentEditor.tsx once the active page's rendered width is measured. */
   --app-control-bottom-edge: var(--theme-space-md);
   --app-control-right-edge: var(--theme-space-md);
   --app-floating-safe-inline: 5rem;
@@ -48,9 +48,18 @@ textarea {
   --app-dock-clearance: calc(
     (var(--app-floating-safe-inline) + var(--app-scrollbar-inline)) / 2
   );
+  --app-page-natural-width: 0px;
+  /* The full clearance while there is slack to spare either side of the page; shrinks toward the bare --theme-space-lg floor (matching the top and between-page gap) as that slack runs out, so a page too wide for the viewport is not padded more on its sides than it is above. Symmetric by construction (both sides read the same clamp()), so the page stays centred at every width in between. */
+  --app-page-gutter-inline: clamp(
+    var(--theme-space-lg),
+    calc((100% - var(--app-page-natural-width)) / 2),
+    calc(var(--theme-space-lg) + var(--app-dock-clearance))
+  );
   /* --app-selection-button-size: written from viewerConfig.ts, which also positions the button. */
+  /* The page column's own scrollbars (components/PageScrollbar.tsx): the vertical one always holds its column, as `scrollbar-gutter: stable` did, and the horizontal one shows only while the pages are wider than the view. */
+  --app-scrollbar-size: var(--theme-space-md);
   --app-scrollbar-block: 0px;
-  --app-scrollbar-inline: 0px;
+  --app-scrollbar-inline: var(--app-scrollbar-size);
 
   /* White in both colour schemes because paper is. */
   --app-page: #ffffff;
@@ -123,14 +132,70 @@ textarea {
   cursor: progress;
 }
 
+.pdfdocumenteditor[data-scrolls-sideways] {
+  --app-scrollbar-block: var(--app-scrollbar-size);
+}
+
+/* The scroller and its two bars, laid out as the browser lays out its own: the vertical bar beside the pages, the horizontal one under them. */
+.pdfdocumenteditor-scroll-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--app-scrollbar-inline);
+  grid-template-rows: minmax(0, 1fr) var(--app-scrollbar-block);
+  height: 100%;
+}
+
 .pdfdocumenteditor-scroll-root {
   box-sizing: border-box;
-  height: 100%;
   overflow: auto;
-  scrollbar-gutter: stable;
-  padding: var(--theme-space-lg)
-    calc(var(--theme-space-lg) + var(--app-dock-clearance)) 50vh
-    calc(var(--theme-space-lg) + var(--app-dock-clearance));
+  padding: var(--theme-space-lg) var(--app-page-gutter-inline) 50vh
+    var(--app-page-gutter-inline);
+  scrollbar-width: none;
+}
+.pdfdocumenteditor-scroll-root::-webkit-scrollbar {
+  display: none;
+}
+
+.pdfdocumenteditor-scrollbar {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+.pdfdocumenteditor-scrollbar--x {
+  grid-area: 2 / 1;
+}
+.pdfdocumenteditor:not([data-scrolls-sideways])
+  .pdfdocumenteditor-scrollbar--x {
+  display: none;
+}
+
+/* Its length and offset are written from PageScrollbar.tsx. The padding keeps the drawn pill clear of the edges while the whole width stays a target. */
+.pdfdocumenteditor-scrollbar-thumb {
+  background-clip: content-box;
+  background-color: var(--theme-control-border);
+  border-radius: var(--theme-radius-pill);
+  box-sizing: border-box;
+  left: 0;
+  padding: var(--theme-space-2xs);
+  position: absolute;
+  top: 0;
+}
+.pdfdocumenteditor-scrollbar--y .pdfdocumenteditor-scrollbar-thumb {
+  right: 0;
+}
+.pdfdocumenteditor-scrollbar--x .pdfdocumenteditor-scrollbar-thumb {
+  bottom: 0;
+}
+.pdfdocumenteditor-scrollbar-thumb:hover,
+.pdfdocumenteditor-scrollbar[data-dragging] .pdfdocumenteditor-scrollbar-thumb {
+  background-color: var(--theme-ink-muted);
+}
+
+/* Forced colours would repaint the thumb as the background it sits on. */
+@media (forced-colors: active) {
+  .pdfdocumenteditor-scrollbar-thumb {
+    background-color: CanvasText;
+    forced-color-adjust: none;
+  }
 }
 
 .pdfdocumenteditor-pages {
@@ -173,9 +238,11 @@ textarea {
 }
 
 .pdfdocumenteditor-page-placeholder {
-  background: var(--theme-surface);
-  box-shadow: var(--app-shadow-hairline);
+  /* The blank sheet the page renders onto, in either theme: in dark mode a surface-coloured box turned white as each page arrived, a flash on every page scrolled to. The light scheme keeps its label readable on the white. */
+  background: var(--app-page);
+  box-shadow: var(--app-page-shadow);
   color: var(--theme-ink-muted);
+  color-scheme: light;
   display: grid;
   font-size: var(--theme-text-xs);
   font-weight: var(--theme-weight-medium);
@@ -564,10 +631,19 @@ textarea {
     print-color-adjust: exact;
   }
 
+  .pdfdocumenteditor-scroll-frame {
+    display: block !important;
+    height: auto !important;
+  }
+
   .pdfdocumenteditor-scroll-root {
     height: auto !important;
     overflow: visible !important;
     padding: 0 !important;
+  }
+
+  .pdfdocumenteditor-scrollbar {
+    display: none !important;
   }
 
   .pdfdocumenteditor-pages {

@@ -262,6 +262,67 @@ test('"always" on one mailto address does not trust the other addresses in the d
   assert.equal(opens[1].url, "mailto:support@vendor.example?subject=Later");
 });
 
+// The trust key is the address part alone, so recipients added in the query would otherwise ride on it unseen - in any letter case, percent-encoded or padded, or as a field like reply-to that a to/cc/bcc blocklist would miss.
+test('"always" on a mailto address still asks before a link whose query adds anything but a subject or body', () => {
+  const opens: OpenCall[] = [];
+  const { result } = renderHook(() => useLinksHarness(opens, []));
+
+  act(() =>
+    result.current.requestExternalLink("mailto:support@vendor.example"),
+  );
+  act(() => result.current.confirmExternalLink({ always: true }));
+  assert.equal(opens.length, 1);
+
+  for (const url of [
+    "mailto:support@vendor.example?to=attacker@evil.example",
+    "mailto:support@vendor.example?cc=attacker@evil.example",
+    "mailto:support@vendor.example?bcc=attacker@evil.example&body=Hello",
+    "mailto:support@vendor.example?To=attacker@evil.example",
+    "mailto:support@vendor.example?cC=attacker@evil.example",
+    "mailto:support@vendor.example?BCC=attacker@evil.example",
+    "mailto:support@vendor.example?%62cc=attacker@evil.example",
+    "mailto:support@vendor.example?%42%43%43=attacker@evil.example",
+    "mailto:support@vendor.example?%20bcc=attacker@evil.example",
+    "mailto:support@vendor.example?reply-to=attacker@evil.example",
+  ]) {
+    act(() => result.current.requestExternalLink(url));
+    assert.equal(result.current.pendingExternalLink?.url, url);
+    act(() => result.current.cancelExternalLink());
+  }
+  assert.equal(opens.length, 1);
+
+  act(() =>
+    result.current.requestExternalLink(
+      "mailto:support@vendor.example?subject=Later&body=Hello",
+    ),
+  );
+  assert.equal(result.current.pendingExternalLink, null);
+  assert.equal(opens.length, 2);
+});
+
+// A link with no address is keyed on the bare "mailto:", the one key every other address-less link shares.
+test('"always" on a mailto link with no address does not trust a later one that names recipients', () => {
+  const opens: OpenCall[] = [];
+  const { result } = renderHook(() => useLinksHarness(opens, []));
+
+  act(() =>
+    result.current.requestExternalLink(
+      "mailto:?to=support@vendor.example&subject=Hi",
+    ),
+  );
+  act(() => result.current.confirmExternalLink({ always: true }));
+  assert.equal(opens.length, 1);
+
+  act(() =>
+    result.current.requestExternalLink("mailto:?to=attacker@evil.example"),
+  );
+  assert.equal(
+    result.current.pendingExternalLink?.url,
+    "mailto:?to=attacker@evil.example",
+  );
+  assert.equal(opens.length, 1);
+});
+
 test("an http trust scope is still the origin, and is labelled as the origin", () => {
   const opens: OpenCall[] = [];
   const { result } = renderHook(() => useLinksHarness(opens, []));

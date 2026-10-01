@@ -74,9 +74,10 @@ function freeTextContentSize(
 ) {
   const empty = text.trim().length === 0;
   const lines = empty ? ["Text..."] : text.split(/\r?\n/);
-  const longestLineLength = Math.max(
+  // Folded rather than spread: imported text can have more lines than a call takes arguments.
+  const longestLineLength = lines.reduce(
+    (longest, line) => Math.max(longest, line.trimEnd().length),
     1,
-    ...lines.map((line) => line.trimEnd().length),
   );
   const measuredWidth = clamp(
     lineWidth(longestLineLength, fontSize) + FREE_TEXT_WIDTH_BUFFER,

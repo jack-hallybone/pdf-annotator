@@ -103,12 +103,15 @@ function containedDelta(
   return Math.min(Math.max(delta, pageLow - low), pageHigh - high);
 }
 
+// Folded rather than spread: a selection can hold more annotations than a call takes arguments.
 function groupBounds(annotations: PdfAnnotation[]): PdfRect {
-  const bounds = annotations.map(annotationBounds);
-  return {
-    x1: Math.min(...bounds.map((rect) => rect.x1)),
-    x2: Math.max(...bounds.map((rect) => rect.x2)),
-    y1: Math.min(...bounds.map((rect) => rect.y1)),
-    y2: Math.max(...bounds.map((rect) => rect.y2)),
-  };
+  return annotations.map(annotationBounds).reduce(
+    (group, rect) => ({
+      x1: Math.min(group.x1, rect.x1),
+      x2: Math.max(group.x2, rect.x2),
+      y1: Math.min(group.y1, rect.y1),
+      y2: Math.max(group.y2, rect.y2),
+    }),
+    { x1: Infinity, x2: -Infinity, y1: Infinity, y2: -Infinity },
+  );
 }

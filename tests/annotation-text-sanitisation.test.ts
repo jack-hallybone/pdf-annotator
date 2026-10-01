@@ -96,23 +96,22 @@ test("a note's own text loses the bidi overrides and control characters", async 
 });
 
 // Complements the hostile-PDF tests above: a note typed or pasted straight into the app reaches pdfWriter.ts as a plain PdfAnnotation with no character allowlist (unlike free text), so it must be stripped on write - checked by reading with pdf-lib directly, not importedTexts, since PDF.js would strip these characters on the way in regardless of whether the write side did.
-test("a note built straight from typed or pasted text loses the same hidden characters on save", async () => {
-  const hostile = `safe${RLO}txt.exe${POP} a${NUL}b${BEL}c`;
+async function savedNoteContents(text: string) {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.addPage([612, 792]);
   const bytes = await pdfDoc.save({ useObjectStreams: false });
 
   const note: PdfAnnotation = {
     color: [1, 0.9, 0.25],
-    id: "hostile-note",
+    id: "typed-note",
     kind: "stickyNote",
     pageIndex: 0,
     rect: { x1: 72, x2: 92, y1: 700, y2: 720 },
-    text: hostile,
+    text,
   };
 
   const output = await writePdfAnnotations(bytes, [note], {
-    replaceAnnotationSourceIds: ["hostile-note"],
+    replaceAnnotationSourceIds: ["typed-note"],
     replacePageIndexes: [0],
   });
 
@@ -120,16 +119,22 @@ test("a note built straight from typed or pasted text loses the same hidden char
   const annots = outputDoc.getPage(0).node.Annots();
   assert.ok(annots && annots.size() === 1);
   const dict = annots.lookup(0, PDFDict);
-  const written = dict
+  return dict
     .lookupMaybe(PDFName.of("Contents"), PDFString, PDFHexString)
     ?.decodeText();
-  assert.equal(written, "safetxt.exe abc");
+}
+
+test("a note built straight from typed or pasted text loses the same hidden characters on save", async () => {
+  assert.equal(
+    await savedNoteContents(`safe${RLO}txt.exe${POP} a${NUL}b${BEL}c`),
+    "safetxt.exe abc",
+  );
 });
 
 // The rule above was written as a list, and the list was Unicode's minus U+061C ARABIC LETTER MARK: ten invisible code points reached the sidebar through a hostile PDF. `tests/hidden-characters.test.ts` is the sweep over Unicode; this is the end of the real path, so the sweep cannot pass while this route is open.
 test("a note's own text loses every invisible code point, not a listed few", async () => {
   const invisibles =
-    "\u061c\u200b\u200d\u2060\ufeff\u2028\u2029\u00ad\ufff9\u{e0041}";
+    "\u061c\u200b\u200e\u2060\ufeff\u2028\u2029\u00ad\ufff9\u{e0001}";
   const texts = await importedTexts(
     await pdfWithNoteAndFreeText(`Pay${invisibles} 100 to ACME`),
   );
@@ -154,6 +159,25 @@ test("U+061C beside Arabic text does not survive the import", async () => {
   for (const text of texts) {
     assert.equal(text, "\u0627\u0644\u0645\u0628\u0644\u063a 100 USD");
   }
+});
+
+// The strip's decided exceptions, end to end: a tab, the joiners that shape a Persian word and an emoji family, an emoji's presentation and a flag's tag characters are the text itself, not something hidden in it.
+const TEXT_WITH_ITS_OWN_INVISIBLES = `Qty\t5 \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645 \u{1f468}\u200d\u{1f469}\u200d\u{1f467} \u2764\ufe0f \u{1f3f4}\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}`;
+
+test("a note's own text keeps the invisible characters it is made of", async () => {
+  const texts = await importedTexts(
+    await pdfWithNoteAndFreeText(TEXT_WITH_ITS_OWN_INVISIBLES),
+  );
+
+  assert.equal(texts.length, 2, `expected both kinds, got ${texts.length}`);
+  for (const text of texts) {
+    assert.equal(text, TEXT_WITH_ITS_OWN_INVISIBLES);
+  }
+  // Only a note saves them: a free-text box is drawn in a font with none of them, and its save refuses them out loud rather than dropping them.
+  assert.equal(
+    await savedNoteContents(TEXT_WITH_ITS_OWN_INVISIBLES),
+    TEXT_WITH_ITS_OWN_INVISIBLES,
+  );
 });
 
 test("and keeps every character of a long note, because that text is the annotation", async () => {

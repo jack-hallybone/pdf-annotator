@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   initialReloadPageIndexes,
+  isPageWithinReach,
   pageRenderPriority,
+  renderedPageReach,
   visibleLoadPageIndexes,
 } from "../src/pdfdocumenteditor/pdfDocumentEditorHelpers";
 import {
   LAZY_PAGE_BUFFER,
   MAX_BAND_LOAD_PAGES,
+  RENDERED_PAGE_PIXEL_BUDGET,
 } from "../src/pdfdocumenteditor/viewerConfig";
 
 // The band is a function of the displayed range, so a wide range asks for a wide band and a test written against an active index could not tell the two apart.
@@ -105,4 +108,43 @@ test("a reloaded document brings back what the view was displaying", () => {
     shrunk.sort((a, b) => a - b),
     [1, 2, 3],
   );
+});
+
+test("the rendered reach spends the pixel budget and no more", () => {
+  const pagePixels = RENDERED_PAGE_PIXEL_BUDGET / 20;
+  const reach = renderedPageReach({ end: 11, start: 10 }, pagePixels);
+  assert.equal(reach, 9);
+  // Every page it keeps rendered, displayed ones included, fits in the budget; before it, reading on kept every visited page's canvases and the renderer grew until it crashed.
+  const rendered = Array.from({ length: 100 }, (_, index) => index).filter(
+    (index) => isPageWithinReach(index, { end: 11, start: 10 }, reach),
+  );
+  assert.deepEqual([rendered[0], rendered.at(-1)], [1, 20]);
+  assert.ok(rendered.length * pagePixels <= RENDERED_PAGE_PIXEL_BUDGET);
+});
+
+test("the rendered reach never falls inside the load band", () => {
+  // Pages in the band render as soon as they load, so a reach shorter than the band would unmount them the moment they painted.
+  const hugePage = RENDERED_PAGE_PIXEL_BUDGET * 2;
+  assert.equal(
+    renderedPageReach({ end: 7, start: 5 }, hugePage),
+    LAZY_PAGE_BUFFER,
+  );
+  assert.equal(
+    renderedPageReach({ end: 30, start: 0 }, 1_000_000),
+    LAZY_PAGE_BUFFER,
+  );
+  // Until a page has been measured there is no size to budget against, so nothing loaded is released.
+  assert.ok(renderedPageReach({ end: 0, start: 0 }, 0) >= MAX_BAND_LOAD_PAGES);
+  for (const index of visibleLoadPageIndexes({ end: 7, start: 5 }, 60)) {
+    assert.ok(isPageWithinReach(index, { end: 7, start: 5 }, LAZY_PAGE_BUFFER));
+  }
+});
+
+test("reach is measured from both ends of the displayed range", () => {
+  assert.equal(isPageWithinReach(2, { end: 9, start: 5 }, 3), true);
+  assert.equal(isPageWithinReach(1, { end: 9, start: 5 }, 3), false);
+  assert.equal(isPageWithinReach(12, { end: 9, start: 5 }, 3), true);
+  assert.equal(isPageWithinReach(13, { end: 9, start: 5 }, 3), false);
+  assert.equal(isPageWithinReach(13, { end: 5, start: 9 }, 3), false);
+  assert.equal(isPageWithinReach(12, { end: 5, start: 9 }, 3), true);
 });

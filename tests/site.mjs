@@ -31,6 +31,9 @@ export async function serveBuiltSite(expect = "index.html") {
   }
 
   let dead = false;
+  // A byte-different sw.js is a new worker, so a trailing comment stands in for a second deploy.
+  let redeployed = false;
+  const SW_FILE = join(SITE, "sw.js");
   const site = http.createServer((request, response) => {
     if (dead) {
       request.socket.destroy();
@@ -54,12 +57,24 @@ export async function serveBuiltSite(expect = "index.html") {
       "content-type": TYPES[extname(file)] ?? "application/octet-stream",
       "cache-control": "no-store",
     });
-    response.end(readFileSync(file));
+    const body = readFileSync(file);
+    response.end(
+      redeployed && file === SW_FILE
+        ? Buffer.concat([body, Buffer.from("\n// deploy 2\n")])
+        : body,
+    );
   });
   await new Promise((listening) => site.listen(0, "127.0.0.1", listening));
   site.url = `http://127.0.0.1:${site.address().port}${BASE}/`;
   site.kill = (value) => {
     dead = value;
+  };
+  site.redeploy = () => {
+    redeployed = true;
+  };
+  // Back to the real build, so a suite can install it fresh before simulating its own next deploy.
+  site.reset = () => {
+    redeployed = false;
   };
   return site;
 }

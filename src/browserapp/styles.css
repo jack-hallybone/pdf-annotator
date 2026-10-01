@@ -177,8 +177,9 @@
   padding: var(--theme-space-md);
 }
 
+/* Three stacked lines (credit, notices, version), centred like everything else on this card rather than hugging one edge of it. */
 .browserapp-home-footer {
-  align-items: flex-start;
+  align-items: center;
 }
 
 /* Sizing is .tap-target's: a standalone link, so the inline exception to SC 2.5.8 does not apply and 12px text needs padding out to a 24px target. */
@@ -186,7 +187,7 @@
   text-decoration-color: rgb(from var(--theme-ink) r g b / 0.24);
 }
 
-/* Same box shape as .tap-target above, so the version reads at the same rhythm as the two footer links beside it - this one just isn't a tap target, so it stays off that class and keeps its own copy of the shape. */
+/* Same box shape as .tap-target above, so the version reads at the same rhythm as the two footer links stacked above it - this one just isn't a tap target, so it stays off that class and keeps its own copy of the shape. */
 .browserapp-release-version {
   align-items: center;
   display: inline-flex;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { act, waitFor } from "@testing-library/react";
 import {
   PDFDict,
@@ -50,6 +50,30 @@ test("a parked session carries the viewport beside the document, not inside it",
       false,
       `${field} is one viewport's business and belongs under session.view`,
     );
+  }
+});
+
+// Its reason was worked out when the file was opened, and a return to the tab is exactly when the wait for page 1 shows.
+test("a parked tab comes back without parsing its file again to check it", async () => {
+  const parked = await mountLoadedModel();
+  const session = parked.result.current.model.createDocumentEditorSession();
+  assert.ok(session, "no session was captured for a loaded document");
+  assert.equal(session.readOnlyReason, null);
+  parked.unmount();
+
+  const load = mock.method(PDFDocument, "load");
+  try {
+    const { result } = await mountLoadedModel(
+      1,
+      undefined,
+      session.pdfBytes,
+      [],
+      session,
+    );
+    assert.equal(result.current.model.readOnlyReason, null);
+    assert.equal(load.mock.callCount(), 0);
+  } finally {
+    load.mock.restore();
   }
 });
 
@@ -405,4 +429,83 @@ test("a file at the limit opens with its note", async () => {
   const [note] = result.current.model.annotations;
   assert.equal(note?.kind, "stickyNote");
   assert.equal(note?.kind === "stickyNote" ? note.text.length : 0, 8_000_000);
+});
+
+// pdf.js shows the pages and pdf-lib writes them, so where the two list different page objects a note or a page edit lands on another page than the one the reader chose. pdf.js takes a page-tree leaf with no /Type for a page and pdf-lib skips it, which moves every later page along by one.
+async function pdfWithUntypedFirstPage({
+  claimPdfA = false,
+  evenCounts = false,
+} = {}) {
+  const pdfDoc = await PDFDocument.create();
+  for (const width of evenCounts ? [300, 310, 320, 330] : [300, 310, 320]) {
+    pdfDoc.addPage([width, 400]);
+  }
+  pdfDoc.getPage(0).node.delete(PDFName.of("Type"));
+  if (evenCounts) {
+    // A fourth page past /Count, which pdf-lib alone lists: both count three, and still not one index names the same page to both.
+    pdfDoc.catalog.Pages().set(PDFName.of("Count"), PDFNumber.of(3));
+  }
+  if (claimPdfA) {
+    // A reason that on its own offers "Edit a copy".
+    pdfDoc.catalog.set(
+      PDFName.of("Metadata"),
+      pdfDoc.context.register(
+        pdfDoc.context.stream(
+          '<rdf:Description xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/" pdfaid:part="1"/>',
+          { Subtype: "XML", Type: "Metadata" },
+        ),
+      ),
+    );
+  }
+  return pdfDoc.save({ useObjectStreams: false });
+}
+
+for (const [name, options] of [
+  ["whose page lists disagree", {}],
+  ["whose page lists disagree though they count alike", { evenCounts: true }],
+  ["whose page lists disagree and that claims PDF/A", { claimPdfA: true }],
+] as const) {
+  test(`a file ${name} opens read-only, with no copy to edit and no page to change`, async () => {
+    const bytes = await pdfWithUntypedFirstPage(options);
+    const { result } = await mountLoadedModel(1, "pages.pdf", bytes);
+    const model = () => result.current.model;
+    assert.equal(model().readOnlyReason, "ambiguous page order");
+    assert.equal(model().readOnly, true);
+
+    act(() => {
+      model().handleEnableEditing();
+    });
+    await act(async () => {
+      await model().handleDeletePage(0);
+    });
+
+    assert.equal(model().editingEnabled, false);
+    assert.equal(model().readOnly, true);
+    assert.equal(model().pdfBytes, bytes);
+    assert.equal(model().pageCount, 3);
+  });
+}
+
+// A parked tab keeps the reason it was opened with rather than check its file again, so the refusal has to hold there too, whatever else the parked state says.
+test("a parked file whose page lists disagree comes back read-only", async () => {
+  const parked = await mountLoadedModel(
+    1,
+    "pages.pdf",
+    await pdfWithUntypedFirstPage(),
+  );
+  const session = parked.result.current.model.createDocumentEditorSession();
+  assert.ok(session, "no session was captured for a loaded document");
+  assert.equal(session.readOnlyReason, "ambiguous page order");
+  parked.unmount();
+
+  const { result } = await mountLoadedModel(
+    1,
+    undefined,
+    session.pdfBytes,
+    [],
+    { ...session, editingEnabled: true },
+  );
+  assert.equal(result.current.model.readOnlyReason, "ambiguous page order");
+  assert.equal(result.current.model.editingEnabled, false);
+  assert.equal(result.current.model.readOnly, true);
 });

@@ -7,17 +7,16 @@ import {
   PDFNumber,
   PDFPage,
   PDFPageLeaf,
-  PDFRawStream,
   PDFRef,
   PDFStream,
   PDFString,
   ParseSpeeds,
-  decodePDFRawStream,
   degrees,
   rgb,
 } from "pdf-lib";
 import type { PDFContext, PDFObject } from "pdf-lib";
 import { canonicalPdfReferenceKey } from "./annotationSourceKey";
+import { decodedWithinBudget } from "./boundedStreamDecode";
 import type { PdfAnnotationRenames } from "./pageIdentity";
 import { NO_ANNOTATION_RENAMES } from "./pageIdentity";
 import {
@@ -41,8 +40,6 @@ const MAX_PAGE_TREE_DEPTH = 256;
 // Hitting either content-scan bound is "cannot say", never "not drawn".
 const MAX_CONTENT_SCAN_DEPTH = 16;
 const MAX_CONTENT_SCAN_BYTES = 32 * 1024 * 1024;
-// Read a content stream in pulls this size rather than one decode() call, so a stream that expands past the remaining budget (a decompression bomb, or simply a lot of legitimate content) is caught as soon as it does, not after the whole thing has already been inflated into memory to find out.
-const CONTENT_SCAN_CHUNK_BYTES = 1024 * 1024;
 // `/S` is in neither this set nor the carrier set: an element must have one, so it is replaced rather than deleted.
 const STRUCTURE_NODE_KEYS: ReadonlySet<PDFName> = new Set([
   PDFName.of("K"),
@@ -108,8 +105,14 @@ export async function saveEditedPdf(pdfDoc: PDFDocument) {
     );
   }
   if (protection.signed || protection.pdfa) {
+    const left =
+      protection.signed && protection.pdfa
+        ? "a signature and a PDF/A conformance claim"
+        : protection.signed
+          ? "a signature"
+          : "a PDF/A conformance claim";
     throw new PdfProtectionSanitizationError(
-      "The edited PDF still contains a signature or PDF/A conformance claim. Saving was stopped to avoid a misleading file.",
+      `The edited PDF still contains ${left}. Saving was stopped to avoid a misleading file.`,
     );
   }
   return output;
@@ -234,10 +237,64 @@ function stripSignatureFields(pdfDoc: PDFDocument) {
       acroForm.delete(PDFName.of("SigFlags"));
     }
 
+    pruneUnlistedSignatureWidgets(pdfDoc, removed, owned);
     deleteSignatureObjects(pdfDoc, removed, owned);
   } catch {
     // A malformed AcroForm must not block the save.
   }
+}
+
+// A form can stop listing a signature - a /Fields another tool rewrote, or no /AcroForm left at all - while its widget still sits on the page, /Sig value and signed appearance included, which the check after the save then finds with nothing left to remove it.
+function pruneUnlistedSignatureWidgets(
+  pdfDoc: PDFDocument,
+  removed: Set<PDFRef>,
+  owned: PDFObject[],
+) {
+  let pages: PDFPage[];
+  try {
+    pages = pdfDoc.getPages();
+  } catch {
+    // An unreadable page tree has no widgets this could reach anyway.
+    return;
+  }
+
+  for (const page of pages) {
+    const annots = resolvedArrayEntry(page.node, PDFName.of("Annots"));
+    if (!annots) {
+      continue;
+    }
+    for (let index = annots.size() - 1; index >= 0; index -= 1) {
+      const entry = annots.get(index);
+      const widget = resolvedDictAt(annots, index);
+      if (!widget || !isSignatureWidget(widget)) {
+        continue;
+      }
+      owned.push(widget);
+      if (entry instanceof PDFRef) {
+        removed.add(entry);
+      }
+      annots.remove(index);
+    }
+  }
+}
+
+// A widget can be its own field, or a kid whose /FT sits on an ancestor.
+function isSignatureWidget(annotation: PDFDict) {
+  if (
+    resolvedNameEntry(annotation, PDFName.of("Subtype"))?.asString() !==
+    "/Widget"
+  ) {
+    return false;
+  }
+
+  let field: PDFDict | undefined = annotation;
+  for (let depth = 0; field && depth <= MAX_FIELD_TREE_DEPTH; depth += 1) {
+    if (isSignatureField(field)) {
+      return true;
+    }
+    field = resolvedDictEntry(field, PDFName.of("Parent"));
+  }
+  return false;
 }
 
 function deleteSignatureObjects(
@@ -1288,7 +1345,7 @@ function followDrawnXObjects(
     under.add(resources);
     walk.walked.set(stream, under);
 
-    const decoded = decodedContent(stream, walk.scan.budget);
+    const decoded = decodedWithinBudget(stream, walk.scan.budget);
     if (!decoded.ok) {
       walk.scan.complete = false;
       // A stream this cannot decode at all is only a gap in this one page's read (continue to the next stream); one that ran past the shared budget ends the whole walk (return) instead - reading on would only spend more of a budget that is already gone.
@@ -1367,44 +1424,6 @@ function inheritedResources(page: PDFDict) {
     node = resolvedDictEntry(node, PDFName.of("Parent"));
   }
   return undefined;
-}
-
-type ScannedContent =
-  { ok: true; bytes: Uint8Array } | { ok: false; overBudget: boolean };
-
-// A malicious /FlateDecode stream can claim only a few compressed bytes and still expand to gigabytes; decoding it whole before checking its size would pay for that expansion just to find out. This reads it in bounded pulls instead of one decode() call, so a stream that grows past the remaining budget is caught as soon as it does, not after the whole thing has already been inflated into memory to find out. (A ratio-based check against the compressed size alone was tried and dropped: legitimate, ordinary page content can compress at ratios well past what a fixed "suspicious" cutoff could allow without also catching real pages that are not a threat, and a cutoff loose enough to spare them is too loose to tell a small-and-dangerous stream from a small-and-fine one either.) getBytes() still decodes one whole deflate block per pull with no size cap of its own, so this bounds how OFTEN the budget is checked, not what a single pull can produce - one pathological block can still land past budget in one call.
-function decodedContent(stream: PDFStream, budget: number): ScannedContent {
-  if (!(stream instanceof PDFRawStream)) {
-    return { ok: false, overBudget: false };
-  }
-
-  try {
-    const source = decodePDFRawStream(stream);
-    // Never actually a Uint8ClampedArray here - forceClamped is left at its default false - but getBytes' own type covers both.
-    const pieces: (Uint8Array | Uint8ClampedArray)[] = [];
-    let total = 0;
-    while (!source.isEmpty) {
-      const chunk = source.getBytes(CONTENT_SCAN_CHUNK_BYTES);
-      if (chunk.length === 0) {
-        break;
-      }
-      total += chunk.length;
-      if (total > budget) {
-        return { ok: false, overBudget: true };
-      }
-      // Copied out: a decode stream's own buffer can be reallocated by a later pull, which would silently invalidate an earlier subarray.
-      pieces.push(chunk.slice());
-    }
-    const joined = new Uint8Array(total);
-    let offset = 0;
-    for (const piece of pieces) {
-      joined.set(piece, offset);
-      offset += piece.length;
-    }
-    return { ok: true, bytes: joined };
-  } catch {
-    return { ok: false, overBudget: false };
-  }
 }
 
 function joinedBytes(pieces: Uint8Array[]) {

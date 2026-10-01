@@ -663,6 +663,8 @@ function PdfPageViewComponent({
       }
       pageElement?.classList.remove("show-delayed-spinner");
       cancelScheduledRender();
+      // destroy() releases the draw layer only along with an annotation editor layer, which this view never has, so without this PDF.js's static text-layer set keeps the page's whole subtree, overlay canvases included, alive after unmount.
+      pageView?.drawLayer?.cancel();
       pageView?.destroy();
       fallbackRenderTask?.cancel();
       if (baseLayer) {

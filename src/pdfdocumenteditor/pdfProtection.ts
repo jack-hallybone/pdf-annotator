@@ -8,9 +8,9 @@ import {
   PDFRef,
   PDFStream,
   ParseSpeeds,
-  decodePDFRawStream,
 } from "pdf-lib";
 import type { PDFContext } from "pdf-lib";
+import { decodedWithinBudget } from "./boundedStreamDecode";
 import {
   resolvedArrayEntry,
   resolvedDictEntry,
@@ -27,13 +27,18 @@ const pdfProtectionLoadOptions = {
 const MAX_PROTECTION_FIELD_ENTRIES = 10_000;
 // pdfPageOperations.ts strips exactly the streams these are found in, so the two must agree: a claim one side cannot see is left in the output.
 const pdfaXmpMarkers = ["pdfaid:part", "pdfaid:conformance"];
+// Shared by every compressed packet in one scan, which runs on the main thread on every open and save. A real XMP packet is kilobytes.
+const MAX_METADATA_DECODE_BYTES = 32 * 1024 * 1024;
 
 export type PdfDocumentEditorReadOnlyReason =
-  "PDF/A compliant" | "password protected" | "signed/certified";
+  | "PDF/A compliant"
+  | "ambiguous page order"
+  | "password protected"
+  | "signed/certified";
 
 export async function detectReadOnlyReason(
   bytes: Uint8Array,
-  pdfDoc: Pick<PDFDocumentProxy, "getMetadata"> | null,
+  pdfDoc: Pick<PDFDocumentProxy, "getMetadata" | "getPage" | "numPages"> | null,
   passwordProtected: boolean,
 ): Promise<PdfDocumentEditorReadOnlyReason | null> {
   if (passwordProtected) {
@@ -44,13 +49,22 @@ export async function detectReadOnlyReason(
     return "password protected";
   }
 
-  if (await pdfLooksPdfA(bytes, pdfDoc)) {
+  // The structural checks below read one parse: each would otherwise load the whole file again, and this runs on every open, before page 1 shows.
+  let parsed: Promise<PDFDocument> | undefined;
+  const parse = () => (parsed ??= loadForProtectionCheck(bytes));
+
+  // Ahead of the two reasons that offer "Edit a copy": a copy is written the same way, so its edits would land on the same wrong pages.
+  if (pdfDoc && (await pageListsDisagree(pdfDoc, parse))) {
+    return "ambiguous page order";
+  }
+
+  if (await pdfLooksPdfA(bytes, pdfDoc, parse)) {
     return "PDF/A compliant";
   }
 
   if (
     pdfLooksSignedOrCertified(bytes) ||
-    (await pdfLooksStructurallySignedOrCertified(bytes))
+    (await pdfLooksStructurallySignedOrCertified(bytes, parse))
   ) {
     return "signed/certified";
   }
@@ -74,6 +88,7 @@ export async function pdfLooksEncrypted(bytes: Uint8Array) {
 export async function pdfLooksPdfA(
   bytes: Uint8Array,
   pdfDoc?: Pick<PDFDocumentProxy, "getMetadata"> | null,
+  parse = () => loadForProtectionCheck(bytes),
 ) {
   if (pdfLooksPdfAByRawMarkers(bytes)) {
     return true;
@@ -88,7 +103,7 @@ export async function pdfLooksPdfA(
       "";
     if (
       typeof rawMetadata === "string" &&
-      /pdfaid:part|pdfaid:conformance|pdf\/a/i.test(rawMetadata)
+      /pdfaid:part|pdfaid:conformance/i.test(rawMetadata)
     ) {
       return true;
     }
@@ -96,7 +111,7 @@ export async function pdfLooksPdfA(
     // Fall through to the structural output-intent check below.
   }
 
-  return pdfLooksStructurallyPdfA(bytes);
+  return pdfLooksStructurallyPdfA(parse);
 }
 
 export function pdfLooksSignedOrCertified(bytes: Uint8Array) {
@@ -119,23 +134,64 @@ export function pdfLooksSignedOrCertified(bytes: Uint8Array) {
   );
 }
 
-export async function pdfLooksStructurallySignedOrCertified(bytes: Uint8Array) {
+export async function pdfLooksStructurallySignedOrCertified(
+  bytes: Uint8Array,
+  parse = () => loadForProtectionCheck(bytes),
+) {
   try {
-    const pdfDoc = await PDFDocument.load(bytes, pdfProtectionLoadOptions);
-    return pdfDocumentLooksSignedOrCertified(pdfDoc);
+    return pdfDocumentLooksSignedOrCertified(await parse());
   } catch {
     // Fail-closed: an unparseable form structure is treated as protected rather than assumed to hold no signature.
     return true;
   }
 }
 
-async function pdfLooksStructurallyPdfA(bytes: Uint8Array) {
+async function pdfLooksStructurallyPdfA(parse: () => Promise<PDFDocument>) {
   try {
-    const pdfDoc = await PDFDocument.load(bytes, pdfProtectionLoadOptions);
-    return pdfDocumentLooksPdfA(pdfDoc);
+    return pdfDocumentLooksPdfA(await parse());
   } catch {
     return false;
   }
+}
+
+// pdf.js shows the pages and pdf-lib writes them, each by index, so an annotation or a page edit lands where the reader put it only while both list the same page objects in the same order. A malformed page tree can split them - pdf.js takes a leaf with no /Type for a page where pdf-lib skips it, and /Count can hide pages from pdf.js alone - and the counts can still agree, so the objects themselves are compared.
+async function pageListsDisagree(
+  pdfDoc: Pick<PDFDocumentProxy, "getPage" | "numPages">,
+  parse: () => Promise<PDFDocument>,
+) {
+  let parsedDoc: PDFDocument;
+  try {
+    parsedDoc = await parse();
+  } catch {
+    // Nothing is written to a file pdf-lib cannot parse, and the signature check below already fails it closed.
+    return false;
+  }
+
+  try {
+    const pages = parsedDoc.getPages();
+    if (pages.length !== pdfDoc.numPages) {
+      return true;
+    }
+    for (const [index, page] of pages.entries()) {
+      // The open's annotation budget check has fetched every page already, so pdf.js answers these from its cache.
+      const { ref } = await pdfDoc.getPage(index + 1);
+      if (
+        ref?.num !== page.ref.objectNumber ||
+        ref.gen !== page.ref.generationNumber
+      ) {
+        return true;
+      }
+    }
+    return false;
+  } catch {
+    // A page list either library cannot read to the end cannot be shown to match.
+    return true;
+  }
+}
+
+// These checks only read what this returns, so detectReadOnlyReason can hand them the same parse.
+function loadForProtectionCheck(bytes: Uint8Array) {
+  return PDFDocument.load(bytes, pdfProtectionLoadOptions);
 }
 
 export async function verifyEditedPdfProtectionClaims(bytes: Uint8Array) {
@@ -153,14 +209,14 @@ export async function verifyEditedPdfProtectionClaims(bytes: Uint8Array) {
   }
 }
 
+// The claim's own markers, never the words "PDF/A": a page, a note or other metadata can spell those out without claiming anything, and counting them opened such a file read-only and, once edited, stopped every save, since no strip removes the reader's own text.
 function pdfLooksPdfAByRawMarkers(bytes: Uint8Array) {
   return (
     bytesContainPdfMarker(bytes, "pdfaid:part", { caseInsensitive: true }) ||
     bytesContainPdfMarker(bytes, "pdfaid:conformance", {
       caseInsensitive: true,
     }) ||
-    bytesContainPdfMarker(bytes, "GTS_PDFA", { caseInsensitive: true }) ||
-    bytesContainPdfMarker(bytes, "PDF/A", { caseInsensitive: true })
+    bytesContainPdfMarker(bytes, "GTS_PDFA", { caseInsensitive: true })
   );
 }
 
@@ -197,6 +253,7 @@ export function pdfAClaimingMetadataRefs(context: PDFContext) {
   }
 
   const claimingRefs = new Set<PDFRef>();
+  const scan = { budget: MAX_METADATA_DECODE_BYTES };
   for (const [ref, object] of context.enumerateIndirectObjects()) {
     if (!(object instanceof PDFRawStream)) {
       continue;
@@ -206,7 +263,7 @@ export function pdfAClaimingMetadataRefs(context: PDFContext) {
     }
     if (
       bytesClaimPdfA(object.contents) ||
-      bytesClaimPdfA(decodedStreamContents(object))
+      decodedPacketClaimsPdfA(object, scan)
     ) {
       claimingRefs.add(ref);
     }
@@ -223,26 +280,27 @@ function streamDeclaresMetadata(stream: PDFRawStream) {
   return type === "/Metadata" || subtype === "/XML";
 }
 
-function bytesClaimPdfA(bytes: Uint8Array | null) {
-  return (
-    bytes !== null &&
-    pdfaXmpMarkers.some((marker) =>
-      bytesContainPdfMarker(bytes, marker, { caseInsensitive: true }),
-    )
+function bytesClaimPdfA(bytes: Uint8Array) {
+  return pdfaXmpMarkers.some((marker) =>
+    bytesContainPdfMarker(bytes, marker, { caseInsensitive: true }),
   );
 }
 
-// PDF/A requires an unfiltered metadata stream, so the raw scan covers conforming files; this catches a claim made from a compressed packet.
-function decodedStreamContents(stream: PDFRawStream) {
+// PDF/A requires an unfiltered metadata stream, so the raw scan covers conforming files; this catches a claim made from a compressed packet. A packet past the budget counts as a claim, as an unreadable signature field counts as a signature: otherwise enough padding would carry a claim through an edit, and a save would leave it in unseen.
+function decodedPacketClaimsPdfA(
+  stream: PDFRawStream,
+  scan: { budget: number },
+) {
   if (!stream.dict.get(PDFName.of("Filter"))) {
-    return null;
+    return false;
   }
 
-  try {
-    return decodePDFRawStream(stream).decode();
-  } catch {
-    return null;
+  const decoded = decodedWithinBudget(stream, scan.budget);
+  if (!decoded.ok) {
+    return decoded.overBudget;
   }
+  scan.budget -= decoded.bytes.length;
+  return bytesClaimPdfA(decoded.bytes);
 }
 
 function pdfDocumentLooksSignedOrCertified(pdfDoc: PDFDocument) {
@@ -365,22 +423,38 @@ function bytesContainPdfMarker(
     return false;
   }
 
+  const lastStart = bytes.length - needle.length;
+  // The check below decodes a #xx escape at any position, the first included ("/S /#47TS_PDFA1"), so a "#" opens a candidate too.
+  const nextStart = firstByteFinder(bytes, [
+    caseInsensitive ? asciiLower(needle[0]) : needle[0],
+    caseInsensitive ? asciiUpper(needle[0]) : needle[0],
+    0x23,
+  ]);
   // `skip` is produced in ascending, non-overlapping order, so one forward pointer keeps this in step with `index` instead of rescanning it per byte.
   let skipIndex = 0;
-  let index = 0;
-  while (index <= bytes.length - needle.length) {
+  let index = nextStart(0);
+  while (index !== -1 && index <= lastStart) {
     while (skip && skipIndex < skip.length && index >= skip[skipIndex][1]) {
       skipIndex += 1;
     }
     const span = skip?.[skipIndex];
     if (span && index >= span[0]) {
-      index = span[1];
+      index = nextStart(span[1]);
       continue;
     }
 
     let matched = true;
+    let at = index;
     for (let offset = 0; offset < needle.length; offset += 1) {
-      const byte = bytes[index + offset];
+      // A PDF name can spell any byte as #xx, in either hex case, and a validator that decodes it still sees "/ByteR#61nge" as "/ByteRange".
+      const escaped =
+        bytes[at] === 0x23 &&
+        hexDigit(bytes[at + 1]) !== -1 &&
+        hexDigit(bytes[at + 2]) !== -1;
+      const byte = escaped
+        ? hexDigit(bytes[at + 1]) * 16 + hexDigit(bytes[at + 2])
+        : bytes[at];
+      at += escaped ? 3 : 1;
       const expected = needle[offset];
       if (
         byte !== expected &&
@@ -393,14 +467,48 @@ function bytesContainPdfMarker(
     if (matched) {
       return true;
     }
-    index += 1;
+    index = nextStart(index + 1);
   }
 
   return false;
 }
 
+// Every open runs these scans over the whole file before page 1 shows, so candidates come from the engine's native search for the bytes a match can open with, rather than a byte-by-byte loop in script. Each byte keeps its own next position and moves on only once passed, so a byte the file never contains is searched for once.
+function firstByteFinder(bytes: Uint8Array, openers: readonly number[]) {
+  const wanted = Array.from(new Set(openers));
+  const next = wanted.map((opener) => bytes.indexOf(opener));
+  return (from: number) => {
+    let nearest = -1;
+    for (let slot = 0; slot < wanted.length; slot += 1) {
+      if (next[slot] !== -1 && next[slot] < from) {
+        next[slot] = bytes.indexOf(wanted[slot], from);
+      }
+      if (next[slot] !== -1 && (nearest === -1 || next[slot] < nearest)) {
+        nearest = next[slot];
+      }
+    }
+    return nearest;
+  };
+}
+
 function asciiLower(value: number) {
   return value >= 65 && value <= 90 ? value + 32 : value;
+}
+
+function asciiUpper(value: number) {
+  return value >= 97 && value <= 122 ? value - 32 : value;
+}
+
+// One hex digit's value, in either case, or -1.
+function hexDigit(value: number | undefined) {
+  if (value === undefined) {
+    return -1;
+  }
+  if (value >= 0x30 && value <= 0x39) {
+    return value - 0x30;
+  }
+  const lower = asciiLower(value);
+  return lower >= 0x61 && lower <= 0x66 ? lower - 0x61 + 10 : -1;
 }
 
 // The byte ranges between a `stream` keyword and its `endstream`: a page's drawn content, an embedded image, a font program, a form field's appearance. Structural PDF syntax - the dictionaries a marker scan is actually meant to see - never sits inside one.
@@ -440,9 +548,15 @@ function contentStreamSpans(bytes: Uint8Array): Array<[number, number]> {
 
 function indexOfAscii(bytes: Uint8Array, pattern: string, start: number) {
   const needle = Array.from(pattern, (char) => char.charCodeAt(0));
-  for (let index = start; index <= bytes.length - needle.length; index += 1) {
+  const lastStart = bytes.length - needle.length;
+  // A native search for the first byte, for the same reason as firstByteFinder.
+  for (
+    let index = bytes.indexOf(needle[0], start);
+    index !== -1 && index <= lastStart;
+    index = bytes.indexOf(needle[0], index + 1)
+  ) {
     let matched = true;
-    for (let offset = 0; offset < needle.length; offset += 1) {
+    for (let offset = 1; offset < needle.length; offset += 1) {
       if (bytes[index + offset] !== needle[offset]) {
         matched = false;
         break;

@@ -179,7 +179,7 @@ export const TabbedAppDocument = forwardRef<
   } = useTabbedAppNotices();
   const {
     pendingExternalLink,
-    openButtonRef: externalLinkOpenButtonRef,
+    cancelButtonRef: externalLinkCancelButtonRef,
     requestExternalLink,
     confirmExternalLink,
     cancelExternalLink,
@@ -684,7 +684,7 @@ export const TabbedAppDocument = forwardRef<
                 onAlways={() => confirmExternalLink({ always: true })}
                 onCancel={cancelExternalLink}
                 onOpen={() => confirmExternalLink()}
-                openButtonRef={externalLinkOpenButtonRef}
+                cancelButtonRef={externalLinkCancelButtonRef}
               />
             ) : null}
           </>

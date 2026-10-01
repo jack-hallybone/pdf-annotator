@@ -813,10 +813,24 @@ body,
   position: relative;
 }
 
-.tabbedapp-tab-list-menu-item {
-  justify-content: space-between;
-  min-width: 0;
+/* Its own position:relative context for the close button below, which floats over this row's right edge exactly as .tabbedapp-tab-close floats over the tab strip's own tab (see that class); min-height guarantees the row is never shorter than that button. */
+.tabbedapp-tab-list-menu-row {
+  min-height: var(--theme-control-xs);
+  position: relative;
   width: 100%;
+}
+
+/* The row above wraps it, so it takes theme.css's .menu-item shape instead of `.menu > button`'s; this adds the right padding the close button floats over, and the hover that theme.css gives only direct children. */
+.tabbedapp-tab-list-menu-item {
+  min-width: 0;
+  padding-inline-end: calc(var(--theme-control-xs) + var(--theme-space-xs));
+  width: 100%;
+}
+
+.tabbedapp-tab-list-menu-item:hover:not(:disabled),
+.tabbedapp-tab-list-menu-item:focus-visible {
+  background: var(--theme-wash);
+  background-image: none;
 }
 
 .tabbedapp-tab-list-menu-item-title {
@@ -826,14 +840,6 @@ body,
 /* Shaded, not bold: the same cue as the active tab itself, not a different one. */
 .tabbedapp-tab-list-menu-item[aria-current="true"] {
   background: var(--theme-wash-strong);
-}
-
-.tabbedapp-tab-list-menu-item-dirty-dot {
-  background: var(--theme-ink-muted);
-  border-radius: var(--theme-radius-pill);
-  flex: 0 0 auto;
-  height: var(--theme-space-sm);
-  width: var(--theme-space-sm);
 }
 
 .tabbedapp-home-tab {

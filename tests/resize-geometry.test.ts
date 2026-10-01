@@ -10,6 +10,7 @@ import {
   rotatedAnnotationRect,
   unrotatePointForAnnotation,
 } from "../src/pdfdocumenteditor/annotationGeometry";
+import { resizeFreeTextRect } from "../src/pdfdocumenteditor/freeTextLayout";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
 
 function imageStamp(overrides: Partial<PdfAnnotation> = {}): PdfAnnotation {
@@ -159,4 +160,15 @@ test("resizeFreeTextWidth keeps the anchor edge fixed in local space when the an
     Math.abs(resultLocal.x2 - 380) < 1e-6,
     "right edge moved to the requested width",
   );
+});
+
+test("free text with more lines than a call takes arguments still lays out", () => {
+  const rect = resizeFreeTextRect(
+    { x1: 0, y1: 0, x2: 10, y2: 10 },
+    "x\n".repeat(200_000),
+    12,
+  );
+
+  assert.ok(Number.isFinite(rect.x2 - rect.x1));
+  assert.ok(Number.isFinite(rect.y2 - rect.y1));
 });

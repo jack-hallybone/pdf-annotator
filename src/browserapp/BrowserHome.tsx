@@ -115,25 +115,23 @@ export function BrowserHome({
         ) : null}
 
         <footer className="browserapp-home-footer stack xxs text-muted">
-          <div className="row xxs grow">
-            <a
-              className="browserapp-home-credit tap-target text-xs text-muted"
-              href="https://jack-hallybone.github.io/"
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              Made by Jack (and the machines)
-            </a>
-            {/* The bundled licences have to be *provided*, not merely present at a URL nobody is told about. */}
-            <a
-              className="browserapp-home-credit tap-target text-xs text-muted"
-              href={thirdPartyNoticesUrl}
-              rel="noopener noreferrer"
-              target="_blank"
-            >
-              Open-source licences
-            </a>
-          </div>
+          <a
+            className="browserapp-home-credit tap-target text-xs text-muted"
+            href="https://jack-hallybone.github.io/"
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Made by Jack (and the machines)
+          </a>
+          {/* The bundled notices have to be *provided*, not merely present at a URL nobody is told about. */}
+          <a
+            className="browserapp-home-credit tap-target text-xs text-muted"
+            href={thirdPartyNoticesUrl}
+            rel="noopener noreferrer"
+            target="_blank"
+          >
+            Third-party notices
+          </a>
           <span className="browserapp-release-version text-xs text-mono">
             {RELEASE_VERSION}
           </span>

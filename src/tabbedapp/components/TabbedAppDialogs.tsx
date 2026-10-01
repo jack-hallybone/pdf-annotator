@@ -44,13 +44,13 @@ export function ExternalLinkDialog({
   onAlways,
   onCancel,
   onOpen,
-  openButtonRef,
+  cancelButtonRef,
 }: {
   link: PendingExternalLink;
   onAlways: () => void;
   onCancel: () => void;
   onOpen: () => void;
-  openButtonRef: RefObject<HTMLButtonElement | null>;
+  cancelButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLElement | null>(null);
@@ -78,7 +78,12 @@ export function ExternalLinkDialog({
         {/* Rendered as stored, not re-derived: PendingExternalLink.url is already the sanitized string that will be opened. */}
         <p className="dialog-body external-link-url text-mono">{link.url}</p>
         <div className="dialog-actions">
-          <button className="" onClick={onCancel} type="button">
+          <button
+            className=""
+            onClick={onCancel}
+            ref={cancelButtonRef}
+            type="button"
+          >
             Cancel
           </button>
           {/* The scope label comes from PendingExternalLink so the button promises exactly what confirmExternalLink stores: this origin, or this mailto recipient - not every link in the document. */}
@@ -90,12 +95,7 @@ export function ExternalLinkDialog({
           >
             {`Always allow ${link.trustScopeLabel} in this document`}
           </button>
-          <button
-            className="primary"
-            onClick={onOpen}
-            ref={openButtonRef}
-            type="button"
-          >
+          <button className="primary" onClick={onOpen} type="button">
             Open
           </button>
         </div>

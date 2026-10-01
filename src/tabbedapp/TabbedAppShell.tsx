@@ -26,6 +26,7 @@ import type {
   RefCallback,
 } from "react";
 import {
+  ChevronDown,
   ChevronsRight,
   Copy,
   Download,
@@ -34,7 +35,6 @@ import {
   FolderOpen,
   Home,
   Layers,
-  List,
   PanelsLeftBottom,
   Pencil,
   Plus,
@@ -326,6 +326,10 @@ export const TabbedAppShell = forwardRef<
     ((decision: CloseDocumentsDecision) => void) | null
   >(null);
   const documentsRef = useLatestRef(documents);
+  // Parked sessions a tab's view has crashed past; see markDocumentViewCrashed.
+  const crashedSessionsRef = useRef(
+    new WeakSet<SensitiveTabbedAppDocumentSession>(),
+  );
   const nextCloseConfirmationIdRef = useRef(0);
   const pendingHostDocumentsRef = useRef<TabbedAppHostDocument[]>([]);
   const {
@@ -638,6 +642,13 @@ export const TabbedAppShell = forwardRef<
     }
   }, [documents, tabContextMenu]);
 
+  // A close from inside the list stays open for closing several in a row (see closeDocument's own callers below) - but with nothing left to list, it has to go too.
+  useEffect(() => {
+    if (tabListMenuOpen && documents.length === 0) {
+      setTabListMenuOpen(false);
+    }
+  }, [documents.length, tabListMenuOpen]);
+
   useEffect(() => {
     if (
       renameDialog &&
@@ -731,6 +742,19 @@ export const TabbedAppShell = forwardRef<
       );
     },
     [],
+  );
+
+  // A crashed view never hands its session back, so its tab's parked one is older than what the reader last saw - and than the file itself, if they saved since. The session object is marked rather than the tab, so the next capture, once that tab mounts again, clears it.
+  const markDocumentViewCrashed = useCallback(
+    (documentId: string) => {
+      const session = documentsRef.current.find(
+        (document) => document.id === documentId,
+      )?.session;
+      if (session) {
+        crashedSessionsRef.current.add(session);
+      }
+    },
+    [documentsRef],
   );
 
   const registerDocumentRef = useCallback(
@@ -911,7 +935,13 @@ export const TabbedAppShell = forwardRef<
     }
 
     captureMountedSessions();
-    releaseDocumentsLeavingView([firstOpenedId]);
+    // The opened document takes the left panel only: a two-document split keeps its second panel's document on screen.
+    releaseDocumentsLeavingView(
+      panelDocumentIds(
+        firstOpenedId,
+        splitViewRef.current ? secondaryDocumentIdRef.current : null,
+      ),
+    );
     setDocuments((current) => {
       const next = [...current, ...openedDocuments];
       // useLatestRef's effect is too late if this is called again first.
@@ -1170,9 +1200,21 @@ export const TabbedAppShell = forwardRef<
       return true;
     }
 
-    const remainingDocuments = latestDocuments.filter(
-      (item) => item.id !== documentId,
+    // Closing one side of a split remounts the document that stays, from its record - re-captured now, as closeDocumentGroup does, or it comes back without every edit since it was last parked.
+    const freshSessionsByDocumentId = new Map(
+      captureMountedSessions().map((update) => [
+        update.documentId,
+        update.session,
+      ]),
     );
+    const remainingDocuments = latestDocuments
+      .filter((item) => item.id !== documentId)
+      .map((item) => {
+        const session = freshSessionsByDocumentId.get(item.id);
+        return session && session.sourceId === item.source.sourceId
+          ? applySessionToDocument(item, session)
+          : item;
+      });
     const activeId = activeDocumentIdRef.current;
     const nextActiveId =
       activeId === documentId
@@ -1460,6 +1502,12 @@ export const TabbedAppShell = forwardRef<
         const session = document.session;
         if (!session) {
           // Never mounted, so its bytes cannot be produced without rendering.
+          failures.push(document);
+          continue;
+        }
+
+        // Writing a copy its view crashed past could put older work over newer; left for the reader to Save As instead.
+        if (crashedSessionsRef.current.has(session)) {
           failures.push(document);
           continue;
         }
@@ -2082,6 +2130,7 @@ export const TabbedAppShell = forwardRef<
         onRegisterDocumentRef={registerDocumentRef}
         onSaveTargetChange={updateDocumentSaveTarget}
         onTitleChange={updateDocumentTitle}
+        onViewCrash={markDocumentViewCrashed}
         secondView={secondView}
         splitDirection={panelSplitDirection}
         splitRatio={panelSplitRatio}
@@ -2299,7 +2348,7 @@ export const TabbedAppShell = forwardRef<
                 title="List open tabs"
                 type="button"
               >
-                <List size={16} />
+                <ChevronDown size={16} />
               </button>
               {tabListMenuOpen ? (
                 <div
@@ -2313,25 +2362,42 @@ export const TabbedAppShell = forwardRef<
                   }}
                 >
                   {documents.map((document) => (
-                    <button
-                      aria-current={visibleDocumentIdSet.has(document.id)}
-                      className="tabbedapp-tab-list-menu-item"
-                      disabled={shellLocked}
+                    <div
+                      className="tabbedapp-tab-list-menu-row"
                       key={document.id}
-                      onClick={() => selectDocumentFromTabList(document.id)}
-                      role="menuitem"
-                      type="button"
+                      onAuxClick={(event) =>
+                        closeTabOnMiddleClick(event, document.id)
+                      }
+                      onMouseDown={suppressMiddleClickAutoscroll}
                     >
-                      <span className="tabbedapp-tab-list-menu-item-title truncate">
-                        {document.title}
-                      </span>
-                      {document.hasUnsavedChanges ? (
-                        <span
-                          aria-label="Unsaved changes"
-                          className="tabbedapp-tab-list-menu-item-dirty-dot"
-                        />
-                      ) : null}
-                    </button>
+                      <button
+                        aria-current={visibleDocumentIdSet.has(document.id)}
+                        className="menu-item tabbedapp-tab-list-menu-item"
+                        disabled={shellLocked}
+                        onClick={() => selectDocumentFromTabList(document.id)}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <span className="tabbedapp-tab-list-menu-item-title truncate">
+                          {document.title}
+                        </span>
+                      </button>
+                      <button
+                        aria-label={`Close ${document.title}`}
+                        className={`tabbedapp-tab-close ${
+                          document.hasUnsavedChanges
+                            ? "tabbedapp-tab-close-dirty"
+                            : ""
+                        }`}
+                        disabled={shellLocked}
+                        onClick={() => void closeDocument(document.id)}
+                        role="menuitem"
+                        type="button"
+                      >
+                        <span className="tabbedapp-tab-dirty-dot dot" />
+                        <X className="tabbedapp-tab-close-icon" size={14} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               ) : null}
@@ -2896,6 +2962,7 @@ function DocumentTabContent({
   onSaveTargetChange,
   onSplitRatioChange,
   onTitleChange,
+  onViewCrash,
   secondView,
   splitDirection,
   splitRatio,
@@ -2914,6 +2981,7 @@ function DocumentTabContent({
   onSaveTargetChange: (documentId: string, change: PdfSaveTargetChange) => void;
   onSplitRatioChange?: Dispatch<SetStateAction<number>>;
   onTitleChange: (documentId: string, title: string) => void;
+  onViewCrash: (documentId: string) => void;
   secondView?: boolean;
   splitDirection?: SplitAxis;
   splitRatio?: number;
@@ -2940,9 +3008,21 @@ function DocumentTabContent({
     () => void onCloseDocument(document.id, { skipConfirm: true }),
     [document.id, onCloseDocument],
   );
+  // Not handleClose: the editor calls that only once it has confirmed discarding, and a crashed view confirms nothing.
+  const handleCrashedViewClose = useCallback(
+    () => void onCloseDocument(document.id),
+    [document.id, onCloseDocument],
+  );
+  const handleViewCrash = useCallback(
+    () => onViewCrash(document.id),
+    [document.id, onViewCrash],
+  );
 
   return (
-    <DocumentPaneErrorBoundary onCloseDocument={handleClose}>
+    <DocumentPaneErrorBoundary
+      onCloseDocument={handleCrashedViewClose}
+      onViewCrash={handleViewCrash}
+    >
       <Suspense
         fallback={
           <div className="tabbedapp-document-pane tabbedapp-document-pane-loading">

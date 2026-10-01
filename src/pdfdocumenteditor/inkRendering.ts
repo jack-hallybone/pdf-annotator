@@ -1,7 +1,7 @@
 // Ink is canvas-backed rather than SVG because a page can hold thousands of stroke points.
 import { rgbToCss } from "./annotationColors";
 import { inkPathCommands } from "./annotationGeometry";
-import { safeCanvasPixelRatio } from "./pdfRender";
+import { releaseCanvasBuffer, safeCanvasPixelRatio } from "./pdfRender";
 import { clamp } from "./viewerConfig";
 import type {
   PageDisplaySize,
@@ -43,6 +43,11 @@ export function renderInkCanvasLayer({
   scale: number;
   viewport: PageViewport;
 }) {
+  if (!annotations.some((annotation) => annotation.kind === kind)) {
+    releaseEmptyLayer(canvas);
+    return;
+  }
+
   const context = prepareInkCanvasContext({
     canvas,
     clear: true,
@@ -80,6 +85,14 @@ export function renderTextHighlightCanvas({
   };
   viewport: PageViewport;
 }) {
+  if (
+    !draftHighlight &&
+    !annotations.some((annotation) => annotation.kind === "textHighlight")
+  ) {
+    releaseEmptyLayer(canvas);
+    return;
+  }
+
   const context = prepareInkCanvasContext({
     canvas,
     clear: true,
@@ -239,6 +252,13 @@ export function eraseInkCanvasPaths({
 
   context.globalCompositeOperation = previousComposite;
   context.globalAlpha = 1;
+}
+
+// Every page on or near the screen has three of these layers, each as large as the page at up to twice its resolution, and most pages carry no ink or highlight at all: an empty layer keeps no pixels, and the next render with something to draw sizes it again.
+function releaseEmptyLayer(canvas: HTMLCanvasElement | null) {
+  if (canvas && (canvas.width !== 0 || canvas.height !== 0)) {
+    releaseCanvasBuffer(canvas);
+  }
 }
 
 function prepareInkCanvasContext(

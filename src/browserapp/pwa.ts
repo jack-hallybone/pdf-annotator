@@ -1,3 +1,4 @@
+import { PACKAGE_NAME } from "../packageName";
 import type { LocalPdfFileHandle } from "./localFileAccess";
 
 type PwaLaunchParams = {
@@ -23,13 +24,44 @@ let launchDeliveryQueue = Promise.resolve();
 // A launch can fire before the shell calls setPwaFileLaunchHandler - a cold start is exactly when it does - so it waits here until one is set.
 const pendingFileLaunches: LocalPdfFileHandle[][] = [];
 
+// Lock names are origin-wide and sibling apps share this origin, so this one carries the package name.
+const WINDOW_LOCK = `${PACKAGE_NAME}-window`;
+
+// An update downloads in the background and runs from the next reload: a new worker waiting by then takes over, unless another window of this app is still open on the current version.
+async function applyWaitingUpdate() {
+  const waiting = (await navigator.serviceWorker.getRegistration())?.waiting;
+  const [navigation] = performance.getEntriesByType(
+    "navigation",
+  ) as PerformanceNavigationTiming[];
+  const reload = navigation?.type === "reload";
+  const shared = (await navigator.locks.query()).held?.some(
+    (lock) => lock.name === WINDOW_LOCK,
+  );
+  // Held until this window closes, for the check above in any other window.
+  void navigator.locks.request(
+    WINDOW_LOCK,
+    { mode: "shared" },
+    () => new Promise(() => {}),
+  );
+  if (!waiting || !reload || shared || !navigator.serviceWorker.controller) {
+    return;
+  }
+  navigator.serviceWorker.addEventListener(
+    "controllerchange",
+    () => location.reload(),
+    { once: true },
+  );
+  waiting.postMessage({ type: "SKIP_WAITING" });
+}
+
 export function registerBrowserServiceWorker() {
   if (!import.meta.env.PROD || !("serviceWorker" in navigator)) {
     return;
   }
+  if (navigator.locks) void applyWaitingUpdate().catch(() => undefined);
 
   const register = () => {
-    // Registration only: a new worker installs and waits, so the running page keeps the asset set it booted with and a lazy chunk cannot 404 mid-session.
+    // Registration only: a new worker installs and waits for a reload (applyWaitingUpdate, above) or for every window to close, so the running page keeps the asset set it booted with and a lazy chunk cannot 404 mid-session.
     void navigator.serviceWorker
       .register(`${import.meta.env.BASE_URL}sw.js`, {
         scope: import.meta.env.BASE_URL,

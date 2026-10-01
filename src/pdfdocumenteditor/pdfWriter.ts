@@ -46,7 +46,11 @@ import {
   pageNodeAnnots,
   saveEditedPdf,
 } from "./pdfPageOperations";
-import { strippedDocumentText, strippedLiveText } from "./untrustedText";
+import {
+  KEPT_IN_TEXT,
+  strippedDocumentText,
+  strippedLiveText,
+} from "./untrustedText";
 import type { InkAnnotation, PdfAnnotation, PdfPoint, PdfRect } from "./types";
 
 const printFlag = 4;
@@ -562,7 +566,7 @@ function freeTextAppearance(
   const [r, g, b] = pdfColor(color);
   const lineHeight = pdfCoordinate(fontSize * FREE_TEXT_LINE_HEIGHT);
   const baselineY = Math.max(0, height - fontSize);
-  const lines = freeTextVisualLines(text, fontSize, width);
+  const lines = freeTextVisualLines(drawnFreeText(text), fontSize, width);
   const content = [
     "q",
     "/GS0 gs",
@@ -731,7 +735,7 @@ function unsupportedAnnotationTextCharacters(annotation: PdfAnnotation) {
   return Array.from(
     new Set(
       graphemeClusters(normalizedFreeText(annotation.text)).filter(
-        (cluster) => !isSupportedFreeTextCluster(cluster),
+        (cluster) => !isSupportedFreeTextCluster(drawnFreeText(cluster)),
       ),
     ),
   );
@@ -739,6 +743,17 @@ function unsupportedAnnotationTextCharacters(annotation: PdfAnnotation) {
 
 function normalizedFreeText(text: string) {
   return text.normalize("NFC");
+}
+
+// Helvetica has no glyph for the characters KEPT_IN_TEXT keeps, so /Contents keeps them and the drawing shows a tab as a space and leaves out the rest, which paint nothing anyway.
+function drawnFreeText(text: string) {
+  return Array.from(text, (character) =>
+    character === "\t"
+      ? " "
+      : character !== "\n" && KEPT_IN_TEXT.test(character)
+        ? ""
+        : character,
+  ).join("");
 }
 
 function isSupportedFreeTextCluster(cluster: string) {

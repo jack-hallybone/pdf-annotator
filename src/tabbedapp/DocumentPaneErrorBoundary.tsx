@@ -3,6 +3,8 @@ import { Component, type ReactNode } from "react";
 type DocumentPaneErrorBoundaryProps = {
   children: ReactNode;
   onCloseDocument: () => void;
+  // The view went down without handing its session back, so everything since that tab was last parked is gone - the caller must stop treating the parked copy as current.
+  onViewCrash: () => void;
 };
 
 type DocumentPaneErrorBoundaryState = { error: Error | null };
@@ -18,6 +20,10 @@ export class DocumentPaneErrorBoundary extends Component<
     return {
       error: error instanceof Error ? error : new Error(String(error)),
     };
+  }
+
+  override componentDidCatch() {
+    this.props.onViewCrash();
   }
 
   override render() {

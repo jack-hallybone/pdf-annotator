@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, PDFName, PDFString } from "pdf-lib";
 
 const fixturePath = fileURLToPath(
   new URL("../tests/fixtures/test-annotated.pdf", import.meta.url),
@@ -163,3 +163,72 @@ test("a downloaded copy can be reopened in the app", async ({ page }) => {
   await page.locator(HIDDEN_FILE_INPUT).setInputFiles(downloadPath);
   await expectFirstPagePainted(page);
 });
+
+// Nothing on the page changes between these clicks, so its view never re-renders: the trust "Always allow" adds has to reach the links it drew beforehand.
+test('"Always allow" reaches the next link on the same page, and still asks before one that adds a recipient', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const opened: string[] = [];
+    (window as unknown as { __opened: string[] }).__opened = opened;
+    window.open = (url) => {
+      opened.push(String(url));
+      return null;
+    };
+  });
+  await page.goto("/");
+  await page.locator(HIDDEN_FILE_INPUT).setInputFiles({
+    name: "links.pdf",
+    mimeType: "application/pdf",
+    buffer: await mailLinksPdf(),
+  });
+
+  const link = (url: string) =>
+    page.getByRole("link", { name: `Open link: ${url}`, exact: true });
+  const dialog = page.locator(".external-link-dialog");
+  const opened = () =>
+    page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
+
+  await link("mailto:support@vendor.example").click();
+  await dialog.getByRole("button", { name: /^Always allow/ }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(opened).toContain("mailto:support@vendor.example");
+
+  await link("mailto:support@vendor.example?subject=Later").click();
+  await expect
+    .poll(opened)
+    .toContain("mailto:support@vendor.example?subject=Later");
+  await expect(dialog).toBeHidden();
+
+  await link("mailto:support@vendor.example?bcc=attacker@evil.example").click();
+  await expect(dialog).toBeVisible();
+  expect(await opened()).not.toContain(
+    "mailto:support@vendor.example?bcc=attacker@evil.example",
+  );
+});
+
+// Three links on one page: a plain address, the same address with a subject, and the same address adding a Bcc.
+async function mailLinksPdf() {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 300]);
+  const urls = [
+    "mailto:support@vendor.example",
+    "mailto:support@vendor.example?subject=Later",
+    "mailto:support@vendor.example?bcc=attacker@evil.example",
+  ];
+  page.node.set(
+    PDFName.of("Annots"),
+    doc.context.obj(
+      urls.map((url, index) =>
+        doc.context.obj({
+          Type: "Annot",
+          Subtype: "Link",
+          Rect: [20, 220 - index * 80, 280, 280 - index * 80],
+          Border: [0, 0, 0],
+          A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+        }),
+      ),
+    ),
+  );
+  return Buffer.from(await doc.save());
+}

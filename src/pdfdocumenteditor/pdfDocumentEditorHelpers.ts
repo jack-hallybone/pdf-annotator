@@ -17,7 +17,11 @@ import type {
   Tool,
   VisiblePageRange,
 } from "./types";
-import { LAZY_PAGE_BUFFER, MAX_BAND_LOAD_PAGES } from "./viewerConfig";
+import {
+  LAZY_PAGE_BUFFER,
+  MAX_BAND_LOAD_PAGES,
+  RENDERED_PAGE_PIXEL_BUDGET,
+} from "./viewerConfig";
 
 export function downloadPdf(bytes: Uint8Array, name: string) {
   const blob = new Blob([uint8ArrayToArrayBuffer(bytes)], {
@@ -168,6 +172,30 @@ export function pageRenderPriority(
   return distance <= LAZY_PAGE_BUFFER ? "near" : "idle";
 }
 
+/** How many pages either side of the displayed range stay rendered: as many as RENDERED_PAGE_PIXEL_BUDGET holds at this page size, and never fewer than the load band, whose pages are rendered as they arrive. */
+export function renderedPageReach(
+  visiblePageRange: VisiblePageRange,
+  pageCanvasPixels: number,
+) {
+  const { first, last } = bandEdges(visiblePageRange);
+  const affordable = Math.floor(
+    RENDERED_PAGE_PIXEL_BUDGET / Math.max(pageCanvasPixels, 1),
+  );
+  return Math.max(
+    LAZY_PAGE_BUFFER,
+    Math.floor((affordable - (last - first + 1)) / 2),
+  );
+}
+
+export function isPageWithinReach(
+  pageIndex: number,
+  visiblePageRange: VisiblePageRange,
+  reach: number,
+) {
+  const { first, last } = bandEdges(visiblePageRange);
+  return pageIndex >= first - reach && pageIndex <= last + reach;
+}
+
 /** Residency, loading and render ranking all read `visiblePageRangeRef`; deriving any of them from the active page leaves displayed pages blank. */
 export function visibleLoadPageIndexes(
   visiblePageRange: VisiblePageRange,
@@ -275,16 +303,4 @@ export function annotationIntersectsPage(
     bounds.y2 > pageBounds.y1 &&
     bounds.y1 < pageBounds.y2
   );
-}
-
-export function measureScrollbarGutter(container: HTMLElement) {
-  const hasHorizontalScrollbar = container.scrollWidth > container.clientWidth;
-
-  return {
-    block: hasHorizontalScrollbar
-      ? Math.max(0, container.offsetHeight - container.clientHeight)
-      : 0,
-    // `.pdfdocumenteditor-scroll-root` reserves this via `scrollbar-gutter: stable` whether or not content overflows, so it is read unconditionally.
-    inline: Math.max(0, container.offsetWidth - container.clientWidth),
-  };
 }

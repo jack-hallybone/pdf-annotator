@@ -81,7 +81,12 @@ import {
   detectReadOnlyReason,
   type PdfDocumentEditorReadOnlyReason,
 } from "./pdfProtection";
-import { canCreateOutputCopy, canEditReadOnlyCopy } from "./readOnlyPolicy";
+import { pdfReadsWithinLimits } from "./pdfParseGate";
+import {
+  canCreateOutputCopy,
+  canEditReadOnlyCopy,
+  isProtectedCopy,
+} from "./readOnlyPolicy";
 import type {
   PdfDocumentEditorCapabilities,
   PdfDownloadTarget,
@@ -427,6 +432,7 @@ export function useDocumentModel({
     currentWorkSignature !== cleanWorkSignature;
   const hostReadOnly = !allowEditing;
   const fileReadOnly = readOnlyReason !== null && !editingEnabled;
+  const protectedCopy = isProtectedCopy(readOnlyReason, editingEnabled);
   const readOnly = fileReadOnly || hostReadOnly;
   const outputCopyAvailable = canCreateOutputCopy(readOnlyReason);
   const saveAvailable =
@@ -1440,6 +1446,10 @@ export function useDocumentModel({
       const loadingTask = startPdfLoading(bytes, generation);
       // Hashed while pdf.js parses in its worker; not needed until later.
       const nextPdfFingerprint = byteFingerprint(bytes);
+      // Checked in a worker of its own beside pdf.js's. A restored tab's bytes passed when the file was opened, or are pdf-lib's own output from bytes that did.
+      const readsWithinLimits = restoredSession
+        ? null
+        : pdfReadsWithinLimits(bytes);
       const loadedPdf = await loadingTask.promise;
       if (loadingTaskRef.current === loadingTask) {
         loadingTaskRef.current = null;
@@ -1466,16 +1476,29 @@ export function useDocumentModel({
             `The selected PDF's notes and comments hold more than ${MAX_DOCUMENT_ANNOTATION_TEXT_CHARACTERS / 1_000_000} million characters of text, which is the current safety limit. It has not been opened.`,
           );
         }
+
+        // Before detectReadOnlyReason, the first thing to hand these bytes to pdf-lib on this thread.
+        const readWithinLimits = await readsWithinLimits;
+        if (!mountedRef.current || generation !== loadGenerationRef.current) {
+          await destroyPdfDocument(loadedPdf);
+          return;
+        }
+        if (!readWithinLimits) {
+          await destroyPdfDocument(loadedPdf);
+          throw new Error(
+            "The selected PDF would take more time or memory to read than the current safety limit allows. It has not been opened.",
+          );
+        }
       }
 
-      // Gates only the banner and the editing toggle, so it need not block page 1.
+      // Only a new file is checked, beside page 1's fetch. A restored tab keeps the reason it was parked with, or its lack of one: that was worked out when the file was opened, or set by the save that wrote these bytes (sessionOutput.ts), and checking again would parse the whole file on every return to the tab.
       const activePage = Math.min(
         options.activePage ?? 0,
         loadedPdf.numPages - 1,
       );
       const [nextReadOnlyReason, firstPage] = await Promise.all([
-        restoredSession?.readOnlyReason
-          ? Promise.resolve(restoredSession.readOnlyReason)
+        restoredSession
+          ? Promise.resolve(restoredSession.readOnlyReason ?? null)
           : detectReadOnlyReason(
               bytes,
               loadedPdf,
@@ -1510,7 +1533,7 @@ export function useDocumentModel({
       downloadTargetRef.current = options.downloadTarget ?? null;
       saveAsTargetRef.current = options.saveAsTarget ?? null;
       const nextEditingEnabled =
-        nextReadOnlyReason === "password protected"
+        nextReadOnlyReason && !canEditReadOnlyCopy(nextReadOnlyReason)
           ? false
           : (restoredSession?.editingEnabled ?? false);
       const nextSaveTarget =
@@ -2554,6 +2577,18 @@ export function useDocumentModel({
           );
         }
 
+        const mergeReadsWithinLimits = await pdfReadsWithinLimits(
+          mergeFile.bytes,
+        );
+        if (superseded()) {
+          return null;
+        }
+        if (!mergeReadsWithinLimits) {
+          throw new Error(
+            "The file you're merging in would take more time or memory to read than the current safety limit allows. It has not been merged in.",
+          );
+        }
+
         const {
           bytes: nextBytes,
           insertAt,
@@ -2829,6 +2864,7 @@ export function useDocumentModel({
               output.sources,
               output.annotations,
             );
+            releaseSavedProtectedCopy();
             reportSaveTargetChange();
           }
           return true;
@@ -2912,6 +2948,7 @@ export function useDocumentModel({
           saveTargetRef.current = result.saveTarget;
         }
         markCurrentWorkClean(output.bytes, output.sources, output.annotations);
+        releaseSavedProtectedCopy();
         reportSaveTargetChange();
       }
       return true;
@@ -2999,8 +3036,18 @@ export function useDocumentModel({
         ? (producedOutput?.annotations ?? currentPersistedAnnotations())
         : currentPersistedAnnotations(),
     );
+    if (producedMatches) {
+      releaseSavedProtectedCopy();
+    }
     reportSaveTargetChange();
     return "saved" as const;
+  }
+
+  // What was saved came out of the writer (see currentPdfOutput), so the file this copy now belongs to claims nothing the original did: from here on it is an ordinary document, and a parked tab keeps its save target.
+  function releaseSavedProtectedCopy() {
+    if (protectedCopy) {
+      setReadOnlyReason(null);
+    }
   }
 
   // A copy is not a save and must not fail like one: a refused download is retried with the unidentifiable annotations left out, and the reader told.
@@ -3090,7 +3137,7 @@ export function useDocumentModel({
 
     const outputAnnotations = validateCurrentPdfOutput();
 
-    if (hasCurrentUnsavedChanges()) {
+    if (hasCurrentUnsavedChanges() || protectedCopy) {
       return annotatedPdfOutput(outputAnnotations);
     }
 
@@ -3170,7 +3217,8 @@ export function useDocumentModel({
 
     if (
       annotationsToWrite.length === 0 &&
-      replaceAnnotationSourceIds.size === 0
+      replaceAnnotationSourceIds.size === 0 &&
+      !protectedCopy
     ) {
       return {
         bytes: pdfBytes,

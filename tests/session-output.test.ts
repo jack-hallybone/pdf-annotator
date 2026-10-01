@@ -6,10 +6,11 @@ import {
   documentEditorSessionOutput,
 } from "../src/pdfdocumenteditor/sessionOutput";
 import { createWorkSignature } from "../src/pdfdocumenteditor/annotationState";
+import { detectReadOnlyReason } from "../src/pdfdocumenteditor/pdfProtection";
 import { markNonSerializable } from "../src/pdfdocumenteditor/sensitiveSession";
 import type { SensitivePdfDocumentEditorSession } from "../src/pdfdocumenteditor/PdfDocumentEditor";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
-import { loadTestPdf } from "./pdfTestUtils";
+import { loadTestPdf, readFixture } from "./pdfTestUtils";
 
 // Save All saves a tab that is not on screen, so it has to serialise one from its parked session alone: mounting each tab in turn would put serialisation inside React lifecycles at the moment they are torn down.
 
@@ -107,6 +108,29 @@ test("a session saved from its parked state comes back clean", async () => {
     createWorkSignature(saved.pdfFingerprint, saved.cleanAnnotations),
   );
   assert.equal(saved.undoStack, original.undoStack);
+});
+
+test("a parked copy of a PDF/A file drops the claim even when saved unchanged, and is an ordinary document afterwards", async () => {
+  const original = await readFixture("test-pdfa.pdf");
+  const copy = session(original, [], {
+    editingEnabled: true,
+    hasUnsavedChanges: false,
+    readOnlyReason: "PDF/A compliant",
+  });
+  const output = await documentEditorSessionOutput(copy);
+
+  assert.equal(await detectReadOnlyReason(output.bytes, null, false), null);
+  assert.equal(
+    documentEditorSessionAfterSave(copy, output).readOnlyReason,
+    null,
+  );
+
+  // Viewed read-only, the same file is copied byte for byte: an unedited PDF/A file is still one.
+  const viewed = session(original, [], {
+    hasUnsavedChanges: false,
+    readOnlyReason: "PDF/A compliant",
+  });
+  assert.equal((await documentEditorSessionOutput(viewed)).bytes, original);
 });
 
 // A session holds full PDF bytes behind a non-enumerable throwing toJSON, and a spread does not carry a non-enumerable property, so a rebuilt one would be a plain object that JSON.stringify - and so localStorage - would serialise.

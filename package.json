@@ -18,7 +18,7 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "security:audit": "npm audit --audit-level=high && npm audit --omit=dev --audit-level=moderate",
+    "security:audit": "npm audit --audit-level=moderate",
     "license:check": "node scripts/license-check.mjs",
     "secrets:scan": "node scripts/secrets-scan.mjs",
     "test": "npm run test:unit && npm run test:dom && npm run test:build",

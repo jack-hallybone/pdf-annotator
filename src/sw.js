@@ -14,6 +14,11 @@ self.addEventListener("activate", (event) =>
   event.waitUntil(sweepPredecessor()),
 );
 
+// Sent by the page on a reload, and only while no other window of the app is open: see src/browserapp/pwa.ts.
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
+
 // Explicit and derived from package.json, not Workbox's shared "workbox" default: several of this fleet's projects precache on one shared origin.
 setCacheNameDetails({ prefix: PACKAGE_NAME });
 cleanupOutdatedCaches();

@@ -5,6 +5,7 @@ import { createServer, type Server } from "node:http";
 import { extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
+import { PDFDocument, PDFName, PDFString } from "pdf-lib";
 
 // Measured on the built artifact, because the dev server rewrites module URLs, injects its own client and sets headers GitHub Pages never sends.
 
@@ -178,3 +179,62 @@ test("the built app loads with a silent console and fetches each asset once", as
     ).toBe(0);
   }
 });
+
+// Enter on a link opens its confirmation dialog, and the same key held down goes on repeating into whatever the dialog focuses. On the built artifact because in development StrictMode runs the dialog's focus trap a second time, which leaves focus on its first button whichever one the dialog asked for.
+test("holding Enter on a link opens its dialog, never the link", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const opened: string[] = [];
+    (window as unknown as { __opened: string[] }).__opened = opened;
+    window.open = (url) => {
+      opened.push(String(url));
+      return null;
+    };
+  });
+  await page.goto(`${origin}${BASE}/`);
+  await page
+    .locator('input[type="file"].tabbedapp-hidden-input')
+    .setInputFiles({
+      name: "linked.pdf",
+      mimeType: "application/pdf",
+      buffer: await linkedPdf(),
+    });
+  const dialog = page.locator(".external-link-dialog");
+
+  await page.locator(".pdfdocumenteditor-external-link").first().focus();
+  await page.keyboard.down("Enter");
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  // A second keydown before the keyup is what Playwright sends as a key repeat.
+  await page.keyboard.down("Enter");
+  await page.keyboard.up("Enter");
+
+  await expect(dialog).toBeHidden();
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { __opened: string[] }).__opened,
+    ),
+  ).toEqual([]);
+});
+
+async function linkedPdf() {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([300, 300]);
+  page.node.set(
+    PDFName.of("Annots"),
+    doc.context.obj([
+      doc.context.obj({
+        Type: "Annot",
+        Subtype: "Link",
+        Rect: [20, 200, 280, 280],
+        Border: [0, 0, 0],
+        A: {
+          Type: "Action",
+          S: "URI",
+          URI: PDFString.of("https://example.com/held-enter"),
+        },
+      }),
+    ]),
+  );
+  return Buffer.from(await doc.save());
+}

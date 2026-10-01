@@ -547,14 +547,18 @@ test("a Save As that fails leaves that file listed, ready to retry", async ({
 
   // The first Save As resolved fails to write; the second succeeds.
   await page.evaluate(() => {
-    const files = (
-      window as unknown as { __savedFiles: Map<string, Uint8Array> }
-    ).__savedFiles;
+    const scope = window as unknown as {
+      __refusedWrites: number;
+      __savedFiles: Map<string, Uint8Array>;
+    };
+    const files = scope.__savedFiles;
     const original = files.set.bind(files);
     let writes = 0;
+    scope.__refusedWrites = 0;
     files.set = (name: string, value: Uint8Array) => {
       writes += 1;
       if (writes === 1 && value.length > 0) {
+        scope.__refusedWrites += 1;
         throw new Error("the disk said no");
       }
       return original(name, value);
@@ -570,6 +574,20 @@ test("a Save As that fails leaves that file listed, ready to retry", async ({
     .getByRole("button", { name: "Save as..." })
     .first()
     .click();
+
+  // Until the write fails, the file is listed and dirty anyway, and a press while a save is still running is ignored: wait for the failure and for the app to be idle again.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { __refusedWrites: number }).__refusedWrites,
+      ),
+    )
+    .toBe(1);
+  await expect(page.locator(".tabbedapp-shell")).toHaveAttribute(
+    "data-busy",
+    "false",
+  );
 
   // Still listed and still dirty: the failed write did not silently drop it.
   await expect(destinationDialog).toBeVisible();
@@ -587,6 +605,8 @@ test("a Save As that fails leaves that file listed, ready to retry", async ({
 async function stubSaveFilePicker(page: Page) {
   await page.addInitScript(() => {
     const files = new Map<string, Uint8Array>();
+    // A real file keeps its modified time between reads, and an in-place save refuses one that seems to have changed since it last wrote it.
+    const modifiedAt = new Map<string, number>();
     (
       window as unknown as { __savedFiles: Map<string, Uint8Array> }
     ).__savedFiles = files;
@@ -626,6 +646,7 @@ async function stubSaveFilePicker(page: Page) {
                 offset += part.length;
               }
               files.set(name, merged);
+              modifiedAt.set(name, Date.now());
             },
             async abort() {},
           };
@@ -633,6 +654,7 @@ async function stubSaveFilePicker(page: Page) {
         async getFile() {
           const stored = files.get(name) ?? new Uint8Array();
           return new File([stored.slice().buffer], name, {
+            lastModified: modifiedAt.get(name),
             type: "application/pdf",
           });
         },
@@ -837,6 +859,119 @@ test("closing a dirty tab can save it instead of discarding it", async ({
   await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(0);
   expect(await savedFileNames(page)).toEqual(["Untitled.pdf"]);
 });
+
+// A crashed view takes every edit since its tab was last parked with it, so the parked copy is older than what the reader saw - and older than the file too, once they have saved since. Writing it back would silently undo that save.
+test("a crashed tab's parked copy is never saved over its file, and closing that tab still asks", async ({
+  page,
+}) => {
+  await stubSaveFilePicker(page);
+  await armViewCrash(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "New tab" }).click();
+  await page.getByRole("menuitem", { name: /New Blank A4/i }).click();
+  await expect(page.locator(".page-jump-control")).toBeVisible();
+
+  // Save All parks the blank page first - the copy that goes stale - and its Save As gives the tab a file of its own.
+  await page.getByRole("button", { name: /save all/i }).click();
+  const destinationDialog = page.getByRole("dialog", {
+    name: "Choose where to save",
+  });
+  await destinationDialog.getByRole("button", { name: "Save as..." }).click();
+  await expect(destinationDialog).toBeHidden();
+  await expect.poll(() => savedFileNames(page)).toEqual(["Untitled.pdf"]);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(0);
+  const blank = await savedFile(page, "Untitled.pdf");
+
+  // One stroke saved in place, then one that is not. The unsaved marker trails each change by a render, so the save is waited for in the file itself.
+  await drawStroke(page, 0.15);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+  await page.keyboard.press("Control+s");
+  await expect.poll(() => savedFile(page, "Untitled.pdf")).not.toEqual(blank);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(0);
+  expect(await savedFileNames(page)).toEqual(["Untitled.pdf"]);
+  const saved = await savedFile(page, "Untitled.pdf");
+  await drawStroke(page, 0.3);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+
+  await crashDocumentView(page);
+
+  await page.getByRole("button", { name: /save all/i }).click();
+  await expect(destinationDialog).toBeVisible();
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+  expect(await savedFile(page, "Untitled.pdf")).toEqual(saved);
+  await destinationDialog.getByRole("button", { name: "Cancel" }).click();
+
+  // "Save changes" would take that same stale copy, so it stops at the destination dialog too.
+  await page.getByRole("button", { name: "Close this tab" }).click();
+  await expect(page.locator(".tabbedapp-close-dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(destinationDialog).toBeVisible();
+  await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(1);
+  expect(await savedFile(page, "Untitled.pdf")).toEqual(saved);
+  await destinationDialog.getByRole("button", { name: "Cancel" }).click();
+
+  await page.getByRole("button", { name: "Close this tab" }).click();
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await expect(page.locator(".tabbedapp-document-tab")).toHaveCount(0);
+});
+
+// No real crash to hand, so one is injected: once armed, the next ResizeObserver constructed throws, and opening the sidebar is the next thing in a document's view to construct one.
+async function armViewCrash(page: Page) {
+  await page.addInitScript(() => {
+    const crash = window as unknown as { __crashNextResizeObserver?: boolean };
+    const NativeResizeObserver = window.ResizeObserver;
+    window.ResizeObserver = class extends NativeResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        if (crash.__crashNextResizeObserver) {
+          crash.__crashNextResizeObserver = false;
+          throw new Error("injected view crash");
+        }
+        super(callback);
+      }
+    };
+  });
+}
+
+async function crashDocumentView(page: Page) {
+  await page.evaluate(() => {
+    (
+      window as unknown as { __crashNextResizeObserver?: boolean }
+    ).__crashNextResizeObserver = true;
+  });
+  await page.getByRole("button", { name: /show sidebar/i }).click();
+  await expect(
+    page.getByRole("button", { name: "Close this tab" }),
+  ).toBeVisible();
+}
+
+async function drawStroke(page: Page, atHeight: number) {
+  await page.getByRole("button", { name: "Pen 1", exact: true }).click();
+  const box = await page
+    .locator(".pdfdocumenteditor-page")
+    .first()
+    .boundingBox();
+  if (!box) {
+    throw new Error("no page to draw on");
+  }
+
+  const y = box.y + box.height * atHeight;
+  await page.mouse.move(box.x + box.width * 0.2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.8, y + 40, { steps: 20 });
+  await page.mouse.up();
+}
+
+async function savedFile(page: Page, name: string) {
+  return page.evaluate(
+    (fileName) =>
+      Array.from(
+        (
+          window as unknown as { __savedFiles: Map<string, Uint8Array> }
+        ).__savedFiles.get(fileName) ?? [],
+      ),
+    name,
+  );
+}
 
 test("a downloaded copy carries the comment and the star for another reader", async ({
   page,

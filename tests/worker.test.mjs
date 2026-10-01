@@ -146,6 +146,153 @@ test("the predecessor's caches are swept, and only this project's", async (t) =>
   );
 });
 
+// The first load in a fresh context is never controlled (no clientsClaim, see `activated` above); a reload past activation is.
+async function controlledPage(context) {
+  const page = await installer(context);
+  await page.reload({ waitUntil: "networkidle" });
+  assert.ok(
+    await page.evaluate(() => !!navigator.serviceWorker.controller),
+    "the page is still not controlled after a reload past activation",
+  );
+  return page;
+}
+
+// Polls inside the page, since page.waitForFunction settles at once on an async predicate; update() is re-issued because a lone call can stall.
+async function waitForWaitingWorker(page, timeoutMs) {
+  return page.evaluate(async (timeout) => {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      registration?.update().catch(() => {});
+      if (registration?.waiting?.state === "installed") return true;
+      await new Promise((done) => setTimeout(done, 200));
+    }
+    return false;
+  }, timeoutMs);
+}
+
+async function registrationState(page) {
+  return page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return {
+      active: registration?.active?.state ?? null,
+      waiting: registration?.waiting?.state ?? null,
+      controller: !!navigator.serviceWorker.controller,
+    };
+  });
+}
+
+async function waitFor(predicate, timeoutMs, intervalMs = 200) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (await predicate()) return true;
+    await new Promise((done) => setTimeout(done, intervalMs));
+  }
+  return false;
+}
+
+test("a reload after an update has downloaded switches to the new worker, alone in the app", async (t) => {
+  const context = await browser.newContext();
+  t.after(async () => await context.close());
+
+  site.reset();
+  const page = await controlledPage(context);
+
+  site.redeploy();
+  assert.ok(
+    await waitForWaitingWorker(page, 60_000),
+    "a redeployed sw.js never reached the waiting state",
+  );
+
+  let loads = 0;
+  // DOMContentLoaded, not load: the self-reload can replace the reloaded document before its load event fires.
+  page.on("domcontentloaded", () => loads++);
+  await page.reload();
+  // The page's own second load, once the new worker takes over (see applyWaitingUpdate in src/browserapp/pwa.ts).
+  assert.ok(
+    await waitFor(() => loads >= 2, 20_000),
+    `the page did not self-reload a second time after the takeover (loads=${loads})`,
+  );
+
+  const state = await registrationState(page);
+  assert.equal(state.waiting, null, "the waiting worker is still there");
+  assert.equal(state.active, "activated", "no worker ended up in charge");
+  assert.ok(state.controller, "the reloaded page is not controlled");
+});
+
+test("a second open window blocks the takeover until it closes", async (t) => {
+  const context = await browser.newContext();
+  t.after(async () => await context.close());
+
+  site.reset();
+  const page1 = await controlledPage(context);
+
+  // A fresh navigation after activation is controlled immediately, with no clientsClaim needed for that.
+  const page2 = await context.newPage();
+  await page2.goto(APP, { waitUntil: "networkidle" });
+  assert.ok(
+    await page2.evaluate(() => !!navigator.serviceWorker.controller),
+    "the second window is not controlled",
+  );
+
+  site.redeploy();
+  assert.ok(
+    await waitForWaitingWorker(page1, 60_000),
+    "a redeployed sw.js never reached the waiting state",
+  );
+
+  let loads1 = 0;
+  // DOMContentLoaded, not load: the self-reload can replace the reloaded document before its load event fires.
+  page1.on("domcontentloaded", () => loads1++);
+  await page1.reload();
+  // Given time to prove nothing happens, rather than only that it hasn't happened yet.
+  await new Promise((done) => setTimeout(done, 3_000));
+  assert.equal(
+    loads1,
+    1,
+    "the page self-reloaded although a second window is still open",
+  );
+  let state = await registrationState(page1);
+  assert.equal(
+    state.waiting,
+    "installed",
+    "the waiting worker was consumed although a second window is still open",
+  );
+  assert.equal(
+    state.active,
+    "activated",
+    "the old worker is no longer in charge",
+  );
+
+  await page2.close();
+  assert.ok(
+    await waitFor(
+      async () =>
+        (await page1.evaluate(
+          async () =>
+            (await navigator.locks.query()).held.filter(
+              (lock) => lock.name === "pdf-annotator-window",
+            ).length,
+        )) <= 1,
+      5_000,
+    ),
+    "the closed window still holds its lock",
+  );
+  loads1 = 0;
+  await page1.reload();
+  assert.ok(
+    await waitFor(() => loads1 >= 2, 20_000),
+    `the page did not self-reload after the last other window closed (loads=${loads1})`,
+  );
+  state = await registrationState(page1);
+  assert.equal(
+    state.waiting,
+    null,
+    "the waiting worker is still there once the other window is gone",
+  );
+  assert.equal(state.active, "activated", "no worker ended up in charge");
+});
+
 after(async () => {
   await browser.close();
   site.close();

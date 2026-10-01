@@ -8,6 +8,7 @@ import {
   normalizeAnnotationLayout,
 } from "./annotationState";
 import { writableAnnotations } from "./pdfDocumentEditorHelpers";
+import { isProtectedCopy } from "./readOnlyPolicy";
 import type { SensitivePdfDocumentEditorSession } from "./PdfDocumentEditor";
 import { markNonSerializable } from "./sensitiveSession";
 import { remapHistoryAnnotationSources } from "./historyStack";
@@ -35,8 +36,12 @@ export async function documentEditorSessionOutput(
     session.cleanAnnotations,
   );
   assertAnnotationsTextIsSupported(annotationsToWrite);
+  const protectedCopy = isProtectedCopy(
+    session.readOnlyReason,
+    session.editingEnabled,
+  );
 
-  if (!session.hasUnsavedChanges) {
+  if (!session.hasUnsavedChanges && !protectedCopy) {
     return {
       bytes: session.cleanPdfBytes ?? session.pdfBytes,
       sources: null,
@@ -52,7 +57,8 @@ export async function documentEditorSessionOutput(
 
   if (
     annotationsToWrite.length === 0 &&
-    replaceAnnotationSourceIds.size === 0
+    replaceAnnotationSourceIds.size === 0 &&
+    !protectedCopy
   ) {
     return { bytes: session.pdfBytes, sources: null };
   }
@@ -110,5 +116,12 @@ export function documentEditorSessionAfterSave(
     hasUnsavedChanges: false,
     pdfBytes: savedBytes,
     pdfFingerprint,
+    // Its output came out of the writer (see documentEditorSessionOutput), so a protected copy is an ordinary document once saved.
+    readOnlyReason: isProtectedCopy(
+      session.readOnlyReason,
+      session.editingEnabled,
+    )
+      ? null
+      : session.readOnlyReason,
   });
 }

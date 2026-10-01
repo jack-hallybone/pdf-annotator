@@ -55,10 +55,12 @@ test("Ctrl+O opens the same file picker as the Open PDFs button", async ({
     });
   });
 
+  // Listened for before goto(): started just before the key press, Playwright's file-chooser interception could still be switching on when a slow page opened the picker.
+  const fileChooserPromise = page.waitForEvent("filechooser");
+
   await page.goto("/");
   await expect(page.getByRole("button", { name: "Open PDFs" })).toBeVisible();
 
-  const fileChooserPromise = page.waitForEvent("filechooser");
   await page.keyboard.press("Control+o");
   const fileChooser = await fileChooserPromise;
   await fileChooser.setFiles(await pdfPath("via-ctrl-o"));

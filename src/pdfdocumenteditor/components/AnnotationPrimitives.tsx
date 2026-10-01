@@ -205,8 +205,9 @@ export function NotePopover({
 
 function notePopoverSize(text: string) {
   const lines = text.trim().length > 0 ? text.split(/\r?\n/) : [""];
-  const longestLine = Math.max(
-    ...lines.map((line) => line.trimEnd().length),
+  // Folded rather than spread: an imported note can have more lines than a call takes arguments.
+  const longestLine = lines.reduce(
+    (longest, line) => Math.max(longest, line.trimEnd().length),
     4,
   );
   return {

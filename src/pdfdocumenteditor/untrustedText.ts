@@ -3,7 +3,9 @@ import { stripHiddenCharacters } from "../hiddenCharacters";
 
 /* What is removed is a set of Unicode properties, not a list of characters: every invisible code point lets two different strings paint the same row. */
 
-const KEPT_CONTROL = "\n";
+// The exceptions are a list, of what text is made of though it paints nothing: a line break and a tab lay a note out, ZWNJ and ZWJ join letters (Persian, Indic scripts) and emoji, variation selectors pick an emoji's or an ideograph's form, and tag characters spell a flag. Bidi controls and every other invisible still go.
+export const KEPT_IN_TEXT =
+  /\t|\n|\u200c|\u200d|[\ufe00-\ufe0f]|[\u{e0020}-\u{e007f}]|[\u{e0100}-\u{e01ef}]/u;
 
 /** At most `maxLength` characters; a non-string reads as absent. */
 export function boundedDocumentText(value: unknown, maxLength: number) {
@@ -11,7 +13,7 @@ export function boundedDocumentText(value: unknown, maxLength: number) {
     return "";
   }
 
-  return stripHiddenCharacters(value.replace(/\r\n?/g, "\n"), KEPT_CONTROL)
+  return stripHiddenCharacters(value.replace(/\r\n?/g, "\n"), KEPT_IN_TEXT)
     .slice(0, maxLength)
     .trim();
 }
@@ -32,5 +34,5 @@ export function strippedLiveText(value: unknown) {
     return "";
   }
 
-  return stripHiddenCharacters(value.replace(/\r\n?/g, "\n"), KEPT_CONTROL);
+  return stripHiddenCharacters(value.replace(/\r\n?/g, "\n"), KEPT_IN_TEXT);
 }

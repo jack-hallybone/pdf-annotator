@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import {
   PDFArray,
   PDFDict,
@@ -10,9 +10,11 @@ import {
   PDFRawStream,
   PDFRef,
   PDFString,
+  decodePDFRawStream,
 } from "pdf-lib";
 import {
   detectReadOnlyReason,
+  pdfLooksPdfA,
   pdfLooksSignedOrCertified,
   pdfLooksEncrypted,
 } from "../src/pdfdocumenteditor/pdfProtection";
@@ -40,6 +42,10 @@ import {
   loadTestPdf,
   readFixture,
 } from "./pdfTestUtils";
+
+// The protection check reads pdf.js's page list, and PDF.js's browser entry touches these globals while the module is evaluated.
+installPdfJsGlobals();
+const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
 test("protected fixture PDFs are detected before editing is enabled", async () => {
   const cases = [
@@ -71,6 +77,21 @@ test("protected fixture PDFs are detected before editing is enabled", async () =
   }
 });
 
+// Every file is checked as it opens, so the check runs on the way to page 1: its structural checks, the page-list comparison among them, share one pdf-lib parse rather than loading the file again for each.
+test("an ordinary file is parsed once while checking it for protection", async () => {
+  const bytes = await readFixture("test-annotated.pdf");
+  const loadingTask = getDocument({ data: bytes.slice() });
+  const shown = await loadingTask.promise;
+  const load = mock.method(PDFDocument, "load");
+  try {
+    assert.equal(await detectReadOnlyReason(bytes, shown, false), null);
+    assert.equal(load.mock.callCount(), 1);
+  } finally {
+    load.mock.restore();
+    await loadingTask.destroy();
+  }
+});
+
 test("pdf-lib encryption detection identifies only the password fixture", async () => {
   const encrypted = await withoutConsoleWarnings(() =>
     readFixture("test-password-123456.pdf").then(pdfLooksEncrypted),
@@ -83,6 +104,36 @@ test("pdf-lib encryption detection identifies only the password fixture", async 
 
   assert.equal(encrypted, true);
   assert.deepEqual(unencrypted, [false, false, false]);
+});
+
+// The scans jump from one native search for a marker's first byte to the next, so a match has to survive the other case of that byte coming first, sitting in the file's last bytes, and a stream it must skip.
+test("marker scans find a claim in either case or behind an escape, up to the last byte, and never inside a stream", async () => {
+  const encode = (text: string) => new TextEncoder().encode(text);
+
+  assert.equal(
+    await pdfLooksPdfA(encode(`${"p".repeat(64)}PDFAID:PART`)),
+    true,
+  );
+  assert.equal(
+    await pdfLooksPdfA(encode(`${"P".repeat(64)}pdfaid:conformance`)),
+    true,
+  );
+  // The scan decodes a #xx escape wherever it sits, so a claim can open with one.
+  assert.equal(await pdfLooksPdfA(encode("/S /#47TS_PDFA1")), true);
+  assert.equal(await pdfLooksPdfA(encode("/S /#67ts_pdfa1")), true);
+  assert.equal(pdfLooksSignedOrCertified(encode("%ends /SigFlags")), true);
+  assert.equal(
+    pdfLooksSignedOrCertified(
+      encode("1 0 obj << /Length 9 >> stream\n/SigFlags\nendstream endobj"),
+    ),
+    false,
+  );
+  assert.equal(
+    pdfLooksSignedOrCertified(
+      encode("1 0 obj << >> stream\nxx\nendstream endobj /ByteRange"),
+    ),
+    true,
+  );
 });
 
 test("signature markers are detected across the full capped byte range", () => {
@@ -201,6 +252,32 @@ test("text annotations refuse unsupported characters before writing output", asy
       error.characters.length === 1 &&
       error.characters.includes("\u2603\ufe0e") &&
       error.message.includes("unsupported character"),
+  );
+});
+
+test("a text box keeps a tab, a joiner and a selector in its text, and draws what Helvetica has", async () => {
+  const bytes = await readFixture("test-annotated.pdf");
+  const text: PdfAnnotation = {
+    color: [0.263, 0.58, 0.827],
+    fontSize: 12,
+    id: "test-kept-text",
+    kind: "freeText",
+    opacity: 1,
+    pageIndex: 0,
+    rect: { x1: 72, x2: 280, y1: 720, y2: 750 },
+    text: "Qty\t5 \u00a9\ufe0f a\u200db",
+  };
+
+  const output = await writePdfAnnotations(bytes, [text], {
+    replaceAnnotationSourceIds: [text.id],
+    replacePageIndexes: [0],
+  });
+
+  assert.equal(await annotationContentsByName(output, text.id), text.text);
+  // "Qty 5 © ab" in WinAnsi: the tab drawn as a space, the selector and the joiner not at all.
+  assert.match(
+    await freeTextAppearanceContent(output, 0, text.id),
+    /<517479203520A9206162> Tj/i,
   );
 });
 
@@ -810,6 +887,20 @@ function assertExistingSubtypeCountsPreserved(
   }
 }
 
+function installPdfJsGlobals() {
+  class FakeDOMMatrix {}
+  class FakeImageData {}
+  class FakePath2D {}
+  const globals = globalThis as {
+    DOMMatrix?: unknown;
+    ImageData?: unknown;
+    Path2D?: unknown;
+  };
+  globals.DOMMatrix ??= FakeDOMMatrix;
+  globals.ImageData ??= FakeImageData;
+  globals.Path2D ??= FakePath2D;
+}
+
 async function withoutConsoleWarnings<T>(task: () => Promise<T>) {
   const originalError = console.error;
   const originalWarn = console.warn;
@@ -824,6 +915,33 @@ async function withoutConsoleWarnings<T>(task: () => Promise<T>) {
 }
 
 async function freeTextAppearanceBBoxWidth(
+  bytes: Uint8Array,
+  pageIndex: number,
+  nm: string,
+) {
+  const formStream = await freeTextAppearanceStream(bytes, pageIndex, nm);
+  const bbox = formStream.dict.lookupMaybe(PDFName.of("BBox"), PDFArray);
+  if (!bbox || bbox.size() < 4) {
+    throw new Error("expected a BBox array");
+  }
+
+  const x1 = bbox.lookupMaybe(0, PDFNumber)?.asNumber() ?? 0;
+  const x2 = bbox.lookupMaybe(2, PDFNumber)?.asNumber() ?? 0;
+  return Math.abs(x2 - x1);
+}
+
+async function freeTextAppearanceContent(
+  bytes: Uint8Array,
+  pageIndex: number,
+  nm: string,
+) {
+  const formStream = await freeTextAppearanceStream(bytes, pageIndex, nm);
+  return new TextDecoder("latin1").decode(
+    decodePDFRawStream(formStream).decode(),
+  );
+}
+
+async function freeTextAppearanceStream(
   bytes: Uint8Array,
   pageIndex: number,
   nm: string,
@@ -856,14 +974,7 @@ async function freeTextAppearanceBBoxWidth(
       throw new Error("expected a Form XObject appearance stream");
     }
 
-    const bbox = formStream.dict.lookupMaybe(PDFName.of("BBox"), PDFArray);
-    if (!bbox || bbox.size() < 4) {
-      throw new Error("expected a BBox array");
-    }
-
-    const x1 = bbox.lookupMaybe(0, PDFNumber)?.asNumber() ?? 0;
-    const x2 = bbox.lookupMaybe(2, PDFNumber)?.asNumber() ?? 0;
-    return Math.abs(x2 - x1);
+    return formStream;
   }
 
   throw new Error(`annotation ${nm} not found`);

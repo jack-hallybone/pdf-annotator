@@ -23,11 +23,9 @@ const BLANK_GLYPH = "\u2800";
 
 const LAST_CODE_POINT = 0x10ffff;
 
-// A line break is content in a note, and a carriage return is normalised to one before the strip runs.
-const KEPT_IN_NOTE_TEXT = new Map([
-  ["\n", "a\nb"],
-  ["\r", "a\nb"],
-]);
+// The one list here, and a decided one: what a note's text is made of though it paints nothing. A line break and a tab lay it out (a carriage return is normalised to a line break before the strip runs), ZWNJ and ZWJ join letters and emoji, variation selectors pick a form, tag characters spell a flag. Everything else the sweep finds still has to go.
+const KEPT_IN_NOTE_TEXT =
+  /^(?:\t|\n|\r|\u200c|\u200d|[\ufe00-\ufe0f]|[\u{e0020}-\u{e007f}]|[\u{e0100}-\u{e01ef}])$/u;
 
 function invisibleCodePoints() {
   const points: string[] = [];
@@ -73,18 +71,30 @@ test("no invisible code point survives the shared strip", () => {
   );
 });
 
-test("no invisible code point reaches a string a reader sees", () => {
+test("no invisible code point reaches a string a reader sees, unless the text is made of it", () => {
+  // Direction is never the text's own: a bidi control kept here would be the spoofing the strip exists to stop.
+  assert.deepEqual(
+    INVISIBLE_CHARACTERS.filter(
+      (char) => KEPT_IN_NOTE_TEXT.test(char) && /\p{Bidi_Control}/u.test(char),
+    ).map(name),
+    [],
+    "a bidi control is on the kept list",
+  );
+
   const survivors: string[] = [];
+  const lost: string[] = [];
   for (const char of INVISIBLE_CHARACTERS) {
-    const kept = KEPT_IN_NOTE_TEXT.get(char);
-    const expected = kept ?? "ab";
+    const keeps = KEPT_IN_NOTE_TEXT.test(char);
+    const expected = keeps ? `a${char === "\r" ? "\n" : char}b` : "ab";
+    // A title is one line, so a kept line break or tab collapses to a space there.
+    const expectedLine = keeps && /\s/.test(char) ? "a b" : expected;
     if (
       strippedDocumentText(`a${char}b`) !== expected ||
       strippedLiveText(`a${char}b`) !== expected ||
       boundedDocumentText(`a${char}b`, 100) !== expected ||
-      boundedDocumentLine(`a${char}b`, 100) !== (kept ? "a b" : "ab")
+      boundedDocumentLine(`a${char}b`, 100) !== expectedLine
     ) {
-      survivors.push(char);
+      (keeps ? lost : survivors).push(char);
     }
   }
   assert.deepEqual(
@@ -92,6 +102,27 @@ test("no invisible code point reaches a string a reader sees", () => {
     [],
     "an invisible code point reached the annotations sidebar",
   );
+  assert.deepEqual(
+    lost.map(name),
+    [],
+    "a character the text is made of was stripped out of it",
+  );
+});
+
+// Each of these lost a character to the rule before it had exceptions, and read differently for it: a Persian word its ZWNJ, a Sinhala conjunct and an emoji family their ZWJs, a heart its emoji presentation, an ideograph its variant, a flag its tag characters, a table its tabs.
+test("text that needs its joiners, selectors, tag characters and tabs keeps them", () => {
+  for (const value of [
+    "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645",
+    "\u0dc1\u0dca\u200d\u0dbb\u0dd3",
+    "\u{1f468}\u200d\u{1f469}\u200d\u{1f467}",
+    "\u2764\ufe0f",
+    "\u845b\u{e0100}",
+    "\u{1f3f4}\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}",
+    "Qty\t5\nPrice\t20",
+  ]) {
+    assert.equal(strippedDocumentText(value), value, JSON.stringify(value));
+    assert.equal(strippedLiveText(value), value, JSON.stringify(value));
+  }
 });
 
 // strippedLiveText backs a controlled textarea's onChange (the sticky note popover): it must strip the same characters as strippedDocumentText, but never trim, or a space or newline the reader just typed at the end of the text would disappear before a next word or line could follow it.

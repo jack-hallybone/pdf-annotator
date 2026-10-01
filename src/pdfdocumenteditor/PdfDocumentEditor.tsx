@@ -77,6 +77,7 @@ import {
   scrollContainerPaddingTop,
 } from "./scrollGeometry";
 import { usePdfDocumentEditorZoom } from "./usePdfDocumentEditorZoom";
+import { useRenderLatestRef } from "./useRenderLatestRef";
 import {
   attachGestureRoot,
   markGestureRootTouched,
@@ -93,6 +94,7 @@ import type {
   PdfDocumentEditorViewPosition,
   PdfDocumentEditorViewSnapshot,
 } from "./viewSnapshot";
+import { PageScrollbar } from "./components/PageScrollbar";
 import { PdfPagePlaceholder } from "./components/PdfPagePlaceholder";
 import {
   annotationIntersectsPage,
@@ -100,10 +102,11 @@ import {
   isTextEntryTarget,
   isZoomInShortcut,
   isZoomShortcut,
-  measureScrollbarGutter,
   pageIndexFromElement,
   pagePdfBounds,
+  isPageWithinReach,
   pageRenderPriority,
+  renderedPageReach,
   scheduleAfterVisiblePaint,
   usesAnnotationLayer,
   visibleLoadPageIndexes,
@@ -112,6 +115,12 @@ import {
 // One view of a document useDocumentModel owns: every field this file declares is one a second viewport over the same document would need its own copy of.
 const EMPTY_ANNOTATIONS: PdfAnnotation[] = [];
 const DEFAULT_FULLSCREEN_CLASS = "document-shell--fullscreen";
+
+// The page's own size, not the document's, so a page of another size keeps its height while it has no canvas.
+function loadedPageSize(page: PDFPageProxy): PageSize {
+  const { height, width } = page.getViewport({ scale: 1 });
+  return { height, width };
+}
 
 // Re-exported here because this file is what src/pdfdocumenteditor/index.ts names.
 export type {
@@ -173,7 +182,7 @@ export type PdfDocumentEditorHandle = {
   redo: () => Promise<void>;
   undo: () => Promise<void>;
 
-  // `remeasureViewport` is how host chrome whose geometry changed asks for the gutters to be measured again.
+  // `remeasureViewport` is how host chrome whose geometry changed asks for the scrollbars to be measured again.
   ensurePageLoaded: (page: PDFPageProxy, pageIndex: number) => void;
   fitHeight: () => void;
   fitWidth: () => void;
@@ -334,6 +343,8 @@ export const PdfDocumentEditorViewport = forwardRef<
   const initialVisualReadyRef = useRef(false);
   const afterInitialVisualReadyRef = useRef<Array<() => void>>([]);
   const [initialVisualReady, setInitialVisualReady] = useState(false);
+  // The page the view opens on stays rendered: a restored tab scrolls to it only after it has painted, from wherever the range was first measured.
+  const [initialVisualPageIndex, setInitialVisualPageIndex] = useState(0);
   const [activePageIndex, setActivePageIndex] = useState(0);
   const [selectedAnnotationIds, setSelectedAnnotationIds] = useState<string[]>(
     [],
@@ -447,14 +458,13 @@ export const PdfDocumentEditorViewport = forwardRef<
     pageSize,
     activePageIndex,
   });
+  // A stable identity that always calls the host's latest: PdfPageView's memo ignores callback props, so a page that has not re-rendered keeps whichever callback it was first handed - one from before an "Always allow", say.
+  const onExternalLinkRequestRef = useRenderLatestRef(onExternalLinkRequest);
   const handleExternalLinkRequest = useCallback(
-    (url: string) => {
-      onExternalLinkRequest?.(url);
-    },
-    [onExternalLinkRequest],
+    (url: string) => onExternalLinkRequestRef.current?.(url),
+    [onExternalLinkRequestRef],
   );
-  const [scrollbarGutterBlock, setScrollbarGutterBlock] = useState(0);
-  const [scrollbarGutterInline, setScrollbarGutterInline] = useState(0);
+  const [scrollsSideways, setScrollsSideways] = useState(false);
   const documentTitle =
     pageCount > 0
       ? `${hasUnsavedChanges ? "*" : ""}${fileName}`
@@ -463,11 +473,11 @@ export const PdfDocumentEditorViewport = forwardRef<
     () =>
       ({
         ...style,
-        "--app-scrollbar-block": `${scrollbarGutterBlock}px`,
-        "--app-scrollbar-inline": `${scrollbarGutterInline}px`,
+        // How wide the page renders at the current zoom, in CSS px - styles.css's --app-page-gutter-inline reads this to let the side padding give way once the page itself needs that room. 0 (no page yet) keeps the full padding, same as before this existed.
+        "--app-page-natural-width": `${(pageSize?.width ?? 0) * scale}px`,
         "--app-selection-button-size": `${SELECTION_BUTTON_SIZE}px`,
       }) as CSSProperties,
-    [scrollbarGutterBlock, scrollbarGutterInline, style],
+    [pageSize, scale, style],
   );
   activePageIndexRef.current = activePageIndex;
   const handleClipboardPasteEvent = useEventCallback(handleClipboardPaste);
@@ -501,6 +511,7 @@ export const PdfDocumentEditorViewport = forwardRef<
 
   function resetInitialVisualReadiness(pageIndex = 0) {
     initialVisualPageIndexRef.current = pageIndex;
+    setInitialVisualPageIndex(pageIndex);
     initialBaseLayerReadyRef.current = false;
     initialAnnotationsReadyRef.current = false;
     initialVisualReadyRef.current = false;
@@ -744,64 +755,6 @@ export const PdfDocumentEditorViewport = forwardRef<
       document.title = documentTitle;
     }
   }, [manageDocumentTitle, onDocumentTitleChange, pageCount, documentTitle]);
-
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !initialVisualReady) {
-      setScrollbarGutterInline(0);
-      return;
-    }
-
-    // Measured once rather than reactively, so a recalculation cannot remap an in-progress scrollbar thumb drag.
-    const updateInline = () => {
-      setScrollbarGutterInline((current) => {
-        const next = measureScrollbarGutter(container).inline;
-        return current === next ? current : next;
-      });
-    };
-    updateInline();
-    window.addEventListener("resize", updateInline);
-    return () => window.removeEventListener("resize", updateInline);
-  }, [initialVisualReady]);
-
-  useLayoutEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container || !initialVisualReady) {
-      setScrollbarGutterBlock(0);
-      return;
-    }
-
-    let frame = 0;
-    const updateScrollbarGutter = () => {
-      frame = 0;
-      setScrollbarGutterBlock((current) => {
-        const next = measureScrollbarGutter(container).block;
-        return current === next ? current : next;
-      });
-    };
-    const scheduleUpdate = () => {
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-      frame = window.requestAnimationFrame(updateScrollbarGutter);
-    };
-
-    scheduleUpdate();
-    const observer = new ResizeObserver(scheduleUpdate);
-    observer.observe(container);
-    if (pagesLayerRef.current) {
-      observer.observe(pagesLayerRef.current);
-    }
-    window.addEventListener("resize", scheduleUpdate);
-
-    return () => {
-      if (frame) {
-        window.cancelAnimationFrame(frame);
-      }
-      observer.disconnect();
-      window.removeEventListener("resize", scheduleUpdate);
-    };
-  }, [chromeGeometryVersion, initialVisualReady, pageSize, pageCount, scale]);
 
   useEffect(() => {
     if (!enableGlobalShortcuts) {
@@ -2141,6 +2094,13 @@ export const PdfDocumentEditorViewport = forwardRef<
     selectedAnnotationIds,
   };
 
+  const outputScale = scale * (window.devicePixelRatio || 1);
+  // Loaded pages beyond this reach keep their place in the column but give up their canvases; see RENDERED_PAGE_PIXEL_BUDGET.
+  const renderReach = renderedPageReach(
+    visiblePageRange,
+    (pageSize?.width ?? 0) * (pageSize?.height ?? 0) * outputScale ** 2,
+  );
+
   return (
     // A plain element, not a landmark: a host names this region itself.
     <div
@@ -2149,6 +2109,7 @@ export const PdfDocumentEditorViewport = forwardRef<
         .filter(Boolean)
         .join(" ")}
       data-busy={busy ? "true" : undefined}
+      data-scrolls-sideways={scrollsSideways ? "true" : undefined}
       onFocusCapture={handleGestureRootTouched}
       onPointerDownCapture={handleGestureRootTouched}
       ref={documentEditorRootRef}
@@ -2158,75 +2119,96 @@ export const PdfDocumentEditorViewport = forwardRef<
       <div className="pdfdocumenteditor-body grow">
         {children?.(view)}
 
-        <section
-          className="pdfdocumenteditor-scroll-root"
-          ref={scrollContainerRef}
-        >
-          <div className="pdfdocumenteditor-pages" ref={pagesLayerRef}>
-            {pageCount > 0
-              ? pages.map((page, index) => (
-                  <div
-                    className="pdfdocumenteditor-page-slot"
-                    data-page-index={index}
-                    key={index}
-                  >
-                    {page ? (
-                      <PdfPageView
-                        active={index === activePageIndex}
-                        annotations={
-                          annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS
-                        }
-                        onActivate={handleActivatePage}
-                        onAddAnnotation={handleAddAnnotation}
-                        onDeleteAnnotations={deleteAnnotations}
-                        focusedAnnotationId={focusedAnnotationId}
-                        onFocusAnnotationConsumed={
-                          handleFocusAnnotationConsumed
-                        }
-                        onEraseAnnotations={eraseAnnotations}
-                        onEnsureAnnotationsVisible={() =>
-                          onShowAnnotationsChange?.(true)
-                        }
-                        onExternalLinkRequest={handleExternalLinkRequest}
-                        onBeginAnnotationEdit={beginAnnotationEdit}
-                        onMoveAnnotationsToPage={handleMoveAnnotationsToPage}
-                        onSelectAnnotations={handleSelectAnnotations}
-                        onToolChange={handleToolChange}
-                        onUpdateAnnotation={updateAnnotation}
-                        onUpdateAnnotations={updateAnnotations}
-                        page={page}
-                        pageCount={pageCount}
-                        pageIndex={index}
-                        readOnly={readOnly || busy}
-                        renderPriority={pageRenderPriority(
+        <div className="pdfdocumenteditor-scroll-frame">
+          <section
+            className="pdfdocumenteditor-scroll-root"
+            ref={scrollContainerRef}
+          >
+            <div className="pdfdocumenteditor-pages" ref={pagesLayerRef}>
+              {pageCount > 0
+                ? pages.map((page, index) => (
+                    <div
+                      className="pdfdocumenteditor-page-slot"
+                      data-page-index={index}
+                      key={index}
+                    >
+                      {page &&
+                      (index === initialVisualPageIndex ||
+                        isPageWithinReach(
                           index,
                           visiblePageRange,
-                        )}
-                        scale={scale}
-                        onNavigateDestination={(destination) =>
-                          void handlePdfDestination(destination)
-                        }
-                        onNavigatePage={handlePdfPageNavigation}
-                        onNotice={showNotice}
-                        onPageReady={handlePageReady}
-                        onPruneOffPageAnnotations={pruneOffPageAnnotations}
-                        selectedAnnotationIds={selectedAnnotationIds}
-                        showAnnotations={showAnnotations}
-                        tool={tool}
-                        toolSettings={toolSettings}
-                      />
-                    ) : (
-                      <PdfPagePlaceholder
-                        pageIndex={index}
-                        pageSize={pageSize}
-                        scale={scale}
-                      />
-                    )}
-                  </div>
-                ))
-              : null}
-          </div>
-        </section>
+                          renderReach,
+                        )) ? (
+                        <PdfPageView
+                          active={index === activePageIndex}
+                          annotations={
+                            annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS
+                          }
+                          onActivate={handleActivatePage}
+                          onAddAnnotation={handleAddAnnotation}
+                          onDeleteAnnotations={deleteAnnotations}
+                          focusedAnnotationId={focusedAnnotationId}
+                          onFocusAnnotationConsumed={
+                            handleFocusAnnotationConsumed
+                          }
+                          onEraseAnnotations={eraseAnnotations}
+                          onEnsureAnnotationsVisible={() =>
+                            onShowAnnotationsChange?.(true)
+                          }
+                          onExternalLinkRequest={handleExternalLinkRequest}
+                          onBeginAnnotationEdit={beginAnnotationEdit}
+                          onMoveAnnotationsToPage={handleMoveAnnotationsToPage}
+                          onSelectAnnotations={handleSelectAnnotations}
+                          onToolChange={handleToolChange}
+                          onUpdateAnnotation={updateAnnotation}
+                          onUpdateAnnotations={updateAnnotations}
+                          page={page}
+                          pageCount={pageCount}
+                          pageIndex={index}
+                          readOnly={readOnly || busy}
+                          renderPriority={pageRenderPriority(
+                            index,
+                            visiblePageRange,
+                          )}
+                          scale={scale}
+                          onNavigateDestination={(destination) =>
+                            void handlePdfDestination(destination)
+                          }
+                          onNavigatePage={handlePdfPageNavigation}
+                          onNotice={showNotice}
+                          onPageReady={handlePageReady}
+                          onPruneOffPageAnnotations={pruneOffPageAnnotations}
+                          selectedAnnotationIds={selectedAnnotationIds}
+                          showAnnotations={showAnnotations}
+                          tool={tool}
+                          toolSettings={toolSettings}
+                        />
+                      ) : (
+                        <PdfPagePlaceholder
+                          pageIndex={index}
+                          pageSize={page ? loadedPageSize(page) : pageSize}
+                          scale={scale}
+                        />
+                      )}
+                    </div>
+                  ))
+                : null}
+            </div>
+          </section>
+          <PageScrollbar
+            axis="y"
+            contentRef={pagesLayerRef}
+            measureKey={chromeGeometryVersion}
+            scrollerRef={scrollContainerRef}
+          />
+          <PageScrollbar
+            axis="x"
+            contentRef={pagesLayerRef}
+            measureKey={chromeGeometryVersion}
+            onOverflowChange={setScrollsSideways}
+            scrollerRef={scrollContainerRef}
+          />
+        </div>
       </div>
     </div>
   );

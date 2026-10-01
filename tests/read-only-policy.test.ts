@@ -18,3 +18,9 @@ test("encrypted PDFs cannot use output-copy routes", () => {
   assert.equal(canCreateOutputCopy("password protected"), false);
   assert.equal(canCreateOutputCopy(null), true);
 });
+
+// A copy is written by page index just like the original, so its edits would land on the same wrong pages; a copy made without edits is the original's own bytes.
+test("a file whose page lists disagree has no copy to edit, only copies of itself", () => {
+  assert.equal(canEditReadOnlyCopy("ambiguous page order"), false);
+  assert.equal(canCreateOutputCopy("ambiguous page order"), true);
+});

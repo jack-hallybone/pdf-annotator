@@ -338,6 +338,76 @@ test("closing the secondary panel's own tab collapses split view instead of leav
   ).toHaveCount(0);
 });
 
+// Collapsing the split moves the document that stays out of its panel's markup, which remounts it from its tab's record: whatever it holds that the record does not is lost, unless the close captures it first.
+test("closing the second panel's tab keeps the unsaved edits of the document that stays", async ({
+  page,
+}) => {
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right"); // first.pdf + second.pdf
+  await drawInkIn(page, page.locator(".tabbedapp-panel").nth(0));
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+
+  await page.getByRole("button", { name: "Close second.pdf" }).click();
+  await expect(page.locator(".tabbedapp-panel")).toHaveCount(0);
+  await waitForShellSettled(page);
+
+  await expect.poll(() => inkPixels(page.locator(VIEW))).toBeGreaterThan(0);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+});
+
+test("closing the left tab keeps the unsaved edits of the second-panel document that takes its place", async ({
+  page,
+}) => {
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right"); // first.pdf + second.pdf
+  await drawInkIn(page, page.locator(".tabbedapp-panel").nth(1));
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+
+  // Its right-hand neighbour becomes the active tab, so second.pdf now fills both panels.
+  await page.getByRole("button", { name: "Close first.pdf" }).click();
+  await expect(page.locator(".tabbedapp-panel")).toHaveCount(0);
+  await expect(page.locator(VIEW)).toHaveCount(2);
+  await waitForShellSettled(page);
+
+  await expect
+    .poll(() => inkPixels(page.locator(VIEW).first()))
+    .toBeGreaterThan(0);
+  await expect(page.locator(".tabbedapp-tab-close-dirty")).toHaveCount(1);
+});
+
+// The opened file takes the left panel only; the right keeps its document on screen, and so must keep what that document renders with.
+test("opening a file during a two-document split leaves the second panel showing its pages", async ({
+  page,
+}) => {
+  await openDocuments(page, [
+    await blankPdf("first"),
+    await blankPdf("second"),
+  ]);
+  await splitFromTab(page, 1, "Split Right"); // first.pdf + second.pdf
+  const right = page.locator(".tabbedapp-panel").nth(1);
+  await expect(
+    right.locator(".pdfdocumenteditor-page canvas").first(),
+  ).toBeVisible();
+
+  await page.locator(HIDDEN_FILE_INPUT).setInputFiles(await blankPdf("third"));
+  await expect(activeTab(page, "third.pdf")).toHaveCount(1);
+  await waitForShellSettled(page);
+
+  await expect(page.locator(".tabbedapp-second-header-title")).toHaveText(
+    "second.pdf",
+  );
+  await expect(right.locator(".loading-overlay")).toHaveCount(0);
+  await expect(
+    right.locator(".pdfdocumenteditor-page canvas").first(),
+  ).toBeVisible();
+});
+
 test("split down stacks the panels instead of placing them side by side", async ({
   page,
 }) => {
@@ -502,39 +572,34 @@ async function openDocuments(page: Page, files: string[]) {
   await watchShellBusy(page);
 }
 
-// In dev, React StrictMode double-invokes a freshly mounted document pane's load effect, so the first mount's busy flag genuinely toggles true/false more than once in quick succession (a real second wave, not a flicker) - "data-busy is false right now" can catch the gap between two waves rather than the settled end, and a right-click issued into that gap is dropped the same as one issued while genuinely busy. This tracks every moment the shell goes busy so a wait can instead require it to have STAYED false.
+// In dev, React StrictMode double-invokes a freshly mounted document pane's load effect, so the first mount's busy flag genuinely toggles true/false more than once in quick succession (a real second wave, not a flicker) - "data-busy is false right now" can catch the gap between two waves rather than the settled end, and a right-click issued into that gap is dropped the same as one issued while genuinely busy. This stamps every change of the flag so a wait can instead require it to have STAYED false: the first wave rises and falls within one task, so the observer only ever reads it as "false", and stamping only a "true" reading missed that wave and read the gap after it as settled.
 async function watchShellBusy(page: Page) {
   await page.evaluate(() => {
     const shell = document.querySelector(".tabbedapp-shell");
     if (!shell) {
       throw new Error("no .tabbedapp-shell to watch");
     }
-    const w = window as unknown as { __lastShellBusyAt: number };
-    w.__lastShellBusyAt =
-      shell.getAttribute("data-busy") === "true" ? Date.now() : 0;
-    new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        if ((mutation.target as Element).getAttribute("data-busy") === "true") {
-          w.__lastShellBusyAt = Date.now();
-        }
-      }
+    const w = window as unknown as { __shellBusyChangedAt: number };
+    w.__shellBusyChangedAt = 0;
+    new MutationObserver(() => {
+      w.__shellBusyChangedAt = Date.now();
     }).observe(shell, { attributes: true, attributeFilter: ["data-busy"] });
   });
 }
 
-// Bigger than the gap a StrictMode double-invoke leaves between its two waves (observed under load at 15-20ms), small next to the 15s expect budget this polls within.
+// Bigger than the gap a StrictMode double-invoke leaves between its two waves, which is the entering file's read (observed at 15-20ms under load, 50-80ms at 4x CPU throttling), small next to the 15s expect budget this polls within.
 const SHELL_SETTLE_MS = 250;
 
 async function waitForShellSettled(page: Page) {
   await page.waitForFunction(
     (settleMs) => {
       const shell = document.querySelector(".tabbedapp-shell");
-      const lastBusyAt =
-        (window as unknown as { __lastShellBusyAt?: number })
-          .__lastShellBusyAt ?? 0;
+      const changedAt =
+        (window as unknown as { __shellBusyChangedAt?: number })
+          .__shellBusyChangedAt ?? 0;
       return (
         shell?.getAttribute("data-busy") === "false" &&
-        Date.now() - lastBusyAt >= settleMs
+        Date.now() - changedAt >= settleMs
       );
     },
     SHELL_SETTLE_MS,

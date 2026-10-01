@@ -34,6 +34,13 @@ const pdfaXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>
 </rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
 
+const mentioningXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF
+ xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:description>Converted to PDF/A</dc:description>
+</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
+
 const unrelatedXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
 <x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF
  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
@@ -130,6 +137,38 @@ test("a PDF/A claim in an untyped compressed XMP packet is stripped", async () =
     inflatedStreamsInclude(output, "pdfaid:part"),
     false,
     "the compressed claim must not survive into the output",
+  );
+});
+
+test("a file that only mentions PDF/A is not treated as one", async () => {
+  const bytes = await appendPageText(
+    await readFixture("test-annotated.pdf"),
+    "This is a PDF/A test file",
+  );
+
+  assert.equal(await detectReadOnlyReason(bytes, null, false), null);
+});
+
+test("a PDF/A document that mentions PDF/A itself can still be saved once edited", async () => {
+  const bytes = await attachMetadataStream(
+    await appendPageText(await readFixture("test-pdfa.pdf"), "PDF/A-3a sample"),
+    mentioningXmpPacket,
+    "page",
+  );
+  assert.equal(
+    await detectReadOnlyReason(bytes, null, false),
+    "PDF/A compliant",
+  );
+
+  const output = await writePdfAnnotations(bytes, [note], {
+    replaceAnnotationSourceIds: [note.id],
+    replacePageIndexes: [0],
+  });
+
+  assert.equal(await detectReadOnlyReason(output, null, false), null);
+  assert.ok(
+    Buffer.from(output).toString("latin1").includes("PDF/A-3a sample"),
+    "the page's own text should be kept",
   );
 });
 
@@ -251,6 +290,32 @@ async function attachMetadataStream(
   const owner =
     target === "page" ? pdfDoc.getPage(0).node : (pdfDoc.catalog as PDFDict);
   owner.set(PDFName.of("Metadata"), ref);
+  return savedBytes(pdfDoc);
+}
+
+// Left uncompressed, as some producers write page content, so the words sit in the file's bytes as they read.
+async function appendPageText(bytes: Uint8Array, text: string) {
+  const pdfDoc = await loadEditablePdf(bytes);
+  const { context } = pdfDoc;
+  const page = pdfDoc.getPage(0).node;
+  const content = new TextEncoder().encode(
+    `BT /F1 12 Tf 72 72 Td (${text}) Tj ET`,
+  );
+  const ref = context.register(
+    PDFRawStream.of(
+      context.obj({ Length: content.length }) as PDFDict,
+      content,
+    ),
+  );
+  const existing = page.get(PDFName.of("Contents"));
+  if (existing instanceof PDFArray) {
+    existing.push(ref);
+  } else {
+    page.set(
+      PDFName.of("Contents"),
+      existing ? context.obj([existing, ref]) : ref,
+    );
+  }
   return savedBytes(pdfDoc);
 }
 

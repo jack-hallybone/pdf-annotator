@@ -11,7 +11,10 @@ function Thrower(): never {
 
 test("a render error in the document pane is caught, not left to take the whole shell down with it", () => {
   const { container } = render(
-    <DocumentPaneErrorBoundary onCloseDocument={() => {}}>
+    <DocumentPaneErrorBoundary
+      onCloseDocument={() => {}}
+      onViewCrash={() => {}}
+    >
       <Thrower />
     </DocumentPaneErrorBoundary>,
   );
@@ -26,7 +29,10 @@ test("a render error in the document pane is caught, not left to take the whole 
 test("Close this tab, in the fallback, hands the closure back to the caller", () => {
   let closed = 0;
   const { getByRole } = render(
-    <DocumentPaneErrorBoundary onCloseDocument={() => (closed += 1)}>
+    <DocumentPaneErrorBoundary
+      onCloseDocument={() => (closed += 1)}
+      onViewCrash={() => {}}
+    >
       <Thrower />
     </DocumentPaneErrorBoundary>,
   );
@@ -37,7 +43,10 @@ test("Close this tab, in the fallback, hands the closure back to the caller", ()
 
 test("a Reload page control is offered alongside it", () => {
   const { getByRole } = render(
-    <DocumentPaneErrorBoundary onCloseDocument={() => {}}>
+    <DocumentPaneErrorBoundary
+      onCloseDocument={() => {}}
+      onViewCrash={() => {}}
+    >
       <Thrower />
     </DocumentPaneErrorBoundary>,
   );
@@ -47,11 +56,29 @@ test("a Reload page control is offered alongside it", () => {
 
 test("a child that does not throw renders normally, with no fallback in sight", () => {
   const { container, getByText } = render(
-    <DocumentPaneErrorBoundary onCloseDocument={() => {}}>
+    <DocumentPaneErrorBoundary
+      onCloseDocument={() => {}}
+      onViewCrash={() => {}}
+    >
       <p>All is well.</p>
     </DocumentPaneErrorBoundary>,
   );
 
   assert.ok(getByText("All is well."));
   assert.equal(container.querySelector(".tabbedapp-document-pane-error"), null);
+});
+
+// The shell has only the tab's parked copy left once the view is gone, and needs telling it is out of date.
+test("a crash is reported to the caller, once", () => {
+  let crashes = 0;
+  render(
+    <DocumentPaneErrorBoundary
+      onCloseDocument={() => {}}
+      onViewCrash={() => (crashes += 1)}
+    >
+      <Thrower />
+    </DocumentPaneErrorBoundary>,
+  );
+
+  assert.equal(crashes, 1);
 });

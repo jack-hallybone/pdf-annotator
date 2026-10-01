@@ -215,7 +215,7 @@ export default defineConfig({
         // A classic worker, not an ES module. Two reasons, and the second is why this is not cosmetic: src/browserapp/pwa.ts registers it without `type: "module"`, which is the only form every browser supports; and the plugin's default "es" path hard-codes rolldown's deprecated `inlineDynamicImports`, so every build printed a deprecation warning that no edit in this repository could answer.
         rollupFormat: "iife",
       },
-      // No skipWaiting and no clientsClaim: a new worker installs, precaches and waits, which is the behaviour this project already had. Taking over mid-session would let a page load half of one build and half of the next.
+      // No skipWaiting and no clientsClaim: a new worker installs, precaches and waits until src/browserapp/pwa.ts asks it to take over on a reload. Taking over unasked, mid-session, would let a page load half of one build and half of the next.
     }),
   ],
   server: {

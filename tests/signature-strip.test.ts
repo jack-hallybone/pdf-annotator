@@ -48,6 +48,31 @@ test("a real signed fixture stops being detected as signed after an edit", async
   assert.equal(await acroFormPresent(output), false);
 });
 
+// The widget, not the form's list of fields, is what renders and what the check after every save looks for, so it has to go even when nothing lists it.
+test("a signature widget the form no longer lists is removed too", async () => {
+  for (const dropAcroForm of [false, true]) {
+    const bytes = await withSignatureUnlisted(
+      await readFixture("test-signed.pdf"),
+      dropAcroForm,
+    );
+    assert.equal(await signatureFieldCount(bytes), 0, "fixture precondition");
+    assert.equal(
+      await signatureWidgetsOnPage(bytes),
+      1,
+      "fixture precondition",
+    );
+    assert.equal(
+      await detectReadOnlyReason(bytes, null, false),
+      "signed/certified",
+    );
+
+    const output = await rotatePageClockwise(bytes, 0);
+
+    assert.equal(await signatureWidgetsOnPage(output), 0);
+    assert.equal(await detectReadOnlyReason(output, null, false), null);
+  }
+});
+
 // The raw scan runs on unparsed bytes precisely so a file that fails to parse still gets a read-only answer; that speed comes at the cost of not knowing a PDF string or a content stream's own text from a real dictionary key, so it has to at least skip everywhere a stream keeps that lower-trust content.
 test("a marker string spelled out in a page's own content does not make a file look signed", async () => {
   const pdfDoc = await PDFDocument.create();
@@ -68,6 +93,16 @@ test("a marker string spelled out in a page's own content does not make a file l
 
   assert.equal(pdfLooksSignedOrCertified(bytes), false);
   assert.equal(await detectReadOnlyReason(bytes, null, false), null);
+});
+
+test("a marker spelled with a #xx escape, in either hex case, still makes a file look signed", () => {
+  for (const key of ["/ByteRa#6ege", "/ByteRa#6Ege"]) {
+    const bytes = Buffer.from(
+      `%PDF-1.7\n1 0 obj\n<< ${key} [0 10 20 30] >>\nendobj\n%%EOF\n`,
+      "latin1",
+    );
+    assert.equal(pdfLooksSignedOrCertified(bytes), true, key);
+  }
 });
 
 // pruneSignatureFields walks /Fields to find what to remove; a malformed one gives it nothing to walk, but /SigFlags still claims a signed form once stripSignatureFields has otherwise run, so it must not survive on that account alone.
@@ -368,6 +403,18 @@ async function buildTextFieldPdf() {
 // pdf-lib's own save, not saveEditedPdf: these fixtures must still carry what the code under test is meant to remove.
 function rawSave(pdfDoc: PDFDocument) {
   return pdfDoc.save({ objectsPerTick: 500, updateFieldAppearances: false });
+}
+
+async function withSignatureUnlisted(bytes: Uint8Array, dropAcroForm: boolean) {
+  const pdfDoc = await loadEditablePdf(bytes);
+  if (dropAcroForm) {
+    pdfDoc.catalog.delete(PDFName.of("AcroForm"));
+  } else {
+    pdfDoc.catalog
+      .lookup(PDFName.of("AcroForm"), PDFDict)
+      .set(PDFName.of("Fields"), pdfDoc.context.obj([]));
+  }
+  return pdfDoc.save({ useObjectStreams: false });
 }
 
 async function signatureFieldCount(bytes: Uint8Array) {

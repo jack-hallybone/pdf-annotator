@@ -85,7 +85,9 @@ export function ReadOnlyBanner({
       <p className="banner-title tabbedapp-notice-text">
         {reason === "password protected"
           ? "This password protected file is open as read-only. Editing and printing are disabled."
-          : `This ${reason} file is open as read-only to protect the original.`}
+          : reason === "ambiguous page order"
+            ? "This file's page structure is malformed, so it is open as read-only: an edit could land on the wrong page."
+            : `This ${reason} file is open as read-only to protect the original.`}
       </p>
       {canEditCopy ? (
         <div className="banner-actions">

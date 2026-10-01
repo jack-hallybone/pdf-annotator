@@ -25,8 +25,8 @@ services:
   # deploy.yml runs this same service and publishes the dist/ it leaves behind.
   verify:
     <<: *common
-    # Microsoft's official Playwright image, used as published. Tag's version segment must match package.json's pinned @playwright/test version (1.63.0).
-    image: mcr.microsoft.com/playwright@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 # v1.63.0-noble
+    # Microsoft's official Playwright image, used as published. Tag's version segment must match package.json's pinned @playwright/test version.
+    image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
     # CI's "Set up GitHub Pages" step resolves these and passes them on the Verify step's env (see deploy.yml); empty locally, where vite.config.ts's own fallbacks cover that case.
     environment:
       - BASE_PATH

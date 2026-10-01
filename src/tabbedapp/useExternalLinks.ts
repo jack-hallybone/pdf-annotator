@@ -26,7 +26,7 @@ type ExternalLinksParams = {
 
 type ExternalLinksApi = {
   pendingExternalLink: PendingExternalLink | null;
-  openButtonRef: RefObject<HTMLButtonElement | null>;
+  cancelButtonRef: RefObject<HTMLButtonElement | null>;
   requestExternalLink: (url: string) => void;
   confirmExternalLink: (options?: { always?: boolean }) => void;
   cancelExternalLink: () => void;
@@ -46,7 +46,7 @@ export function useExternalLinks({
   const [trustedExternalLinkKeys, setTrustedExternalLinkKeys] = useState<
     string[]
   >([]);
-  const openButtonRef = useRef<HTMLButtonElement | null>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const openExternalLink = useCallback(
     async (url: string) => {
@@ -86,7 +86,10 @@ export function useExternalLinks({
         return;
       }
 
-      if (trustedExternalLinkKeys.includes(link.trustKey)) {
+      if (
+        trustedExternalLinkKeys.includes(link.trustKey) &&
+        !mailtoNeedsPrompt(link.url)
+      ) {
         void openExternalLink(link.url);
         return;
       }
@@ -127,13 +130,13 @@ export function useExternalLinks({
     setTrustedExternalLinkKeys([]);
   }, []);
 
-  // While the dialog is open, focus its primary button and let Escape dismiss.
+  // While the dialog is open, focus Cancel and let Escape dismiss. Never Open: Enter on a link opens this dialog, and that key held down repeats into whatever it focuses.
   useEffect(() => {
     if (!pendingExternalLink) {
       return;
     }
 
-    openButtonRef.current?.focus({ preventScroll: true });
+    cancelButtonRef.current?.focus({ preventScroll: true });
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -147,7 +150,7 @@ export function useExternalLinks({
 
   return {
     pendingExternalLink,
-    openButtonRef,
+    cancelButtonRef,
     requestExternalLink,
     confirmExternalLink,
     cancelExternalLink,
@@ -181,6 +184,20 @@ function externalLinkRequest(url: string): PendingExternalLink | null {
   } catch {
     return null;
   }
+}
+
+// A mailto trust key covers the address part alone, but the query can name recipients too (to, cc, bcc, reply-to, or a field a mail client knows and this list does not), so a trusted mail link still asks unless its query carries nothing but these.
+const SILENT_MAILTO_FIELDS = new Set(["subject", "body"]);
+
+function mailtoNeedsPrompt(url: string) {
+  const parsed = new URL(url);
+  // URLSearchParams has decoded each name, so a percent-encoded, padded or differently cased "bcc" is still caught.
+  return (
+    parsed.protocol === "mailto:" &&
+    [...parsed.searchParams.keys()].some(
+      (name) => !SILENT_MAILTO_FIELDS.has(name.trim().toLowerCase()),
+    )
+  );
 }
 
 function openExternalLinkInNewTab(url: string) {
