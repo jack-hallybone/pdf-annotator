@@ -1,5 +1,5 @@
 // The two dialogs the tabbedapp shell renders over the core: the password prompt for an encrypted document, and the confirmation for an external link.
-import { useId, useRef } from "react";
+import { useId, useRef, useState } from "react";
 import type { FormEvent, RefObject } from "react";
 import type { PendingExternalLink } from "../useExternalLinks";
 import { useFocusTrap } from "../useFocusTrap";
@@ -41,19 +41,19 @@ export function PasswordUnlockForm({
 
 export function ExternalLinkDialog({
   link,
-  onAlways,
   onCancel,
   onOpen,
   cancelButtonRef,
 }: {
   link: PendingExternalLink;
-  onAlways: () => void;
   onCancel: () => void;
-  onOpen: () => void;
+  onOpen: (always: boolean) => void;
   cancelButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   const titleId = useId();
+  const alwaysId = useId();
   const dialogRef = useRef<HTMLElement | null>(null);
+  const [always, setAlways] = useState(false);
   useFocusTrap(dialogRef, true);
 
   return (
@@ -77,25 +77,25 @@ export function ExternalLinkDialog({
         </p>
         {/* Rendered as stored, not re-derived: PendingExternalLink.url is already the sanitized string that will be opened. */}
         <p className="dialog-body external-link-url text-mono">{link.url}</p>
+        {/* A box, not a third button: its label wraps however long the origin, where a button that long pushed Open onto a row of its own. The scope label comes from PendingExternalLink so the box promises exactly what confirmExternalLink stores: this origin, or this mailto recipient - not every link in the document. */}
+        <label className="external-link-always row nowrap" htmlFor={alwaysId}>
+          <input
+            checked={always}
+            id={alwaysId}
+            onChange={(event) => setAlways(event.currentTarget.checked)}
+            type="checkbox"
+          />
+          <span>{`Always allow links to ${link.trustScopeLabel} in this document`}</span>
+        </label>
         <div className="dialog-actions">
-          <button
-            className=""
-            onClick={onCancel}
-            ref={cancelButtonRef}
-            type="button"
-          >
+          <button onClick={onCancel} ref={cancelButtonRef} type="button">
             Cancel
           </button>
-          {/* The scope label comes from PendingExternalLink so the button promises exactly what confirmExternalLink stores: this origin, or this mailto recipient - not every link in the document. */}
           <button
-            className=""
-            onClick={onAlways}
-            title={`Always open links to ${link.trustScopeLabel} from this document, without asking again`}
+            className="primary"
+            onClick={() => onOpen(always)}
             type="button"
           >
-            {`Always allow ${link.trustScopeLabel} in this document`}
-          </button>
-          <button className="primary" onClick={onOpen} type="button">
             Open
           </button>
         </div>

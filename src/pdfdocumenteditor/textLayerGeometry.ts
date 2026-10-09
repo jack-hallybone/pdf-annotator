@@ -274,9 +274,11 @@ export function getSelectedTextRects(
     pageElement,
     viewport,
   );
-  const selectedRanges = Array.from({ length: selection.rangeCount }, (_, i) =>
-    selection.getRangeAt(i),
-  );
+  const selectedRanges = textLayerElement
+    ? selectedRangesWithin(selection, textLayerElement)
+    : Array.from({ length: selection.rangeCount }, (_, i) =>
+        selection.getRangeAt(i),
+      );
   const selectedTextSpans = textLayerElement
     ? Array.from(textLayerElement.querySelectorAll("span")).filter((span) =>
         selectedRanges.some((range) => rangeIntersectsNode(range, span)),
@@ -331,6 +333,37 @@ export function getSelectedTextRects(
   return { rects, quadPoints };
 }
 
+/** What `selection.toString()` gives for the part of a selection inside one page's text layer: a selection can run on over a page break, and each page keeps only the text it covers. */
+export function selectedTextInLayer(
+  selection: Selection,
+  textLayerElement: HTMLElement,
+) {
+  let text = "";
+  for (const range of selectedRangesWithin(selection, textLayerElement)) {
+    const walker = document.createTreeWalker(
+      textLayerElement,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT,
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!rangeIntersectsNode(range, node)) {
+        continue;
+      }
+
+      // pdf.js ends each line of the layer with a <br>.
+      if (node.nodeName === "BR") {
+        text += "\n";
+      } else if (node instanceof Text) {
+        text += node.data.slice(
+          node === range.startContainer ? range.startOffset : 0,
+          node === range.endContainer ? range.endOffset : node.data.length,
+        );
+      }
+    }
+  }
+
+  return text;
+}
+
 type ViewportBoundsTransform = {
   left: number;
   scaleX: number;
@@ -378,6 +411,30 @@ function clientYToViewportY(
   viewport: PageViewport,
 ) {
   return clamp((clientY - bounds.top) * bounds.scaleY, 0, viewport.height);
+}
+
+// A selection that runs on over a page break also takes in everything drawn between the two text layers, whole pages of it, so each page measures only its own part.
+function selectedRangesWithin(selection: Selection, element: Element) {
+  const ranges: Range[] = [];
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    if (!rangeIntersectsNode(range, element)) {
+      continue;
+    }
+
+    const clipped = range.cloneRange();
+    const bounds = document.createRange();
+    bounds.selectNodeContents(element);
+    if (clipped.compareBoundaryPoints(Range.START_TO_START, bounds) < 0) {
+      clipped.setStart(bounds.startContainer, bounds.startOffset);
+    }
+    if (clipped.compareBoundaryPoints(Range.END_TO_END, bounds) > 0) {
+      clipped.setEnd(bounds.endContainer, bounds.endOffset);
+    }
+    ranges.push(clipped);
+  }
+
+  return ranges;
 }
 
 function rangeIntersectsNode(range: Range, node: Node) {

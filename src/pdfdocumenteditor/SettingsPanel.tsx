@@ -15,12 +15,10 @@ export function SettingsPanelShell({ children }: { children: ReactNode }) {
 
 export function ColorPalette({
   color,
-  label = "Colour",
   onChange,
   onCommit,
 }: {
   color: RgbColor;
-  label?: string | null;
   onChange: (color: RgbColor) => void;
   onCommit?: () => void;
 }) {
@@ -29,48 +27,45 @@ export function ColorPalette({
   );
 
   return (
-    <div className="field settings-field">
-      {label ? <span className="field-label">{label}</span> : null}
-      <div className="color-palette">
-        {annotationColorSwatches.map((swatch) => {
-          const selected = sameRgbColor(color, swatch);
-          return (
-            <button
-              aria-label={`Set ${rgbToHex(swatch)}`}
-              aria-pressed={selected}
-              className={`color-swatch ${selected ? "color-swatch-active" : ""}`}
-              key={swatch.join("-")}
-              onClick={() => {
-                onChange(swatch);
-                onCommit?.();
-              }}
-              style={{ background: rgbToHex(swatch) }}
-              type="button"
-            />
-          );
-        })}
-        <label
-          className={`color-picker-button ${
-            customColorSelected ? "color-swatch-active" : ""
-          }`}
-          title="Custom colour"
-        >
-          <MoreHorizontal
-            aria-hidden="true"
-            className="color-picker-icon"
-            size={14}
-          />
-          <input
-            className="color-picker-input"
-            aria-label="Custom colour"
-            onChange={(event) => {
-              onChange(hexToRgb(event.target.value));
+    <div className="color-palette">
+      {annotationColorSwatches.map((swatch) => {
+        const selected = sameRgbColor(color, swatch);
+        return (
+          <button
+            aria-label={`Set ${rgbToHex(swatch)}`}
+            aria-pressed={selected}
+            className={`color-swatch ${selected ? "color-swatch-active" : ""}`}
+            key={swatch.join("-")}
+            onClick={() => {
+              onChange(swatch);
+              onCommit?.();
             }}
-            type="color"
-            value={rgbToHex(color)}
+            style={{ background: rgbToHex(swatch) }}
+            type="button"
           />
-        </label>
-      </div>
+        );
+      })}
+      <label
+        className={`color-picker-button ${
+          customColorSelected ? "color-swatch-active" : ""
+        }`}
+        title="Custom colour"
+      >
+        <MoreHorizontal
+          aria-hidden="true"
+          className="color-picker-icon"
+          size={14}
+        />
+        <input
+          className="color-picker-input"
+          aria-label="Custom colour"
+          onChange={(event) => {
+            onChange(hexToRgb(event.target.value));
+          }}
+          type="color"
+          value={rgbToHex(color)}
+        />
+      </label>
     </div>
   );
 }
@@ -91,8 +86,8 @@ export function NumberSetting({
   value: number;
 }) {
   return (
-    <label className="field number-setting row nowrap">
-      <span className="field-label">{label}</span>
+    <label className="menu-item number-setting">
+      <span>{label}</span>
       <input
         className="number-setting-input"
         max={max}

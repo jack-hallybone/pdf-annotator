@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   annotationColorCounts,
+  annotationListMarkdown,
   annotationListRows,
   filterAnnotationRows,
   prunedAnnotationFilter,
@@ -194,4 +195,112 @@ test("the comment and the covered text stay separate", () => {
   assert.equal(rows[0].quote, "the page said something");
   assert.equal(rows[0].comment, "check this claim");
   assert.equal(rows[0].commentable, true);
+});
+
+// Pasted into notes, each entry has to say where the mark is and what it says; a mark that says nothing has no entry.
+test("the Markdown copy is the document's name, then each mark's page, quote and comment", () => {
+  const note: PdfAnnotation = {
+    color: YELLOW,
+    id: "note",
+    kind: "stickyNote",
+    pageIndex: 2,
+    rect: { x1: 72, x2: 92, y1: 700, y2: 720 },
+    text: "Check the method\n\n\n\nand the sample",
+  };
+  const stamp: PdfAnnotation = {
+    comment: "",
+    heightPx: 10,
+    id: "stamp",
+    imageData: "",
+    kind: "imageStamp",
+    mimeType: "image/png",
+    pageIndex: 2,
+    rect: { x1: 10, x2: 60, y1: 10, y2: 60 },
+    widthPx: 10,
+  };
+  const rows = annotationListRows(
+    new Map([
+      [2, [note, stamp]],
+      [
+        0,
+        [
+          highlight("a", 0, 700, 72, YELLOW, {
+            comment: "Key claim",
+            // A page wrap, and a bidi override from the file's text layer.
+            coveredText: "Prior work‮\nfound the effect",
+          }),
+        ],
+      ],
+    ]),
+  );
+
+  const { count, markdown } = annotationListMarkdown(rows, "Smith 2020.pdf");
+
+  assert.equal(count, 2);
+  assert.equal(
+    markdown,
+    [
+      "# Smith 2020",
+      "",
+      "## Page 1",
+      "",
+      "> Prior work found the effect",
+      "",
+      "Key claim",
+      "",
+      "## Page 3",
+      "",
+      "Check the method",
+      "",
+      "and the sample",
+      "",
+    ].join("\n"),
+  );
+});
+
+// The text comes from a file or from a reader, and either can look like markup: a tag, a link, emphasis, or a line a renderer would take for a heading or a list. Prose that only resembles it is left as it is.
+test("nothing in a quote or comment turns into markup in the Markdown copy", () => {
+  const rows = annotationListRows(
+    new Map([
+      [
+        0,
+        [
+          highlight("a", 0, 700, 72, YELLOW, {
+            comment: [
+              "# not a heading",
+              "- not a list",
+              "1. not a list either",
+              "<img src=x onerror=alert(1)>",
+              "[a link](https://example.com)",
+              "[12]: https://example.com",
+              "```",
+            ].join("\n"),
+            coveredText: "As shown in [12], p < 0.05 holds for *most* cases_",
+          }),
+        ],
+      ],
+    ]),
+  );
+
+  const { markdown } = annotationListMarkdown(rows, "<b>x</b>.pdf");
+
+  assert.equal(
+    markdown,
+    [
+      "# \\<b>x\\</b>",
+      "",
+      "## Page 1",
+      "",
+      "> As shown in [12], p < 0.05 holds for \\*most\\* cases\\_",
+      "",
+      "\\# not a heading",
+      "\\- not a list",
+      "1\\. not a list either",
+      "\\<img src=x onerror=alert(1)>",
+      "[a link\\](https://example.com)",
+      "[12\\]: https://example.com",
+      "\\`\\`\\`",
+      "",
+    ].join("\n"),
+  );
 });

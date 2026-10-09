@@ -4,6 +4,7 @@ import {
   annotationFingerprint,
   annotationSourceIdsForReplacement,
   byteFingerprint,
+  createWorkSignature,
   groupAnnotationsByPageStable,
 } from "../src/pdfdocumenteditor/annotationState";
 import type { PdfAnnotation } from "../src/pdfdocumenteditor/types";
@@ -192,4 +193,48 @@ test("groupAnnotationsByPageStable stays stable across repeated calls with no ch
   assert.equal(second.get(1), first.get(1));
   assert.equal(third.get(0), first.get(0));
   assert.equal(third.get(1), first.get(1));
+});
+
+// The work signature is put together from each annotation's kept fingerprint rather than serialised whole, so a page of handwriting isn't read point by point on every change and save. It must still say exactly what serialising it whole did.
+test("a work signature is the whole document's signatures in id order, and an edit changes it", () => {
+  const stroke: PdfAnnotation = {
+    color: [0.1, 0.2, 0.45],
+    comment: "",
+    id: "b-stroke",
+    kind: "draw",
+    opacity: 1,
+    pageIndex: 0,
+    paths: [
+      [
+        { x: 10.123456, y: 20 },
+        { x: 11, y: 21.5 },
+      ],
+    ],
+    width: 1.5,
+  };
+  const note = { ...stickyNote("a-note", 1), text: 'a "quoted" note' };
+
+  const signature = createWorkSignature("12:ab:cd", [stroke, note]);
+  assert.equal(
+    signature,
+    JSON.stringify({
+      annotations: [note, stroke].map((annotation) =>
+        JSON.parse(annotationFingerprint(annotation)),
+      ),
+      pdfFingerprint: "12:ab:cd",
+    }),
+  );
+  assert.equal(createWorkSignature("12:ab:cd", [note, stroke]), signature);
+
+  // An edit is a new object, so it gets a fingerprint of its own; the same content in another object reads the same.
+  const moved = {
+    ...stroke,
+    paths: [stroke.paths[0].map(({ x, y }) => ({ x: x + 5, y }))],
+  };
+  assert.notEqual(createWorkSignature("12:ab:cd", [moved, note]), signature);
+  assert.equal(
+    annotationFingerprint({ ...stroke }),
+    annotationFingerprint(stroke),
+  );
+  assert.equal(createWorkSignature("12:ab:cd", [stroke, note]), signature);
 });

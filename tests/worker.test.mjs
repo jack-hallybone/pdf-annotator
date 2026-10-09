@@ -245,6 +245,12 @@ test("a second open window blocks the takeover until it closes", async (t) => {
   // DOMContentLoaded, not load: the self-reload can replace the reloaded document before its load event fires.
   page1.on("domcontentloaded", () => loads1++);
   await page1.reload();
+  // Until this reload's own update check is over, not for a set time: on a busy machine the check, which waits a quarter of a second while another window is open, can outlast a set wait, and if it is still running when that window closes it rightly takes the update. The mark is set where src/browserapp/pwa.ts starts the check.
+  await page1.waitForFunction(
+    () => performance.getEntriesByName("update-checked").length > 0,
+    undefined,
+    { timeout: 20_000 },
+  );
   // Given time to prove nothing happens, rather than only that it hasn't happened yet.
   await new Promise((done) => setTimeout(done, 3_000));
   assert.equal(

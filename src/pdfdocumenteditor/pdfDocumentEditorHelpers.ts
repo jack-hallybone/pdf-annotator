@@ -55,6 +55,20 @@ export async function destinationTargetToPageIndex(
   }
 }
 
+/** The PDF y a link's destination puts at the top of the view, or null when it names only the page. Each kind keeps its top in its own slot, and a null top means "wherever you are", not 0, which is the page's foot. */
+export function destinationTop(destination: unknown[]) {
+  const kind = (destination[1] as { name?: unknown } | null | undefined)?.name;
+  const top =
+    kind === "XYZ"
+      ? destination[3]
+      : kind === "FitH" || kind === "FitBH"
+        ? destination[2]
+        : kind === "FitR"
+          ? destination[5]
+          : null;
+  return typeof top === "number" && Number.isFinite(top) ? top : null;
+}
+
 export function annotatedName(name: string) {
   return name.replace(/\.pdf$/i, "") + "-annotated.pdf";
 }
@@ -134,6 +148,18 @@ export function isZoomInShortcut(event: KeyboardEvent) {
 
 function isZoomOutShortcut(event: KeyboardEvent) {
   return event.key === "-" || event.key === "_";
+}
+
+// A browser's own Back keys: Alt+Left Arrow, and Cmd+[ on a Mac.
+export function isBackShortcut(event: KeyboardEvent) {
+  if (event.ctrlKey || event.shiftKey) {
+    return false;
+  }
+
+  return (
+    (event.altKey && !event.metaKey && event.key === "ArrowLeft") ||
+    (event.metaKey && !event.altKey && event.key === "[")
+  );
 }
 
 export function usesAnnotationLayer(tool: Tool) {
@@ -248,6 +274,18 @@ export function initialReloadPageIndexes(
   };
   const indexes = visibleLoadPageIndexes(clamped, pageCount);
   return indexes.includes(active) ? indexes : [active, ...indexes];
+}
+
+/** Resolves once what's on screen now has been painted: a frame callback runs just before a paint, and a task queued from it runs after that paint. A hidden page paints nothing and runs no frame callbacks, so it doesn't wait, and the timer bounds the wait for a page hidden meanwhile. */
+export function afterNextPaint() {
+  return new Promise<void>((resolve) => {
+    if (document.visibilityState !== "visible") {
+      resolve();
+      return;
+    }
+    window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+    window.setTimeout(resolve, 200);
+  });
 }
 
 export function scheduleAfterVisiblePaint(callback: () => void) {

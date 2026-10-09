@@ -63,8 +63,6 @@ type EraserGestureParams = {
   readOnly: boolean;
   scale: number;
   showSynchronizedAnnotations: boolean;
-  // Armed once a right-drag passes the minimum distance; read by the page's own contextmenu handler.
-  suppressNextContextMenuRef: RefObject<boolean>;
   toolSettings: ToolSettings;
   viewport: PageViewport;
 };
@@ -99,7 +97,6 @@ export function useEraserGesture({
   readOnly,
   scale,
   showSynchronizedAnnotations,
-  suppressNextContextMenuRef,
   toolSettings,
   viewport,
 }: EraserGestureParams): EraserGestureApi {
@@ -334,8 +331,6 @@ export function useEraserGesture({
     eraserGestureRef.current = {
       pendingUntilDrag: requireMovement,
     };
-    // Reset here rather than derived from `requireMovement`, which is also true for the left-click eraser tool.
-    suppressNextContextMenuRef.current = false;
     scheduleEraserPreviewRender();
 
     if (!requireMovement) {
@@ -369,7 +364,6 @@ export function useEraserGesture({
       }
 
       gesture.pendingUntilDrag = false;
-      suppressNextContextMenuRef.current = true;
       nextPath.forEach(eraseAtPoint);
       return;
     }

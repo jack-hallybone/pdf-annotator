@@ -246,6 +246,25 @@ test("a right-click does not start a drag", () => {
   assert.deepEqual(calls.drags, []);
 });
 
+test("a stylus's eraser end presses through the annotation to the page, whatever the tool", () => {
+  for (const tool of ["select", "highlight", "draw"] as const) {
+    const { calls, shape } = renderShape(note, { tool });
+
+    assert.equal(
+      fireEvent.pointerDown(shape, {
+        button: 5,
+        buttons: 32,
+        pointerType: "pen",
+      }),
+      true,
+      `the ${tool} tool should not claim the press`,
+    );
+    assert.deepEqual(calls.selects, []);
+    assert.deepEqual(calls.drags, []);
+    assert.deepEqual(calls.page, ["pointerdown"]);
+  }
+});
+
 test("the highlight tool moves a highlight it is pressed on", () => {
   const { calls, shape } = renderShape(highlight, { tool: "highlight" });
 

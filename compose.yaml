@@ -23,6 +23,7 @@ services:
     command: sh -c "npm ci && npm run build && npm run preview:docker"
 
   # deploy.yml runs this same service and publishes the dist/ it leaves behind.
+  # Plain verify skips what deploy.yml sets up first, so before calling a change ready also run verify on a copy of the tree after deploy.yml's Stamp version sed, with BASE_PATH=/pdf-annotator VITE_SITE_URL=https://jack-hallybone.github.io/pdf-annotator.
   verify:
     <<: *common
     # Microsoft's official Playwright image, used as published. Tag's version segment must match package.json's pinned @playwright/test version.

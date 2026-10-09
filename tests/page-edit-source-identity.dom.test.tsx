@@ -1039,6 +1039,7 @@ function useStubView() {
       revealPreparationError: () => {},
       runAfterInitialVisualReady: (callback: () => void) => callback(),
       setActivePageIndex,
+      setBackStack: () => {},
       setFocusedAnnotationId,
       setScale: () => {},
       setSelectedAnnotationIds,

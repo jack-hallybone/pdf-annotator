@@ -22,6 +22,8 @@ const compare = (PdfPageView as unknown as { compare?: Comparator }).compare;
 const DATA_PROPS: Record<string, [unknown, unknown]> = {
   active: [false, true],
   annotations: [[], []],
+  findCurrentMatch: [null, 0],
+  findMatches: [null, new Int32Array([0, 1])],
   focusedAnnotationId: [null, "annotation-1"],
   page: [{ pageNumber: 1 }, { pageNumber: 2 }],
   pageCount: [3, 4],

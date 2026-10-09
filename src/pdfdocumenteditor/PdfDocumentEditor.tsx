@@ -31,6 +31,7 @@ import {
   writeAnnotationClipboard,
 } from "./annotationClipboard";
 import { PdfPageView } from "./PdfPageView";
+import { getSelectedTextRects, selectedTextInLayer } from "./textLayerGeometry";
 import {
   assertAnnotationsTextIsSupported,
   UnsupportedAnnotationTextError,
@@ -64,6 +65,7 @@ import type {
   VisiblePageRange,
 } from "./types";
 import {
+  BACK_HISTORY_LIMIT,
   DOCUMENT_EDITOR_ROOT_CLASS,
   SPLIT_VIEW_CLASS,
   clamp,
@@ -76,6 +78,8 @@ import {
   pageTopInContainer,
   scrollContainerPaddingTop,
 } from "./scrollGeometry";
+import { useDocumentFind } from "./useDocumentFind";
+import type { PdfDocumentEditorFindResults } from "./useDocumentFind";
 import { usePdfDocumentEditorZoom } from "./usePdfDocumentEditorZoom";
 import { useRenderLatestRef } from "./useRenderLatestRef";
 import {
@@ -99,6 +103,8 @@ import { PdfPagePlaceholder } from "./components/PdfPagePlaceholder";
 import {
   annotationIntersectsPage,
   destinationTargetToPageIndex,
+  destinationTop,
+  isBackShortcut,
   isTextEntryTarget,
   isZoomInShortcut,
   isZoomShortcut,
@@ -134,8 +140,11 @@ export type {
   PdfDocumentEditorViewPosition,
   PdfDocumentEditorViewSnapshot,
 } from "./viewSnapshot";
+export type { PdfDocumentEditorFindResults } from "./useDocumentFind";
 
 export type PdfDocumentEditorReadOnlyState = {
+  /** The file can also be edited as itself and saved over (unlockOriginal), not only copied (enableEditing). */
+  canUnlockOriginal: boolean;
   readOnly: boolean;
   /** Null when the file itself is fine and the host simply asked for read-only. */
   reason: PdfDocumentEditorReadOnlyReason | null;
@@ -184,8 +193,13 @@ export type PdfDocumentEditorHandle = {
 
   // `remeasureViewport` is how host chrome whose geometry changed asks for the scrollbars to be measured again.
   ensurePageLoaded: (page: PDFPageProxy, pageIndex: number) => void;
+  // Through the matches for `findQuery`, wrapping at either end.
+  findNext: () => void;
+  findPrevious: () => void;
   fitHeight: () => void;
   fitWidth: () => void;
+  // Returns to where this view was before its last jump: a link, goToDestination, goToPage or revealAnnotation.
+  goBack: () => void;
   // `destination` is opaque on purpose: a host passes back what it was handed.
   goToDestination: (destination: unknown) => Promise<void>;
   goToPage: (pageIndex: number) => void;
@@ -197,6 +211,7 @@ export type PdfDocumentEditorHandle = {
   enableEditing: () => void;
   retryLoad: () => void;
   submitPassword: (password: string) => void;
+  unlockOriginal: () => void;
 };
 
 // Handed to the overlay slot on every render; a host never reaches inside.
@@ -205,6 +220,8 @@ export type PdfDocumentEditorViewState = {
   annotationsByPage: Map<number, PdfAnnotation[]>;
   // False until the host calls `importAllAnnotations`, and a page the pass could not read raises a notice rather than holding it false for ever.
   annotationsComplete: boolean;
+  // The page `goBack` returns to, or null when there is nowhere to go back to.
+  backPageIndex: number | null;
   busy: boolean;
   canRedo: boolean;
   canUndo: boolean;
@@ -244,10 +261,16 @@ export type PdfDocumentEditorViewportProps = {
   // Exactly one viewport answers each window-level gesture, or two views both zoom on one wheel tick.
   enableGlobalShortcuts?: boolean;
   enableWheelZoom?: boolean;
+  // What the host's find bar is looking for: its matches are highlighted and the current one scrolled to. Empty, the default, is no search.
+  findQuery?: string;
   manageDocumentTitle?: boolean;
   onDocumentTitleChange?: (title: string) => void;
   // The host confirms and opens it; see safePdfExternalUrl.
   onExternalLinkRequest?: (url: string) => void;
+  // Ctrl+F (Cmd+F) with a document open. Absent, or with no document, the browser's own find runs.
+  onFindRequest?: () => void;
+  // "n of m" for `findQuery`, reported because a host may draw its find bar outside the overlay slot.
+  onFindResultsChange?: (results: PdfDocumentEditorFindResults) => void;
   // Reported as well as exposed on the view state: the host draws this outside the overlay slot.
   onReadOnlyChange?: (state: PdfDocumentEditorReadOnlyState) => void;
   onShowAnnotationsChange?: (showAnnotations: boolean) => void;
@@ -313,9 +336,12 @@ export const PdfDocumentEditorViewport = forwardRef<
     emptyTitle,
     enableGlobalShortcuts = true,
     enableWheelZoom = true,
+    findQuery = "",
     manageDocumentTitle = true,
     onDocumentTitleChange,
     onExternalLinkRequest,
+    onFindRequest,
+    onFindResultsChange,
     onReadOnlyChange,
     onShowAnnotationsChange,
     onToolChange,
@@ -352,8 +378,14 @@ export const PdfDocumentEditorViewport = forwardRef<
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(
     null,
   );
+  // Where this view was before each jump, newest last: positions rather than pages, so Back lands on the line the reader left.
+  const [backStack, setBackStack] = useState<PdfDocumentEditorViewPosition[]>(
+    [],
+  );
   // The core cannot see the host's geometry, so the host says when it moved.
   const [chromeGeometryVersion, setChromeGeometryVersion] = useState(0);
+  // Counts find's scrolls to a match, so one still waiting on its page can tell it has been overtaken.
+  const findRevealRef = useRef(0);
   // A ref, not a plain argument: usePdfDocumentEditorZoom below is built from the model's output, so passing its setScale in directly would be a cycle.
   const viewBridge: PdfDocumentEditorViewBridge = {
     activePageIndex,
@@ -366,6 +398,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     revealPreparationError: handlePreparationError,
     runAfterInitialVisualReady,
     setActivePageIndex,
+    setBackStack,
     setFocusedAnnotationId,
     setScale: setViewScale,
     setSelectedAnnotationIds,
@@ -382,6 +415,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     beginBusyOperation,
     busy,
     busyRef,
+    canUnlockOriginal,
     commitAnnotations,
     createDocumentEditorSession,
     documentVersion,
@@ -403,6 +437,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     handleRotatePage,
     handleSave,
     handleThumbnailPageLoad,
+    handleUnlockOriginal,
     hasUnsavedChanges,
     imageAnnotationsVisible,
     importAllAnnotations,
@@ -457,6 +492,13 @@ export const PdfDocumentEditorViewport = forwardRef<
     pages,
     pageSize,
     activePageIndex,
+  });
+  const { found: documentFind, step: stepFindMatch } = useDocumentFind({
+    anchorPageIndexRef: activePageIndexRef,
+    onResultsChange: onFindResultsChange,
+    onReveal: revealFindMatch,
+    pdfDoc,
+    query: findQuery,
   });
   // A stable identity that always calls the host's latest: PdfPageView's memo ignores callback props, so a page that has not re-rendered keeps whichever callback it was first handed - one from before an "Always allow", say.
   const onExternalLinkRequestRef = useRenderLatestRef(onExternalLinkRequest);
@@ -577,12 +619,16 @@ export const PdfDocumentEditorViewport = forwardRef<
   function captureViewSnapshot(): PdfDocumentEditorViewSnapshot {
     return {
       activePageIndex: activePageIndexRef.current,
+      backStack,
       scale,
       viewPosition: captureViewPosition(),
     };
   }
 
-  function captureViewPosition(): PdfDocumentEditorViewPosition {
+  // `exact` lets the position start above its page, as it does while the foot of the page before is still in view; Back needs that to land on the same view, where a parked tab settles for the page's top.
+  function captureViewPosition({
+    exact = false,
+  } = {}): PdfDocumentEditorViewPosition {
     const container = scrollContainerRef.current;
     const pageIndex = activePageIndexRef.current;
     const fallback = {
@@ -606,13 +652,11 @@ export const PdfDocumentEditorViewport = forwardRef<
       container.scrollWidth - container.clientWidth,
     );
 
+    const offsetRatio =
+      (container.scrollTop + paddingTop - pageTop) /
+      Math.max(1, pageElement.offsetHeight);
     return {
-      offsetRatio: clamp(
-        (container.scrollTop + paddingTop - pageTop) /
-          Math.max(1, pageElement.offsetHeight),
-        0,
-        1,
-      ),
+      offsetRatio: exact ? offsetRatio : clamp(offsetRatio, 0, 1),
       pageIndex,
       scrollLeftRatio:
         maxScrollLeft > 0
@@ -631,13 +675,18 @@ export const PdfDocumentEditorViewport = forwardRef<
     downloadCopy: handleDownload,
     enableEditing: handleEnableEditing,
     ensurePageLoaded: handleThumbnailPageLoad,
+    findNext: () => stepFindMatch(1),
+    findPrevious: () => stepFindMatch(-1),
     finishAnnotationEdit: finishCurrentAnnotationEditWithValidation,
     fitHeight: fitZoomToPageHeight,
     fitWidth: fitZoomToPageWidth,
+    goBack: () => void goBack(),
     goToDestination: handlePdfDestination,
     importAllAnnotations,
     goToPage: (pageIndex: number) => {
-      void navigateToPage(pageIndex, { block: "start" });
+      void jumpRememberingBack(() =>
+        navigateToPage(pageIndex, { block: "start" }),
+      );
     },
     insertPage: handleAddPage,
     print: handlePrint,
@@ -658,16 +707,24 @@ export const PdfDocumentEditorViewport = forwardRef<
     setZoom,
     submitPassword: handlePasswordUnlock,
     undo: undoHistory,
+    unlockOriginal: handleUnlockOriginal,
     zoomBy: updateZoom,
   }));
 
   useEffect(() => {
     onReadOnlyChange?.({
+      canUnlockOriginal,
       readOnly,
       ready: initialVisualReady,
       reason: readOnlyReason,
     });
-  }, [initialVisualReady, onReadOnlyChange, readOnly, readOnlyReason]);
+  }, [
+    canUnlockOriginal,
+    initialVisualReady,
+    onReadOnlyChange,
+    readOnly,
+    readOnlyReason,
+  ]);
 
   useEffect(() => {
     function handlePaste(event: ClipboardEvent) {
@@ -978,6 +1035,20 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
+    // Ahead of the text-entry bail below, so a second Ctrl+F from inside the find bar comes back to it.
+    if (
+      onFindRequest &&
+      pageCount > 0 &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "f"
+    ) {
+      event.preventDefault();
+      onFindRequest();
+      return;
+    }
+
     if ((event.ctrlKey || event.metaKey) && isZoomShortcut(event)) {
       event.preventDefault();
       updateZoom(isZoomInShortcut(event) ? ZOOM_STEP : -ZOOM_STEP);
@@ -1014,9 +1085,17 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
+    // Claimed even with nowhere to go back to: the browser's own Back would leave the app and every open document with it.
+    if (isBackShortcut(event)) {
+      event.preventDefault();
+      void goBack();
+      return;
+    }
+
+    // A Mac keyboard's delete key is Backspace.
     if (
       !readOnly &&
-      event.key === "Delete" &&
+      (event.key === "Delete" || event.key === "Backspace") &&
       selectedAnnotationIds.length > 0
     ) {
       event.preventDefault();
@@ -1086,6 +1165,66 @@ export const PdfDocumentEditorViewport = forwardRef<
     setFocusedAnnotationId(shouldKeepOpenForInitialText ? annotation.id : null);
   }
 
+  // A selection can run on over a page break, and a highlight belongs to one page: each page the selection covers gets its own, holding only that page's text, and they come and go as one undo step.
+  function highlightTextSelection() {
+    const selection = window.getSelection();
+    const container = scrollContainerRef.current;
+    if (readOnly || busyRef.current || !selection || !container) {
+      return;
+    }
+
+    const highlights: PdfAnnotation[] = [];
+    for (const pageElement of container.querySelectorAll<HTMLElement>(
+      ".pdfdocumenteditor-page",
+    )) {
+      const pageIndex = pageIndexFromElement(pageElement);
+      const page = pageIndex === null ? null : pagesRef.current[pageIndex];
+      const textLayer = pageElement.querySelector<HTMLElement>(".textLayer");
+      const coveredText = textLayer
+        ? selectedTextInLayer(selection, textLayer)
+        : "";
+      if (pageIndex === null || !page || !coveredText.trim()) {
+        continue;
+      }
+
+      const { rects, quadPoints } = getSelectedTextRects(
+        selection,
+        pageElement,
+        textLayer,
+        page.getViewport({ scale }),
+      );
+      if (rects.length > 0) {
+        highlights.push({
+          id: crypto.randomUUID(),
+          kind: "textHighlight",
+          pageIndex,
+          rects,
+          quadPoints,
+          color: toolSettings.highlightColor,
+          opacity: toolSettings.highlightOpacity,
+          comment: "",
+          coveredText,
+        });
+      }
+    }
+
+    selection.removeAllRanges();
+    if (highlights.length === 0) {
+      return;
+    }
+
+    for (const highlight of highlights) {
+      managedAnnotationPagesRef.current.add(highlight.pageIndex);
+    }
+    onShowAnnotationsChange?.(true);
+    commitAnnotations(
+      (current) => [...current, ...highlights.map(normalizeAnnotationLayout)],
+      { assumeChanged: true },
+    );
+    setSelectedAnnotationIds([]);
+    setFocusedAnnotationId(null);
+  }
+
   async function handleAddImageFromFile(file: File) {
     await addPreparedImageAnnotation(() => prepareImageStampFromFile(file));
   }
@@ -1098,8 +1237,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     finishCurrentAnnotationEditWithValidation();
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
-    // The image tool never becomes active, so the current tool is deactivated up front or the dock keeps it highlighted until the picker settles.
-    onToolChange?.("select");
+    // Back to Select only once the picker settles, so a host showing the image tool as selected while its picker is open keeps showing it until then.
     try {
       const file = await pickImageFile();
       if (file) {
@@ -1125,7 +1263,6 @@ export const PdfDocumentEditorViewport = forwardRef<
     finishCurrentAnnotationEditWithValidation();
     setSelectedAnnotationIds([]);
     setFocusedAnnotationId(null);
-    onToolChange?.("select");
     try {
       const image = await prepareImageStampFromSystemClipboard();
       if (image) {
@@ -1422,7 +1559,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       (candidate) => candidate.id === annotationId,
     );
     if (annotation) {
-      void navigateToAnnotation(annotation);
+      void jumpRememberingBack(() => navigateToAnnotation(annotation));
     }
   }
 
@@ -1922,14 +2059,57 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
-    await navigateToPage(pageIndex, {
-      block: "center",
-      destination: explicitDestination,
-    });
+    await jumpRememberingBack(() =>
+      navigateToPage(pageIndex, {
+        // One that names only its page lands at the page's top, as a page jump does; centring a tall page scrolled past where it begins.
+        block:
+          destinationTop(explicitDestination) === null ? "start" : "center",
+        destination: explicitDestination,
+      }),
+    );
   }
 
   function handlePdfPageNavigation(pageIndex: number) {
-    void navigateToPage(pageIndex, { block: "center" });
+    void jumpRememberingBack(() =>
+      navigateToPage(pageIndex, { block: "center" }),
+    );
+  }
+
+  // Only a jump that moved the view is remembered: a link to what is already on screen leaves nothing to go back to.
+  async function jumpRememberingBack(jump: () => Promise<void>) {
+    const container = scrollContainerRef.current;
+    if (!container || pageCount === 0) {
+      return jump();
+    }
+
+    const from = captureViewPosition({ exact: true });
+    const { scrollLeft, scrollTop } = container;
+    const generation = loadGenerationRef.current;
+    await jump();
+    // A frame after the jump's own, which scrolls in the frame it has just asked for.
+    window.requestAnimationFrame(() => {
+      const moved =
+        Math.abs(container.scrollTop - scrollTop) >= 1 ||
+        Math.abs(container.scrollLeft - scrollLeft) >= 1;
+      if (moved && generation === loadGenerationRef.current) {
+        setBackStack((stack) => [...stack, from].slice(-BACK_HISTORY_LIMIT));
+      }
+    });
+  }
+
+  // Not a jump itself, so nothing is remembered on the way: Back again goes one step further.
+  async function goBack() {
+    const position = backStack.at(-1);
+    if (!position || pageCount === 0) {
+      return;
+    }
+
+    setBackStack(backStack.slice(0, -1));
+    const pageIndex = clamp(position.pageIndex, 0, pageCount - 1);
+    activePageIndexRef.current = pageIndex;
+    setActivePageIndex(pageIndex);
+    await ensurePageLoaded(pageIndex);
+    window.requestAnimationFrame(() => restoreCapturedViewPosition(position));
   }
 
   function scrollToPage(
@@ -1952,10 +2132,10 @@ export const PdfDocumentEditorViewport = forwardRef<
       return;
     }
 
-    const destinationTop = destination ? Number(destination[3]) : NaN;
-    if (page && Number.isFinite(destinationTop)) {
+    const top = destination ? destinationTop(destination) : null;
+    if (page && top !== null) {
       const viewport = page.getViewport({ scale });
-      const [, y] = viewport.convertToViewportPoint(0, destinationTop);
+      const [, y] = viewport.convertToViewportPoint(0, top);
       const containerRect = container.getBoundingClientRect();
       const pageRect = pageElement.getBoundingClientRect();
       container.scrollTo({
@@ -2029,6 +2209,73 @@ export const PdfDocumentEditorViewport = forwardRef<
     });
   }
 
+  // The page may need loading first; a later match supersedes one still waiting for its page.
+  async function revealFindMatch(pageIndex: number, bounds: PdfRect | null) {
+    const reveal = (findRevealRef.current += 1);
+    const page =
+      (await ensurePageLoaded(pageIndex)) ??
+      (await pdfDocRef.current?.getPage(pageIndex + 1).catch(() => null)) ??
+      null;
+    if (reveal === findRevealRef.current) {
+      window.requestAnimationFrame(() =>
+        scrollToFindMatch(pageIndex, bounds, page),
+      );
+    }
+  }
+
+  // Like a browser's own find: no scroll while the match is in sight, and centred when it is not.
+  function scrollToFindMatch(
+    pageIndex: number,
+    bounds: PdfRect | null,
+    page: PDFPageProxy | null,
+  ) {
+    const container = scrollContainerRef.current;
+    const sheet = container
+      ? pageElementForIndex(container, pageIndex)?.querySelector("article")
+      : null;
+    if (!container || !sheet || !page || !bounds) {
+      scrollToPage(pageIndex, { block: "center", page });
+      return;
+    }
+
+    const match = pdfRectToViewportRect(bounds, page.getViewport({ scale }));
+    const containerRect = container.getBoundingClientRect();
+    const sheetRect = sheet.getBoundingClientRect();
+    // From the view's top left corner, as it is now.
+    const top = sheetRect.top - containerRect.top + match.y;
+    const left = sheetRect.left - containerRect.left + match.x;
+    const outOfSightSideways =
+      left < 0 || left + match.width > container.clientWidth;
+    const outOfSightVertically =
+      top < 0 ||
+      top + match.height > container.clientHeight ||
+      // Under the floating controls, the host's find bar or a notice is as hidden as past the edge. Asked only once it is in sight sideways, where the point is on the page at all.
+      (!outOfSightSideways &&
+        !sheet.contains(
+          document.elementFromPoint(
+            containerRect.left + left + match.width / 2,
+            containerRect.top + top + match.height / 2,
+          ),
+        ));
+    if (!outOfSightVertically && !outOfSightSideways) {
+      return;
+    }
+
+    container.scrollTo({
+      behavior: "auto",
+      left:
+        container.scrollLeft +
+        (outOfSightSideways
+          ? left + match.width / 2 - container.clientWidth / 2
+          : 0),
+      top:
+        container.scrollTop +
+        (outOfSightVertically
+          ? top + match.height / 2 - container.clientHeight / 2
+          : 0),
+    });
+  }
+
   function restoreCapturedViewPosition(
     viewPosition: PdfDocumentEditorViewPosition,
   ) {
@@ -2057,7 +2304,7 @@ export const PdfDocumentEditorViewport = forwardRef<
       left: viewPosition.scrollLeftRatio * maxScrollLeft,
       top:
         pageTop +
-        clamp(viewPosition.offsetRatio, 0, 1) * pageElement.offsetHeight -
+        viewPosition.offsetRatio * pageElement.offsetHeight -
         scrollContainerPaddingTop(container),
     });
     activePageIndexRef.current = pageIndex;
@@ -2068,6 +2315,7 @@ export const PdfDocumentEditorViewport = forwardRef<
     activePageIndex,
     annotationsByPage,
     annotationsComplete,
+    backPageIndex: backStack.at(-1)?.pageIndex ?? null,
     busy,
     canRedo: redoStack.length > 0,
     canUndo: undoStack.length > 0,
@@ -2122,6 +2370,12 @@ export const PdfDocumentEditorViewport = forwardRef<
         <div className="pdfdocumenteditor-scroll-frame">
           <section
             className="pdfdocumenteditor-scroll-root"
+            // The browser's own menu has nothing to offer on a page, and it came up for a pen's barrel button or a right-drag too short to erase; a form control or editable text keeps it, focused or not, for spelling and paste.
+            onContextMenu={(event) => {
+              if (!isTextEntryTarget(event.target)) {
+                event.preventDefault();
+              }
+            }}
             ref={scrollContainerRef}
           >
             <div className="pdfdocumenteditor-pages" ref={pagesLayerRef}>
@@ -2144,6 +2398,14 @@ export const PdfDocumentEditorViewport = forwardRef<
                           annotations={
                             annotationsByPage.get(index) ?? EMPTY_ANNOTATIONS
                           }
+                          findCurrentMatch={
+                            documentFind.current?.pageIndex === index
+                              ? documentFind.current.matchIndex
+                              : null
+                          }
+                          findMatches={
+                            documentFind.matchesByPage.get(index) ?? null
+                          }
                           onActivate={handleActivatePage}
                           onAddAnnotation={handleAddAnnotation}
                           onDeleteAnnotations={deleteAnnotations}
@@ -2156,6 +2418,7 @@ export const PdfDocumentEditorViewport = forwardRef<
                             onShowAnnotationsChange?.(true)
                           }
                           onExternalLinkRequest={handleExternalLinkRequest}
+                          onHighlightTextSelection={highlightTextSelection}
                           onBeginAnnotationEdit={beginAnnotationEdit}
                           onMoveAnnotationsToPage={handleMoveAnnotationsToPage}
                           onSelectAnnotations={handleSelectAnnotations}
@@ -2318,11 +2581,13 @@ export const PdfDocumentEditor = forwardRef<
           />
           <PdfDocumentEditorViewport
             {...viewportProps}
-            // The host's chrome, the tab title and the handle all belong to the first view.
+            // The host's chrome, the tab title, the handle and find all belong to the first view; Ctrl+F in this one still opens the find bar.
             children={undefined}
             className=""
             document={documentModel}
+            findQuery={undefined}
             manageDocumentTitle={false}
+            onFindResultsChange={undefined}
             style={{ flexBasis: 0, flexGrow: 1 - splitRatio }}
           />
         </>

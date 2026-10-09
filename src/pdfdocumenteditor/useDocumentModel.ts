@@ -111,6 +111,7 @@ import type {
 import { ACTUAL_SIZE_ZOOM, clamp, EAGER_PAGE_LIMIT } from "./viewerConfig";
 import { usePageCache } from "./usePageCache";
 import {
+  afterNextPaint,
   annotatedName,
   copyName,
   downloadPdf,
@@ -210,6 +211,8 @@ export type SensitivePdfDocumentEditorSession = {
   shouldImportAnnotations: boolean;
   sourceId: string;
   undoStack: PdfDocumentEditorHistoryEntry[];
+  // Unlock original rather than Edit a copy: the tab still saves over its own file, so unlike a copy it keeps its save target.
+  unlockedOriginal?: boolean;
   view: PdfDocumentEditorViewSnapshot;
   version: 1;
 };
@@ -234,6 +237,8 @@ export type PdfDocumentEditorViewBridge = {
   revealPreparationError: (error: unknown) => void;
   runAfterInitialVisualReady: (callback: () => void) => void;
   setActivePageIndex: Dispatch<SetStateAction<number>>;
+  /** Where Back goes, newest last. */
+  setBackStack: (backStack: PdfDocumentEditorViewPosition[]) => void;
   setFocusedAnnotationId: Dispatch<SetStateAction<string | null>>;
   setScale: (scale: number) => void;
   setSelectedAnnotationIds: Dispatch<SetStateAction<string[]>>;
@@ -391,6 +396,7 @@ export function useDocumentModel({
   const [readOnlyReason, setReadOnlyReason] =
     useState<PdfDocumentEditorReadOnlyReason | null>(null);
   const [editingEnabled, setEditingEnabled] = useState(false);
+  const [unlockedOriginal, setUnlockedOriginal] = useState(false);
   const [sourceRetryKey, setSourceRetryKey] = useState(0);
   const showNotice = useCallback(
     (message: string, options?: PdfDocumentEditorNoticeOptions) => {
@@ -433,6 +439,11 @@ export function useDocumentModel({
   const hostReadOnly = !allowEditing;
   const fileReadOnly = readOnlyReason !== null && !editingEnabled;
   const protectedCopy = isProtectedCopy(readOnlyReason, editingEnabled);
+  // Only with a file to save over: without one, a save would go through Save As, which is Edit a copy under another name.
+  const canUnlockOriginal =
+    fileReadOnly &&
+    canEditReadOnlyCopy(readOnlyReason) &&
+    Boolean(saveTargetRef.current);
   const readOnly = fileReadOnly || hostReadOnly;
   const outputCopyAvailable = canCreateOutputCopy(readOnlyReason);
   const saveAvailable =
@@ -653,9 +664,11 @@ export function useDocumentModel({
     });
   }
 
+  // Back names pages by index, and every caller here has just replaced the document or renumbered its pages.
   function resetViewsToPage(pageIndex: number) {
     moveViewsToPage(pageIndex);
     clearViewSelections();
+    eachView((attached) => attached.setBackStack([]));
   }
 
   function clearViewSelections() {
@@ -704,6 +717,7 @@ export function useDocumentModel({
       shouldImportAnnotations: shouldImportAnnotationsRef.current,
       sourceId: sourceIdRef.current,
       undoStack: undoStackRef.current,
+      unlockedOriginal,
       view: capturePrimaryViewSnapshot(),
       version: 1,
     });
@@ -1123,6 +1137,7 @@ export function useDocumentModel({
     setPasswordRequest(null);
     setReadOnlyReason(null);
     setEditingEnabled(false);
+    setUnlockedOriginal(false);
     if (clearFileInfo) {
       setFileName(UNNAMED_DOCUMENT);
       if (manageDocumentTitle && emptyTitle) {
@@ -1304,7 +1319,14 @@ export function useDocumentModel({
       return;
     }
 
+    const generation = loadGenerationRef.current;
     try {
+      // See handleSave.
+      await afterNextPaint();
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
       const printableBytes = await printablePdfBytes();
       await printTarget(printableBytes, printableName(fileName));
     } catch (error) {
@@ -1536,13 +1558,16 @@ export function useDocumentModel({
         nextReadOnlyReason && !canEditReadOnlyCopy(nextReadOnlyReason)
           ? false
           : (restoredSession?.editingEnabled ?? false);
+      const nextUnlockedOriginal =
+        nextEditingEnabled && restoredSession?.unlockedOriginal === true;
       const nextSaveTarget =
-        nextReadOnlyReason && nextEditingEnabled
+        nextReadOnlyReason && nextEditingEnabled && !nextUnlockedOriginal
           ? null
           : (options.saveTarget ?? null);
       saveTargetRef.current = nextSaveTarget;
       setReadOnlyReason(nextReadOnlyReason);
       setEditingEnabled(nextEditingEnabled);
+      setUnlockedOriginal(nextUnlockedOriginal);
       moveViewsToPage(activePage);
 
       if (restoredSession) {
@@ -1583,12 +1608,16 @@ export function useDocumentModel({
         generation,
         bytes,
       );
-      const restoredViewPosition = restoredSession?.view.viewPosition;
-      if (restoredViewPosition) {
+      const restoredView = restoredSession?.view;
+      if (restoredView) {
         eachView((attached) =>
-          attached.runAfterInitialVisualReady(() =>
-            attached.restoreViewPosition(restoredViewPosition),
-          ),
+          attached.runAfterInitialVisualReady(() => {
+            if (restoredView.viewPosition) {
+              attached.restoreViewPosition(restoredView.viewPosition);
+            }
+            // Not before: this restore would undo a Back taken while it waited.
+            attached.setBackStack(restoredView.backStack ?? []);
+          }),
         );
       }
 
@@ -2850,6 +2879,13 @@ export function useDocumentModel({
     const generation = loadGenerationRef.current;
 
     try {
+      // The controls grey out before the file is prepared, which can hold the page for seconds with many annotations, rather than once it's done.
+      await afterNextPaint();
+      // Nothing has been read yet, so a document swapped or closed in that frame is simply not saved.
+      if (generation !== loadGenerationRef.current) {
+        return false;
+      }
+
       const saveTarget = saveTargetRef.current;
 
       if (saveTarget) {
@@ -2940,6 +2976,12 @@ export function useDocumentModel({
 
     const generation = loadGenerationRef.current;
     try {
+      // See handleSave.
+      await afterNextPaint();
+      if (generation !== loadGenerationRef.current) {
+        return false;
+      }
+
       const output = await currentPdfOutput();
       const result = await write(output.bytes);
       if (generation === loadGenerationRef.current) {
@@ -2966,7 +3008,14 @@ export function useDocumentModel({
       return false;
     }
 
+    const generation = loadGenerationRef.current;
     try {
+      // See handleSave.
+      await afterNextPaint();
+      if (generation !== loadGenerationRef.current) {
+        return false;
+      }
+
       const saveAsResult = await saveCurrentPdfAs(suggestedName);
       if (saveAsResult === "saved") {
         return true;
@@ -3060,7 +3109,14 @@ export function useDocumentModel({
       return;
     }
 
+    const generation = loadGenerationRef.current;
     try {
+      // See handleSave.
+      await afterNextPaint();
+      if (generation !== loadGenerationRef.current) {
+        return;
+      }
+
       const savedBytes = await downloadableCopyBytes();
       const outputName = annotatedName(fileName);
       await downloadPdfBytes(savedBytes, outputName);
@@ -3263,9 +3319,31 @@ export function useDocumentModel({
     fileKeyRef.current = null;
     reportSaveTargetChange();
     setEditingEnabled(true);
+    setUnlockedOriginal(false);
     setFileName((current) => copyName(current));
     onToolChange?.("select");
     clearViewSelections();
+  }
+
+  // Unlike a copy, the tab keeps its file, name and save target, so its next save goes over the original. That save comes out of the writer just as a copy's does, so the claim is gone from the file it leaves.
+  function handleUnlockOriginal() {
+    if (
+      !canEditReadOnlyCopy(readOnlyReason) ||
+      editingEnabled ||
+      !saveTargetRef.current
+    ) {
+      return;
+    }
+
+    setEditingEnabled(true);
+    setUnlockedOriginal(true);
+    onToolChange?.("select");
+    clearViewSelections();
+    // Kept until dismissed: the save it warns of can come long after the unlock, and can't be undone.
+    showNotice(
+      `Editing the original. Saving overwrites it without its ${readOnlyReason === "PDF/A compliant" ? "PDF/A claim" : "signature"}.`,
+      { durationMs: null, tone: "warning" },
+    );
   }
 
   function retryLoad() {
@@ -3277,6 +3355,7 @@ export function useDocumentModel({
     annotationsByPage,
     annotationsComplete,
     busy,
+    canUnlockOriginal,
     documentVersion,
     editingEnabled,
     fileName,
@@ -3335,6 +3414,7 @@ export function useDocumentModel({
     handleRotatePage,
     handleSave,
     handleThumbnailPageLoad,
+    handleUnlockOriginal,
     importAllAnnotations,
     redoHistory,
     releaseRenderResources,

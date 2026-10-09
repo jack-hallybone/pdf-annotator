@@ -132,7 +132,7 @@ export function BrowserHome({
           >
             Third-party notices
           </a>
-          <span className="browserapp-release-version text-xs text-mono">
+          <span className="browserapp-release-version text-xs">
             {RELEASE_VERSION}
           </span>
         </footer>

@@ -8,6 +8,7 @@ import {
 import { annotationBounds } from "../pdfdocumenteditor/annotationGeometry";
 import { rgbToHex } from "../pdfdocumenteditor/annotationColors";
 import type { PdfAnnotation } from "../pdfdocumenteditor/types";
+import { strippedDocumentText } from "../pdfdocumenteditor/untrustedText";
 
 export type AnnotationListRow = {
   annotation: PdfAnnotation;
@@ -162,4 +163,54 @@ export function prunedAnnotationFilter(
   }
 
   return { ...filter, colorKeys };
+}
+
+/** For pasting into notes: the document's name as a heading, then each row that has text, in list order, as its page, the text it covers as a quote and its comment. A pen stroke with no comment has nothing to say here, so it is left out of `count` too. */
+export function annotationListMarkdown(
+  rows: AnnotationListRow[],
+  documentName: string,
+) {
+  const entries = rows.flatMap((row) => {
+    // A highlight's line breaks are where the page wrapped, not the reader's, so they read as spaces, as the list shows them.
+    const quote = strippedDocumentText(
+      annotationCoveredText(row.annotation),
+    ).replace(/\s+/g, " ");
+    const comment = strippedDocumentText(row.comment);
+    if (!quote && !comment) {
+      return [];
+    }
+
+    return [
+      [
+        `## Page ${row.pageIndex + 1}`,
+        ...(quote ? [`> ${markdownText(quote)}`] : []),
+        ...(comment
+          ? [
+              comment
+                .split("\n")
+                .map(markdownText)
+                .join("\n")
+                .replace(/\n{3,}/g, "\n\n"),
+            ]
+          : []),
+      ].join("\n\n"),
+    ];
+  });
+
+  const heading = `# ${markdownText(documentName.replace(/\.pdf$/i, ""))}`;
+  return {
+    count: entries.length,
+    markdown: `${[heading, ...entries].join("\n\n")}\n`,
+  };
+}
+
+// One line of document text or a reader's comment, to render as itself: anything that would become a tag, a link, emphasis, code or, at the start of the line, a heading, quote, list, rule or fence is escaped, while ordinary prose - "[12]" and "p < 0.05" included - passes through untouched.
+function markdownText(line: string) {
+  return line
+    .trim()
+    .replace(/[\\`*_]/g, "\\$&")
+    .replace(/<(?=[a-z/!?])/gi, "\\<")
+    .replace(/\](?=[([:])/g, "\\]")
+    .replace(/^[#>+=~-]/, "\\$&")
+    .replace(/^(\d+)([.)])(?=\s|$)/, "$1\\$2");
 }

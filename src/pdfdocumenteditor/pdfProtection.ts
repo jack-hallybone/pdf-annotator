@@ -4,6 +4,7 @@ import {
   PDFDict,
   PDFDocument,
   PDFName,
+  PDFPageTree,
   PDFRawStream,
   PDFRef,
   PDFStream,
@@ -13,6 +14,7 @@ import type { PDFContext } from "pdf-lib";
 import { decodedWithinBudget } from "./boundedStreamDecode";
 import {
   resolvedArrayEntry,
+  resolvedDictAt,
   resolvedDictEntry,
   resolvedNameEntry,
   resolvedNumberEntry,
@@ -28,7 +30,7 @@ const MAX_PROTECTION_FIELD_ENTRIES = 10_000;
 // pdfPageOperations.ts strips exactly the streams these are found in, so the two must agree: a claim one side cannot see is left in the output.
 const pdfaXmpMarkers = ["pdfaid:part", "pdfaid:conformance"];
 // Shared by every compressed packet in one scan, which runs on the main thread on every open and save. A real XMP packet is kilobytes.
-const MAX_METADATA_DECODE_BYTES = 32 * 1024 * 1024;
+export const MAX_METADATA_DECODE_BYTES = 32 * 1024 * 1024;
 
 export type PdfDocumentEditorReadOnlyReason =
   | "PDF/A compliant"
@@ -168,6 +170,9 @@ async function pageListsDisagree(
   }
 
   try {
+    if (pageTreeRepeatsABranch(parsedDoc)) {
+      return true;
+    }
     const pages = parsedDoc.getPages();
     if (pages.length !== pdfDoc.numPages) {
       return true;
@@ -187,6 +192,32 @@ async function pageListsDisagree(
     // A page list either library cannot read to the end cannot be shown to match.
     return true;
   }
+}
+
+// pdf-lib walks the page tree with no record of where it has been, so a /Pages node listed under two parents, or under itself, is walked once for every path to it: a few kilobytes of /Kids can ask for billions of visits, all on the main thread. This visits each /Pages node once and stops at the first one it meets again, which no well-formed tree has. A page listed twice costs pdf-lib one more visit, not a multiplication, so it is left to the page-order check above.
+export function pageTreeRepeatsABranch(pdfDoc: PDFDocument) {
+  const root = resolvedDictEntry(pdfDoc.catalog, PDFName.of("Pages"));
+  if (!(root instanceof PDFPageTree)) {
+    return false;
+  }
+
+  const seen = new Set<PDFDict>([root]);
+  const pending = [root];
+  for (let node = pending.pop(); node; node = pending.pop()) {
+    const kids = resolvedArrayEntry(node, PDFName.of("Kids"));
+    for (let index = 0; kids && index < kids.size(); index += 1) {
+      const kid = resolvedDictAt(kids, index);
+      if (!(kid instanceof PDFPageTree)) {
+        continue;
+      }
+      if (seen.has(kid)) {
+        return true;
+      }
+      seen.add(kid);
+      pending.push(kid);
+    }
+  }
+  return false;
 }
 
 // These checks only read what this returns, so detectReadOnlyReason can hand them the same parse.
@@ -301,6 +332,54 @@ function decodedPacketClaimsPdfA(
   }
   scan.budget -= decoded.bytes.length;
   return bytesClaimPdfA(decoded.bytes);
+}
+
+/* The rest of a claiming packet is the file's own title, authors, DOI and the like, which a reference manager reads, so the strip takes out only the pdfaid properties where it can. Null sends the packet whole, as every claiming packet once went: it isn't strict UTF-8, its claim takes some other form, or what is left would still trip the raw-marker check saveEditedPdf verifies its output with. */
+export function metadataStreamWithoutPdfAClaim(
+  stream: PDFRawStream,
+  scan: { budget: number },
+) {
+  let packet = stream.contents;
+  if (stream.dict.get(PDFName.of("Filter"))) {
+    const decoded = decodedWithinBudget(stream, scan.budget);
+    if (!decoded.ok) {
+      return null;
+    }
+    scan.budget -= decoded.bytes.length;
+    packet = decoded.bytes;
+  }
+
+  let xmp: string;
+  try {
+    // ignoreBOM keeps a leading byte-order mark, so every byte the edits below leave alone is written back as it was.
+    xmp = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      packet,
+    );
+  } catch {
+    return null;
+  }
+  // UTF-16 or UTF-32 text with no byte-order mark is valid UTF-8 too, and its NULs give it away.
+  if (xmp.includes("\u0000")) {
+    return null;
+  }
+
+  // Each pattern opens with "<pdfaid:" or a single space, never a repeat such as \s+, which a packet's padding would make the engine retry from every position in it.
+  const kept = new TextEncoder().encode(
+    xmp
+      .replace(/<pdfaid:\w+(?:\s[^<>]*)?\/>/gi, "")
+      .replace(/<pdfaid:(\w+)(?:\s[^<>]*)?>[^<]*<\/pdfaid:\1\s*>/gi, "")
+      .replace(/\spdfaid:\w+\s*=\s*(?:"[^"<]*"|'[^'<]*')/gi, ""),
+  );
+  if (pdfLooksPdfAByRawMarkers(kept)) {
+    return null;
+  }
+
+  // Written unfiltered, as PDF/A asks of metadata, so the byte scans read it as it stands.
+  const dict = stream.dict.clone();
+  for (const key of ["Filter", "DecodeParms", "DL", "Length"]) {
+    dict.delete(PDFName.of(key));
+  }
+  return PDFRawStream.of(dict, kept);
 }
 
 function pdfDocumentLooksSignedOrCertified(pdfDoc: PDFDocument) {

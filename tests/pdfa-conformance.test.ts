@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { inflateSync } from "node:zlib";
-import { PDFArray, PDFDict, PDFName, PDFRawStream, PDFRef } from "pdf-lib";
+import { PDFArray, PDFDict, PDFName, PDFRawStream } from "pdf-lib";
 import {
   detectReadOnlyReason,
   pdfLooksPdfA,
@@ -32,6 +32,18 @@ const pdfaXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
 <rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">
 <pdfaid:part>2</pdfaid:part><pdfaid:conformance>B</pdfaid:conformance>
+</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
+
+// Attributes rather than elements, as some producers write the claim, beside the metadata a reference manager reads back.
+const attributeClaimXmpPacket = `<?xpacket begin="\uFEFF" id="W5M0MpCehiHzreSzNTczkc9d"?>
+<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF
+ xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+<rdf:Description rdf:about="" xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/"
+ pdfaid:part="2" pdfaid:conformance='U'/>
+<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:prism="http://prismstandard.org/namespaces/basic/2.0/">
+<dc:title><rdf:Alt><rdf:li xml:lang="x-default">Zur Elektrodynamik bewegter Körper</rdf:li></rdf:Alt></dc:title>
+<prism:doi>10.1002/andp.19053221004</prism:doi>
 </rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
 
 const mentioningXmpPacket = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
@@ -140,6 +152,75 @@ test("a PDF/A claim in an untyped compressed XMP packet is stripped", async () =
   );
 });
 
+// The rest of a claiming packet is the file's own title, authors, DOI and the like, which a reference manager reads back, so only the claim goes.
+test("an edited PDF/A document keeps its XMP metadata, without the claim", async () => {
+  const output = await rotatePageClockwise(
+    await readFixture("test-pdfa.pdf"),
+    0,
+  );
+
+  const xmp = catalogXmp(await loadTestPdf(output));
+  assert.ok(xmp.includes("<rdf:li>Test Fixture 1</rdf:li>"), xmp);
+  assert.ok(xmp.includes("<xmpMM:DocumentID>uuid:5CFB06B1-"), xmp);
+  assert.doesNotMatch(xmp, /pdfaid:(part|conformance)/i);
+  assert.equal(await detectReadOnlyReason(output, null, false), null);
+});
+
+test("a compressed packet that claims PDF/A in attributes keeps its title and DOI", async () => {
+  const bytes = await attachMetadataStream(
+    await readFixture("test-annotated.pdf"),
+    attributeClaimXmpPacket,
+    "catalog",
+    { compress: true },
+  );
+  assert.equal(
+    await pdfLooksPdfA(bytes),
+    true,
+    "the claim must be detected on input",
+  );
+
+  const output = await rotatePageClockwise(bytes, 0);
+
+  assert.equal(await pdfLooksPdfA(output), false);
+  const xmp = catalogXmp(await loadTestPdf(output));
+  assert.equal(
+    xmp,
+    attributeClaimXmpPacket.replace(
+      ` pdfaid:part="2" pdfaid:conformance='U'`,
+      "",
+    ),
+  );
+});
+
+// Anything but plain pdfaid elements and attributes in UTF-8 text goes whole, as every claiming packet once did, rather than leave a claim behind or write back a packet the edit can't read.
+test("a claiming packet that can't lose just its claim is dropped whole", async () => {
+  const encoder = new TextEncoder();
+  const packets = [
+    new Uint8Array([...encoder.encode(pdfaXmpPacket), 0xff]),
+    encoder.encode(
+      pdfaXmpPacket.replace(
+        "</rdf:Description>",
+        "<dc:description>pdfaid:part 2</dc:description></rdf:Description>",
+      ),
+    ),
+  ];
+
+  for (const packet of packets) {
+    const bytes = await attachMetadataStream(
+      await readFixture("test-annotated.pdf"),
+      packet,
+      "catalog",
+    );
+    assert.equal(await pdfLooksPdfA(bytes), true, "fixture precondition");
+
+    const output = await rotatePageClockwise(bytes, 0);
+
+    assert.equal(await pdfLooksPdfA(output), false);
+    const after = await loadTestPdf(output);
+    assert.equal(after.catalog.get(PDFName.of("Metadata")), undefined);
+  }
+});
+
 test("a file that only mentions PDF/A is not treated as one", async () => {
   const bytes = await appendPageText(
     await readFixture("test-annotated.pdf"),
@@ -245,6 +326,17 @@ async function pageOutputIntentSubtypes(bytes: Uint8Array) {
   return count;
 }
 
+function catalogXmp(pdfDoc: Awaited<ReturnType<typeof loadTestPdf>>) {
+  const stream = pdfDoc.catalog.lookup(PDFName.of("Metadata"));
+  assert.ok(stream instanceof PDFRawStream, "the catalog's XMP should be kept");
+  assert.equal(
+    stream.dict.get(PDFName.of("Filter")),
+    undefined,
+    "kept XMP is written unfiltered",
+  );
+  return new TextDecoder().decode(stream.contents);
+}
+
 function inflatedStreamsInclude(bytes: Uint8Array, marker: string) {
   const buffer = Buffer.from(bytes);
   for (let index = 0; index < buffer.length; index += 1) {
@@ -264,7 +356,7 @@ function inflatedStreamsInclude(bytes: Uint8Array, marker: string) {
 
 async function attachMetadataStream(
   bytes: Uint8Array,
-  packet: string,
+  packet: string | Uint8Array,
   target: "page" | "catalog",
   {
     compress = false,
@@ -273,7 +365,8 @@ async function attachMetadataStream(
 ) {
   const pdfDoc = await loadEditablePdf(bytes);
   const { context } = pdfDoc;
-  const packetBytes = new TextEncoder().encode(packet);
+  const packetBytes =
+    typeof packet === "string" ? new TextEncoder().encode(packet) : packet;
   const typeEntries = typed ? { Type: "Metadata", Subtype: "XML" } : {};
   const ref = compress
     ? context.register(context.flateStream(packetBytes, typeEntries))
@@ -347,5 +440,4 @@ test("the PDF/A fixture stays loadable after stripping", async () => {
   const after = await loadTestPdf(output);
 
   assert.equal(after.getPageCount(), before.getPageCount());
-  assert.ok(!(after.catalog.get(PDFName.of("Metadata")) instanceof PDFRef));
 });

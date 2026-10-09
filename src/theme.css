@@ -1,19 +1,14 @@
-/* Copied in, not installed: never edit it in a consuming project, suggest changes only. */
+/* The canonical version of this file is pdf-annotator/src/theme.css;
+   reference-manager, literature-pdf-bibtex-downloader,
+   word-bibtex-citation-addin and self-documenting-project-manager each hold
+   a read-only copy at src/theme.css. Change the canonical version only, then
+   copy it by hand over every copy; a copy is never changed on its own, so
+   suggest the change for the canonical version, which decides. The other
+   eight projects' stylesheets are their own. */
 
 /* Provides consistent design language and boilerplate to multiple projects. */
 
 /* Retint by redeclaring a --theme-* value in a stylesheet that loads after this one. */
-
-/* Sync split (2026-09-25, self-documenting-project-manager added
-   2026-09-25 morning): pdf-annotator, reference-manager,
-   literature-pdf-bibtex-downloader, word-bibtex-citation-addin and
-   self-documenting-project-manager keep this file genuinely synced —
-   their src/theme.css must stay byte-identical to
-   normalization-survey/canonical-theme.css. There is no sync script: pull
-   a canonical change by copying that file over this one, whole. Every
-   other consuming project split off on this date and now owns its copy
-   independently — a canonical change no longer reaches them, and nothing
-   here should try to force one back into sync. */
 
 /* A token or class earns its place by demonstrated real use — here or in a consuming project — and loses it the same way. */
 
@@ -538,7 +533,7 @@ input[type="file"]::file-selector-button {
   padding: var(--theme-space-sm) var(--theme-space-lg);
 }
 
-/* .credit removed — compose the footer from primitives instead, adding .text-muted to the link since <a> doesn't inherit muted colour; see demo.html. */
+/* No .credit class: compose the footer from primitives, adding .text-muted to the link, since <a> doesn't inherit muted colour. */
 
 /* An anchored, non-modal menu/popover a native <dialog> can't provide; the caller positions it. */
 .menu {

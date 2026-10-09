@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Star } from "lucide-react";
+import { Copy, Star } from "lucide-react";
 import { MAX_ANNOTATION_COMMENT_LENGTH } from "../../pdfdocumenteditor";
 import type { PdfAnnotation } from "../../pdfdocumenteditor";
 import {
@@ -17,6 +17,7 @@ export function AnnotationsPanel({
   complete,
   filter,
   onChangeFilter,
+  onCopyMarkdown,
   onRevealAnnotation,
   onSetBookmarked,
   onSetComment,
@@ -28,6 +29,8 @@ export function AnnotationsPanel({
   complete: boolean;
   filter: AnnotationListFilter;
   onChangeFilter: (filter: AnnotationListFilter) => void;
+  /** Handed the rows the list is showing, filters applied, in its order. */
+  onCopyMarkdown: (rows: AnnotationListRow[]) => void;
   onRevealAnnotation: (annotationId: string) => void;
   onSetBookmarked: (annotationId: string, bookmarked: boolean) => void;
   onSetComment: (annotationId: string, comment: string) => void;
@@ -49,7 +52,7 @@ export function AnnotationsPanel({
         <div className="annotations-filter row nowrap xs">
           <div
             aria-label="Filter annotations by colour"
-            className="annotations-swatches row xxs"
+            className="annotations-swatches row xxs grow"
             role="group"
           >
             {colorCounts.map(({ colorKey, count }, index) => {
@@ -93,6 +96,17 @@ export function AnnotationsPanel({
               fill={filter.bookmarkedOnly ? "currentColor" : "none"}
               size={15}
             />
+          </button>
+          {/* Not until every page has been read, or a copy of "all" would silently miss some. */}
+          <button
+            aria-label="Copy as Markdown"
+            className="annotations-copy icon-center"
+            disabled={!complete || visibleRows.length === 0}
+            onClick={() => onCopyMarkdown(visibleRows)}
+            title="Copy as Markdown"
+            type="button"
+          >
+            <Copy size={15} />
           </button>
         </div>
       ) : null}

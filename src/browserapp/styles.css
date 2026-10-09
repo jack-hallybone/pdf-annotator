@@ -187,9 +187,10 @@
   text-decoration-color: rgb(from var(--theme-ink) r g b / 0.24);
 }
 
-/* Same box shape as .tap-target above, so the version reads at the same rhythm as the two footer links stacked above it - this one just isn't a tap target, so it stays off that class and keeps its own copy of the shape. */
+/* Same box shape as .tap-target above, so the version reads at the same rhythm as the two footer links stacked above it - this one just isn't a tap target, so it stays off that class and keeps its own copy of the shape. Its colour is the footer's muted tone a step lighter, the quietest line here: 4.6:1 on this card in light mode, still above WCAG's 4.5:1. Scaling muted's own alpha keeps its stronger prefers-contrast override. */
 .browserapp-release-version {
   align-items: center;
+  color: rgb(from var(--theme-ink-muted) r g b / calc(alpha * 0.85));
   display: inline-flex;
   min-height: var(--theme-control-xs);
   padding-inline: var(--theme-space-xs);

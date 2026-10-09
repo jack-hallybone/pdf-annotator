@@ -1,3 +1,5 @@
+// The canonical version of this file is pdf-annotator/scripts/secrets-scan.mjs; every other project published at jack-hallybone.github.io holds a read-only copy at the same path. Change the canonical version only, then copy it by hand over every copy; a copy is never changed on its own, so suggest the change for the canonical version, which decides.
+
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import process from "node:process";

@@ -7,6 +7,7 @@ import {
   PDFNumber,
   PDFPage,
   PDFPageLeaf,
+  PDFRawStream,
   PDFRef,
   PDFStream,
   PDFString,
@@ -27,6 +28,9 @@ import {
   resolvedNumberEntry,
 } from "./pdfLookup";
 import {
+  MAX_METADATA_DECODE_BYTES,
+  metadataStreamWithoutPdfAClaim,
+  pageTreeRepeatsABranch,
   pdfAClaimingMetadataRefs,
   verifyEditedPdfProtectionClaims,
 } from "./pdfProtection";
@@ -81,8 +85,15 @@ const pdfSaveOptions = {
   updateFieldAppearances: false,
 };
 
-export function loadEditablePdf(bytes: Uint8Array) {
-  return PDFDocument.load(bytes, pdfLoadOptions);
+export async function loadEditablePdf(bytes: Uint8Array) {
+  const pdfDoc = await PDFDocument.load(bytes, pdfLoadOptions);
+  // Saving, page edits, the existing-annotation import and a merge source all reach pdf-lib's page walk, which a repeated /Pages node turns into a freeze. The open already makes such a file read-only; this covers the rest, a merge source included.
+  if (pageTreeRepeatsABranch(pdfDoc)) {
+    throw new Error(
+      "This PDF's page tree lists part of itself more than once.",
+    );
+  }
+  return pdfDoc;
 }
 
 export class PdfProtectionSanitizationError extends Error {
@@ -177,15 +188,35 @@ function stripPdfAMetadataStreams(context: PDFContext) {
     return;
   }
 
+  // A packet that can lose just its claim keeps the rest; any other goes whole.
+  const scan = { budget: MAX_METADATA_DECODE_BYTES };
+  const deletedRefs = new Set<PDFRef>();
+  for (const ref of claimingRefs) {
+    const stream = context.lookup(ref);
+    const kept =
+      stream instanceof PDFRawStream
+        ? metadataStreamWithoutPdfAClaim(stream, scan)
+        : null;
+    if (kept) {
+      context.assign(ref, kept);
+    } else {
+      deletedRefs.add(ref);
+    }
+  }
+
+  if (deletedRefs.size === 0) {
+    return;
+  }
+
   const metadataKey = PDFName.of("Metadata");
   for (const dict of indirectDicts(context)) {
     const ref = dict.get(metadataKey);
-    if (ref instanceof PDFRef && claimingRefs.has(ref)) {
+    if (ref instanceof PDFRef && deletedRefs.has(ref)) {
       dict.delete(metadataKey);
     }
   }
 
-  for (const ref of claimingRefs) {
+  for (const ref of deletedRefs) {
     context.delete(ref);
   }
 }

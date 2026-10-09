@@ -503,7 +503,7 @@ test("a parked file whose page lists disagree comes back read-only", async () =>
     undefined,
     session.pdfBytes,
     [],
-    { ...session, editingEnabled: true },
+    { ...session, editingEnabled: true, unlockedOriginal: true },
   );
   assert.equal(result.current.model.readOnlyReason, "ambiguous page order");
   assert.equal(result.current.model.editingEnabled, false);

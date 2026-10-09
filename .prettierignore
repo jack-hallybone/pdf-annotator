@@ -6,11 +6,11 @@ coverage
 playwright-report
 test-results
 
-# Vendored and user content: never ours to reformat.
+# The annotator's own test PDFs, and the icons, images and manifest template it serves: kept exactly as made, never reformatted.
 *.pdf
 src/browserapp/assets
 
-# The shared fleet stylesheet, byte-identical in every project carrying it: `npm run format` would fork this copy, and .gitignore does not keep prettier off it.
+# The canonical version of the stylesheet four other projects copy byte for byte (see its header): it changes only when someone means to change it, never as a side effect of `npm run format`, and .gitignore does not keep prettier off it.
 src/theme.css
 
 # Generated from the dependency tree; reformatting it would fork it from what the generator emits.

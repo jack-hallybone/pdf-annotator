@@ -78,6 +78,19 @@
   padding: var(--theme-space-sm);
 }
 
+/* The box sits on the label's first line, and a long origin wraps rather than widening the dialog. */
+.external-link-always {
+  align-items: flex-start;
+  color: var(--theme-ink);
+  font-size: var(--theme-text-md);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+
+  & input {
+    margin-block-start: 0.2em;
+  }
+}
+
 .floating-frame {
   color: var(--theme-ink);
   padding: var(--theme-space-xs);
@@ -87,8 +100,7 @@
 .floating-frame button,
 .floating-frame input,
 .floating-frame select,
-.floating-frame textarea,
-.floating-popover {
+.floating-frame textarea {
   pointer-events: auto;
 }
 
@@ -113,18 +125,13 @@
   width: var(--theme-space-xl);
 }
 
-.floating-popover {
-  box-sizing: border-box;
-  font-size: var(--theme-text-xs);
-  font-weight: var(--theme-weight-medium);
-  padding: var(--theme-space-md);
-  position: absolute;
-}
-
+/* Plain .menu panels like the tab and page menus, as is .zoom-popover below. The frame they open from passes pointer events through to the page, so each takes them back. */
 .tool-settings-popover,
 .image-tool-menu {
   margin-right: var(--theme-space-sm);
   max-width: calc(100vw - 5rem);
+  pointer-events: auto;
+  position: absolute;
   right: 100%;
   top: 0;
   width: max-content;
@@ -214,6 +221,13 @@
   .tabbedapp-notice {
     width: auto;
   }
+
+  /* Beside the text, Edit a copy and Unlock original would squeeze it to a word or two a line, so here the read-only choices take a row of their own under it, centred as the text is. */
+  .banner-actions.protected-pdf-actions {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    justify-content: center;
+  }
 }
 
 @media (max-width: 700px) {
@@ -230,11 +244,75 @@
   }
 }
 
+/* In the notice stack for its placement, docked or floating; shaped like the floating controls, a raised strip of compact controls rather than a banner. */
+.find-bar.panel {
+  max-width: 100%;
+  padding: var(--theme-space-xs);
+  width: max-content;
+}
+
+.find-bar-input {
+  height: var(--theme-control-md);
+  min-width: 0;
+  padding: 0 var(--theme-space-sm);
+  width: 12rem;
+}
+
+/* A minimum width, so the controls after it hold still as the count changes. */
+.find-bar-count {
+  color: var(--theme-ink-muted);
+  font-size: var(--theme-text-xs);
+  font-weight: var(--theme-weight-medium);
+  min-width: 4.5rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Wider than a notice, the bar would float into the document controls or the open sidebar up to about this width, so the stack docks in flow while it holds one, as it does for everything below 700px. Only the floating placement is undone; the rest of .toast.inline's in-flow default comes back with position. */
+@media (min-width: 701px) and (max-width: 900px) {
+  .tabbedapp-notice-stack.toast.inline:has(> .find-bar) {
+    box-sizing: border-box;
+    max-width: none;
+    padding: var(--theme-space-sm) var(--theme-space-sm) 0;
+    position: static;
+    transform: none;
+    width: 100%;
+  }
+}
+
+/* Docked, it fills its row and the field takes the room. */
+@media (max-width: 900px) {
+  .find-bar.panel {
+    align-self: stretch;
+    width: auto;
+  }
+
+  .find-bar-input {
+    flex: 1;
+    width: auto;
+  }
+}
+
 .history-controls {
   bottom: calc(var(--app-control-bottom-edge) + var(--app-scrollbar-block));
 }
 
-.zoom-button {
+.back-control {
+  bottom: calc(var(--app-control-bottom-edge) + var(--app-scrollbar-block));
+  font-size: var(--theme-text-xs);
+}
+
+/* Lifted by the height of the undo and redo frame below it - one control, the frame's padding and its 1px border - and a gap. */
+.back-control.stacked {
+  bottom: calc(
+    var(--app-control-bottom-edge) + var(--app-scrollbar-block) +
+      var(--theme-control-md) + 2 * var(--theme-space-xs) + 2px +
+      var(--theme-space-sm)
+  );
+}
+
+.zoom-button,
+.back-button {
   font-weight: var(--theme-weight-medium);
   height: var(--theme-control-md);
   min-width: 3.5rem;
@@ -267,42 +345,11 @@
 .zoom-popover {
   bottom: 100%;
   margin-bottom: var(--theme-space-sm);
+  min-width: 10.5rem;
+  pointer-events: auto;
+  position: absolute;
   right: 0;
-  width: 10rem;
-}
-
-.zoom-percent-field {
-  height: var(--theme-control-md);
-  margin-bottom: var(--theme-space-sm);
-  padding: 0 var(--theme-space-sm);
-}
-
-.zoom-percent-input {
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  font-weight: var(--theme-weight-medium);
-  min-width: 0;
-  text-align: right;
-}
-
-.zoom-percent-unit {
-  color: var(--theme-ink-muted);
-  padding-left: var(--theme-space-xs);
-}
-
-.zoom-preset-grid {
-  display: grid;
-  gap: var(--theme-space-xs);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.menu-button {
-  font-weight: var(--theme-weight-medium);
-  height: var(--theme-control-md);
-  padding: 0 var(--theme-space-sm);
-  text-align: left;
+  width: max-content;
 }
 
 /* padding: 0 cancels .panel's own: the header and scroll area below already carry their own padding, sized on the assumption of a flush outer edge. */
@@ -408,6 +455,7 @@
 }
 
 .annotations-star-filter,
+.annotations-copy,
 .annotation-row-star {
   border-color: var(--theme-border);
   height: var(--theme-control-sm);
@@ -1272,14 +1320,10 @@ body,
   width: min(30rem, calc(100vw - var(--theme-space-lg) * 2));
 }
 
-.tabbedapp-file-list-dialog p,
+/* The same size and leading as the .dialog-body line above the list. */
 .tabbedapp-file-list-dialog li {
   font-size: var(--theme-text-md);
   line-height: 1.45;
-}
-
-.tabbedapp-file-list-dialog p {
-  margin: 0;
 }
 
 .tabbedapp-file-list-dialog ul {
@@ -1306,27 +1350,4 @@ body,
 
 .tabbedapp-rename-dialog {
   width: min(24rem, calc(100vw - var(--theme-space-lg) * 2));
-}
-
-.tabbedapp-rename-dialog label {
-  display: grid;
-  font-size: var(--theme-text-sm);
-  font-weight: var(--theme-weight-semibold);
-  gap: var(--theme-space-sm);
-}
-
-.tabbedapp-rename-dialog input {
-  background: var(--theme-surface);
-  border-radius: var(--theme-radius-lg);
-  box-sizing: border-box;
-  color: var(--theme-ink);
-  font: inherit;
-  min-width: 0;
-  padding: var(--theme-space-sm) var(--theme-space-md);
-  width: 100%;
-}
-
-.tabbedapp-rename-dialog input:focus {
-  box-shadow: var(--theme-focus-ring);
-  outline: none;
 }

@@ -80,6 +80,7 @@ type DocumentSidebarProps = {
   canMergePdf?: boolean;
   onChangeAnnotationFilter: (filter: AnnotationListFilter) => void;
   onChangeTab: (tab: DocumentSidebarTab) => void;
+  onCopyAnnotationsMarkdown: (rows: AnnotationListRow[]) => void;
   onEnsureAllAnnotations: () => void;
   onRevealAnnotation: (annotationId: string) => void;
   onSelectOutlineDestination: (destination: unknown) => void;
@@ -126,6 +127,7 @@ export function DocumentSidebar({
   onAddPage,
   onChangeAnnotationFilter,
   onChangeTab,
+  onCopyAnnotationsMarkdown,
   onEnsureAllAnnotations,
   onRevealAnnotation,
   onSelectOutlineDestination,
@@ -374,6 +376,7 @@ export function DocumentSidebar({
             complete={annotationsComplete}
             filter={filter}
             onChangeFilter={onChangeAnnotationFilter}
+            onCopyMarkdown={onCopyAnnotationsMarkdown}
             onRevealAnnotation={onRevealAnnotation}
             onSetBookmarked={onSetAnnotationBookmarked}
             onSetComment={onSetAnnotationComment}

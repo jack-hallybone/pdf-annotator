@@ -84,6 +84,7 @@ function useStubView(snapshot: PdfDocumentEditorViewSnapshot): StubView {
     revealPreparationError: () => {},
     runAfterInitialVisualReady: (callback: () => void) => callback(),
     setActivePageIndex,
+    setBackStack: () => {},
     setFocusedAnnotationId,
     setScale: (nextScale: number) => {
       scaleRef.current = nextScale;

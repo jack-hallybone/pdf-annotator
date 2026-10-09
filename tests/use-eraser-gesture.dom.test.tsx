@@ -74,7 +74,6 @@ function renderEraser(options: HarnessOptions = {}) {
   return renderHook(
     (props: HarnessOptions) => {
       const prepaintedInkAnnotationIdsRef = useRef<Set<string>>(new Set());
-      const suppressNextContextMenuRef = useRef(false);
       const api = useEraserGesture({
         annotations: props.annotations ?? annotations,
         canvasInkAnnotations:
@@ -93,11 +92,10 @@ function renderEraser(options: HarnessOptions = {}) {
         readOnly: props.readOnly ?? false,
         scale: 1,
         showSynchronizedAnnotations: props.showSynchronizedAnnotations ?? false,
-        suppressNextContextMenuRef,
         toolSettings,
         viewport,
       });
-      return { api, prepaintedInkAnnotationIdsRef, suppressNextContextMenuRef };
+      return { api, prepaintedInkAnnotationIdsRef };
     },
     { initialProps: options },
   );
@@ -211,15 +209,12 @@ test("requireMovement holds the erase until the drag passes the threshold", () =
     ),
   );
   assert.deepEqual(changes, []);
-  assert.equal(result.current.suppressNextContextMenuRef.current, false);
 
   act(() => result.current.api.appendPoints([{ x: 12, y: 10 }]));
   assert.deepEqual(changes, []);
-  assert.equal(result.current.suppressNextContextMenuRef.current, false);
 
   act(() => result.current.api.appendPoints([{ x: 18, y: 10 }]));
   assert.deepEqual(changes, [{ deleteIds: ["note"], pathUpdates: [] }]);
-  assert.equal(result.current.suppressNextContextMenuRef.current, true);
 });
 
 test("a scoped gesture ignores annotations outside its scope", () => {

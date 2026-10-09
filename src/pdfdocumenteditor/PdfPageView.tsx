@@ -23,7 +23,6 @@ import type {
   PageRenderPriority,
   PageViewport,
   PdfPoint,
-  PdfRect,
   Tool,
   ToolSettings,
 } from "./types";
@@ -34,6 +33,8 @@ import {
   shouldRenderExistingAnnotationInPdfJsLayer,
 } from "./annotationDisplayPolicy";
 import { getDisplayAnnotations } from "./annotationImport";
+import type { PageFindMatches } from "./documentFind";
+import { showFindHighlights } from "./findHighlights";
 import {
   promotePendingPageTasks,
   schedulePromotableTask,
@@ -74,6 +75,7 @@ import {
   eventToPdfPoints,
   eventToPdfPointsFromElement,
   eventToViewportPoint,
+  isPenEraser,
   nearestTextHitRect,
   releasePointer,
   viewportDisplaySize,
@@ -161,9 +163,6 @@ type InkCanvasRenderState = {
   viewportWidth: number;
 };
 type TextSelectionHighlightAction = {
-  coveredText: string;
-  quadPoints: number[][];
-  rects: PdfRect[];
   x: number;
   y: number;
 };
@@ -180,6 +179,9 @@ type PdfPageViewProps = {
   annotations: PdfAnnotation[];
   selectedAnnotationIds: string[];
   focusedAnnotationId: string | null;
+  // This page's matches for the find bar, and which of them is the current match, if it is on this page.
+  findMatches: PageFindMatches | null;
+  findCurrentMatch: number | null;
   showAnnotations: boolean;
   toolSettings: ToolSettings;
   onActivate: (pageIndex: number) => void;
@@ -193,6 +195,8 @@ type PdfPageViewProps = {
   onFocusAnnotationConsumed: (annotationId: string) => void;
   onEnsureAnnotationsVisible: () => void;
   onExternalLinkRequest: (url: string) => void;
+  // Highlights the text selection on every page it covers, this one included.
+  onHighlightTextSelection: () => void;
   onMoveAnnotationsToPage: (options: {
     annotationIds: string[];
     clientX: number;
@@ -246,6 +250,8 @@ function PdfPageViewComponent({
   annotations,
   selectedAnnotationIds,
   focusedAnnotationId,
+  findMatches,
+  findCurrentMatch,
   showAnnotations,
   toolSettings,
   onActivate,
@@ -256,6 +262,7 @@ function PdfPageViewComponent({
   onFocusAnnotationConsumed,
   onEnsureAnnotationsVisible,
   onExternalLinkRequest,
+  onHighlightTextSelection,
   onMoveAnnotationsToPage,
   onNavigateDestination,
   onNavigatePage,
@@ -280,7 +287,6 @@ function PdfPageViewComponent({
   const pendingPageTasksRef = useRef<Set<PendingPageTask>>(new Set());
   const suppressNextTextHighlightRef = useRef(false);
   const dismissedSelectionPointerIdRef = useRef<number | null>(null);
-  const suppressNextContextMenuRef = useRef(false);
   const inkCanvasRenderStateRef = useRef<InkCanvasRenderState | null>(null);
   const prepaintedInkAnnotationIdsRef = useRef<Set<string>>(new Set());
   const [draftTextHighlight, setDraftTextHighlight] = useState<{
@@ -326,6 +332,11 @@ function PdfPageViewComponent({
     onFocusAnnotationConsumed,
   );
   const getActiveTextGeometryRef = useRenderLatestRef(getActiveTextGeometry);
+  const findMatchesRef = useRenderLatestRef(findMatches);
+  const findCurrentMatchRef = useRenderLatestRef(findCurrentMatch);
+  // Null until this render's text layer has finished drawing: find colours its matches only once their text is all there.
+  const findTextLayerRef = useRef<HTMLElement | null>(null);
+  const clearFindHighlightsRef = useRef<() => void>(() => undefined);
   const viewport = useMemo(() => page.getViewport({ scale }), [page, scale]);
   const viewportRef = useRenderLatestRef(viewport);
   // Escape generates no pointerup or pointercancel, so nothing in the pointer gesture tracking below sees it.
@@ -439,10 +450,18 @@ function PdfPageViewComponent({
     readOnly,
     scale,
     showSynchronizedAnnotations,
-    suppressNextContextMenuRef,
     toolSettings,
     viewport,
   });
+
+  const paintFindHighlights = useCallback(() => {
+    clearFindHighlightsRef.current();
+    clearFindHighlightsRef.current = showFindHighlights(
+      findTextLayerRef.current,
+      findMatchesRef.current,
+      findCurrentMatchRef.current,
+    );
+  }, [findCurrentMatchRef, findMatchesRef]);
 
   function setPageDisplaySize(nextSize: PageDisplaySize) {
     setDisplaySize((currentSize) =>
@@ -584,6 +603,17 @@ function PdfPageViewComponent({
         } else {
           const eventBus = new EventBus();
           eventBus.on("pagerendered", revealCanvasIfReady, { once: true });
+          // draw() settles without waiting for the text layer, which find's colours are painted into.
+          eventBus.on(
+            "textlayerrendered",
+            () => {
+              if (!cancelled) {
+                findTextLayerRef.current = pageView?.textLayer?.div ?? null;
+                paintFindHighlights();
+              }
+            },
+            { once: true },
+          );
           pageView = new PdfJsPageView({
             annotationMode: AnnotationMode.DISABLE,
             container,
@@ -673,16 +703,25 @@ function PdfPageViewComponent({
       }
       textLayerRef.current = null;
       activeTextGeometryRef.current = null;
+      findTextLayerRef.current = null;
+      clearFindHighlightsRef.current();
+      clearFindHighlightsRef.current = () => undefined;
     };
   }, [
     onNoticeRef,
     page,
     pageIndex,
+    paintFindHighlights,
     renderKey,
     renderPriorityRef,
     scale,
     viewport,
   ]);
+
+  // A text layer drawn later paints its own, from the render effect above.
+  useEffect(() => {
+    paintFindHighlights();
+  }, [findCurrentMatch, findMatches, paintFindHighlights]);
 
   /* The only effect allowed to depend on `renderPriority` directly - elsewhere read `renderPriorityRef`, or the effect re-runs on every priority change and blanks the canvas mid-scroll. What it's allowed to do: start work this page has queued but not begun. */
   useEffect(() => {
@@ -1127,9 +1166,24 @@ function PdfPageViewComponent({
     };
   }, [readOnly, tool, viewport]);
 
+  /** Turning the pen over erases whatever tool is chosen, as the Eraser does. */
+  function beginPenErase(event: React.PointerEvent<Element>, point: PdfPoint) {
+    event.preventDefault();
+    // The interaction layer sits inside the page, which would begin a second erase.
+    event.stopPropagation();
+    onBeginAnnotationEdit({ finishOnPointerUp: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    eraser.begin(point, { requireMovement: false, scope: "all" });
+  }
+
   function handlePointerDown(event: React.PointerEvent<SVGSVGElement>) {
     onActivate(pageIndex);
     if (readOnly) {
+      return;
+    }
+
+    if (isPenEraser(event)) {
+      beginPenErase(event, eventToPdfPoint(event, viewport));
       return;
     }
 
@@ -1235,6 +1289,12 @@ function PdfPageViewComponent({
     }
     if (readOnly) {
       onActivate(pageIndex);
+      return;
+    }
+
+    if (isPenEraser(event)) {
+      onActivate(pageIndex);
+      beginPenErase(event, eventToPdfPointFromElement(event, viewport));
       return;
     }
 
@@ -2072,33 +2132,7 @@ function PdfPageViewComponent({
       return;
     }
 
-    const pageElement = pageRef.current;
-    if (!pageElement) {
-      return;
-    }
-
-    const { rects, quadPoints } = getSelectedTextRects(
-      selection,
-      pageElement,
-      textLayerRef.current,
-      viewport,
-    );
-
-    if (rects.length > 0) {
-      onAddAnnotation({
-        id: crypto.randomUUID(),
-        kind: "textHighlight",
-        pageIndex,
-        rects,
-        quadPoints,
-        color: toolSettings.highlightColor,
-        opacity: toolSettings.highlightOpacity,
-        comment: "",
-        coveredText: selection.toString(),
-      });
-    }
-
-    selection.removeAllRanges();
+    onHighlightTextSelection();
   }
 
   const draftTextHighlightRects = useMemo(
@@ -2167,23 +2201,7 @@ function PdfPageViewComponent({
     event.preventDefault();
     event.stopPropagation();
 
-    if (!textSelectionHighlightAction) {
-      return;
-    }
-
-    onEnsureAnnotationsVisible();
-    onAddAnnotation({
-      id: crypto.randomUUID(),
-      kind: "textHighlight",
-      pageIndex,
-      rects: textSelectionHighlightAction.rects,
-      quadPoints: textSelectionHighlightAction.quadPoints,
-      color: toolSettings.highlightColor,
-      opacity: toolSettings.highlightOpacity,
-      comment: "",
-      coveredText: textSelectionHighlightAction.coveredText,
-    });
-    window.getSelection()?.removeAllRanges();
+    onHighlightTextSelection();
     setTextSelectionHighlightAction(null);
   }
 
@@ -2205,12 +2223,6 @@ function PdfPageViewComponent({
         onPointerCancel={handlePointerCancel}
         onLostPointerCapture={handlePointerCancel}
         onMouseUp={handleMouseUp}
-        onContextMenu={(event) => {
-          if (suppressNextContextMenuRef.current) {
-            suppressNextContextMenuRef.current = false;
-            event.preventDefault();
-          }
-        }}
       >
         <div className="pdfdocumenteditor-fill">
           <div
@@ -2443,6 +2455,8 @@ function arePdfPageViewPropsEqual(
   return (
     previous.active === next.active &&
     previous.annotations === next.annotations &&
+    previous.findCurrentMatch === next.findCurrentMatch &&
+    previous.findMatches === next.findMatches &&
     previous.focusedAnnotationId === next.focusedAnnotationId &&
     previous.page === next.page &&
     previous.pageCount === next.pageCount &&
@@ -2582,12 +2596,11 @@ function getTextSelectionHighlightAction(
     return null;
   }
 
-  const coveredText = selection.toString();
-  if (coveredText.trim().length === 0) {
+  if (selection.toString().trim().length === 0) {
     return null;
   }
 
-  const { rects, quadPoints } = getSelectedTextRects(
+  const { rects } = getSelectedTextRects(
     selection,
     pageElement,
     textLayerElement,
@@ -2606,9 +2619,6 @@ function getTextSelectionHighlightAction(
   const pagePadding = SELECTION_BUTTON_PAGE_PADDING;
 
   return {
-    coveredText,
-    quadPoints,
-    rects,
     x: clamp(
       viewportBounds.x * xScale - buttonSize - pagePadding,
       pagePadding,

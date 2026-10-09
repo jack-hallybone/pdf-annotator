@@ -1,3 +1,5 @@
+// The canonical version of this file is pdf-annotator/scripts/license-check.mjs; every other project published at jack-hallybone.github.io holds a read-only copy at the same path. Change the canonical version only, then copy it by hand over every copy; a copy is never changed on its own, so suggest the change for the canonical version, which decides.
+
 import { readFileSync } from "node:fs";
 import process from "node:process";
 
@@ -18,6 +20,12 @@ const ALLOWED = new Set([
   "Zlib",
 ]);
 
+// Knowingly accepted copyleft exceptions, by project: the citation engine the reference manager and the Word add-in share (reference-manager/bib-core/src/csl-engine.mjs). Pinned by version, so an upgrade is reviewed again, and by project, so no other project inherits them.
+const EXCEPTIONS = new Map([
+  ["reference-manager", ["bibliojson@4.0.4", "citeproc@2.4.63"]],
+  ["word-bibtex-citation-addin", ["bibliojson@4.0.4", "citeproc@2.4.63"]],
+]);
+
 // "A OR B" needs one allowed side and "A AND B" needs both; anything else (WITH, nested brackets, no licence at all) fails closed.
 const allowed = (licence) => {
   const expr = licence.replace(/^\((.*)\)$/, "$1");
@@ -32,6 +40,7 @@ const allowed = (licence) => {
 const lock = JSON.parse(
   readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
 );
+const excepted = new Set(EXCEPTIONS.get(lock.name));
 const packages = Object.entries(lock.packages)
   .filter(([path]) => path)
   .map(([path, { version, license }]) => ({
@@ -40,7 +49,9 @@ const packages = Object.entries(lock.packages)
     license,
   }));
 const refused = packages.filter(
-  ({ license }) => typeof license !== "string" || !allowed(license),
+  ({ name, version, license }) =>
+    !excepted.has(`${name}@${version}`) &&
+    (typeof license !== "string" || !allowed(license)),
 );
 
 for (const { name, version, license } of refused)

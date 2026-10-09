@@ -190,7 +190,8 @@ test('"Always allow" reaches the next link on the same page, and still asks befo
     page.evaluate(() => (window as unknown as { __opened: string[] }).__opened);
 
   await link("mailto:support@vendor.example").click();
-  await dialog.getByRole("button", { name: /^Always allow/ }).click();
+  await dialog.getByRole("checkbox", { name: /^Always allow/ }).check();
+  await dialog.getByRole("button", { name: "Open" }).click();
   await expect(dialog).toBeHidden();
   await expect.poll(opened).toContain("mailto:support@vendor.example");
 

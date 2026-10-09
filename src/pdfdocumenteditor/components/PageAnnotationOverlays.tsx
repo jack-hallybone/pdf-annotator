@@ -15,7 +15,7 @@ import {
   resizeImageStampToWidth,
 } from "../annotationGeometry";
 import { FREE_TEXT_LINE_HEIGHT } from "../freeTextLayout";
-import { useVisiblePageBounds } from "../pagePointerGeometry";
+import { isPenEraser, useVisiblePageBounds } from "../pagePointerGeometry";
 import {
   annotationContentTransform,
   pdfRectToViewportRect,
@@ -107,7 +107,8 @@ export const AnnotationShape = memo(function AnnotationShape({
       }
 
       const isRightButton = event.button === 2 || (event.buttons & 2) === 2;
-      if (isRightButton) {
+      // Left to bubble to the page, which erases with a stylus's eraser end.
+      if (isRightButton || isPenEraser(event)) {
         return;
       }
 
@@ -591,6 +592,15 @@ export function SelectionToolbar({
     (annotation) =>
       annotation.kind === "freeText" || annotation.kind === "imageStamp",
   );
+  // The same tests the rows below render on, so a separator never sits under or over nothing.
+  const showsNumberRows =
+    Boolean(
+      first &&
+      ((showsOpacity && hasOpacity(first)) ||
+        (showsStroke && hasStroke(first))),
+    ) ||
+    showsFontSize ||
+    showsImageSize;
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const visibleBounds = useVisiblePageBounds(pageRef, viewport);
   const rowHeights = [
@@ -664,7 +674,7 @@ export function SelectionToolbar({
       onPointerUp={(event) => event.stopPropagation()}
     >
       <div
-        className="panel floating selection-toolbar"
+        className="panel floating menu selection-toolbar"
         ref={toolbarRef}
         onClick={(event) => event.stopPropagation()}
         onMouseDown={(event) => event.stopPropagation()}
@@ -676,7 +686,6 @@ export function SelectionToolbar({
             <div onPointerDownCapture={onBeginEdit}>
               <ColorPalette
                 color={first.color}
-                label={null}
                 onChange={(color) =>
                   onUpdate((current) =>
                     hasColor(current) ? { ...current, color } : current,
@@ -685,6 +694,10 @@ export function SelectionToolbar({
                 onCommit={onClose}
               />
             </div>
+          ) : null}
+          {/* Swatches, number rows and actions are three groups, split the way a menu splits its own; the actions row always follows, so the swatches never end the panel. */}
+          {showsColor ? (
+            <span className="menu-separator" role="separator" />
           ) : null}
           {showsOpacity && first && hasOpacity(first) ? (
             <div onPointerDownCapture={onBeginEdit}>
@@ -785,6 +798,9 @@ export function SelectionToolbar({
                 />
               </div>
             </>
+          ) : null}
+          {showsNumberRows ? (
+            <span className="menu-separator" role="separator" />
           ) : null}
           <div className="selection-toolbar-actions row nowrap">
             {showsCopyText && onCopyText ? (

@@ -337,6 +337,18 @@ export function nearestTextHitRect(
   return best;
 }
 
+/** A stylus's eraser end: Pointer Events give it button 5 as it touches, and buttons bit 32 while it stays down. */
+export function isPenEraser(event: {
+  pointerType: string;
+  button: number;
+  buttons: number;
+}): boolean {
+  return (
+    event.pointerType === "pen" &&
+    (event.button === 5 || (event.buttons & 32) === 32)
+  );
+}
+
 export function releasePointer(event: React.PointerEvent, pointerId: number) {
   try {
     (event.target as Element).releasePointerCapture?.(pointerId);

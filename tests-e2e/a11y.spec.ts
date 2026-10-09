@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
@@ -11,7 +12,12 @@ const fixturePath = fixture("test-annotated.pdf");
 const HIDDEN_FILE_INPUT = 'input[type="file"].tabbedapp-hidden-input';
 
 // WCAG 2.2 SC 2.5.8 sets 24x24 CSS px. Its spacing exception needs every neighbour's geometry, so exempt targets are listed with their reason.
-const TARGET_SIZE_EXEMPT: { selector: string; why: string }[] = [];
+const TARGET_SIZE_EXEMPT: { selector: string; why: string }[] = [
+  {
+    selector: '.external-link-always input[type="checkbox"]',
+    why: "a native checkbox at the browser's own size, which SC 2.5.8 exempts as a user-agent control; the label around it takes the click too, so the whole line is its target",
+  },
+];
 
 // PDF.js's text layer is a transparent copy of the page's text over the canvas, so its 1:1 contrast is the point. Skipped wholesale rather than listed, because it is one element per text run.
 const PDF_DOCUMENT_CONTENT = ".textLayer";
@@ -64,7 +70,43 @@ const DOCUMENT_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
         await expect(page.locator(".banner.warning")).toBeVisible();
       },
     },
+    {
+      name: "read-only banner (PDF/A) with Unlock original",
+      open: async (page) => {
+        await stubOpenFilePicker(page, "test-pdfa.pdf");
+        await page.goto("/");
+        await page.getByRole("button", { name: "Open PDFs" }).click();
+        await expect(
+          page.getByRole("button", { name: "Unlock original" }),
+        ).toBeVisible();
+      },
+    },
   ];
+
+// Only a file opened through Open PDFs carries a handle to save over, never one from the hidden input, and only that file is offered Unlock original. Nothing is written here.
+async function stubOpenFilePicker(page: Page, name: string) {
+  const bytes = Array.from(await readFile(fixture(name)));
+  await page.addInitScript(
+    (opened) => {
+      const handle = {
+        kind: "file",
+        name: opened.name,
+        createWritable: async () => {
+          throw new Error("Nothing is saved in this test.");
+        },
+        getFile: async () =>
+          new File([new Uint8Array(opened.bytes)], opened.name, {
+            lastModified: 1,
+            type: "application/pdf",
+          }),
+      };
+      (
+        window as unknown as { showOpenFilePicker: () => Promise<unknown[]> }
+      ).showOpenFilePicker = async () => [handle];
+    },
+    { bytes, name },
+  );
+}
 
 const OVERLAY_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
   [
@@ -99,6 +141,27 @@ const OVERLAY_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
           .click();
         await page.getByRole("tab", { name: "Contents" }).click();
         await expect(page.locator(".outline-entry").first()).toBeVisible();
+      },
+    },
+    {
+      name: "back control after a contents jump",
+      open: async (page) => {
+        await page.goto("/");
+        await page.locator(HIDDEN_FILE_INPUT).setInputFiles({
+          name: "outlined.pdf",
+          mimeType: "application/pdf",
+          buffer: await outlinedPdf(),
+        });
+        await expect(page.locator(".page-jump-control")).toBeVisible();
+        await page
+          .getByRole("button", { name: /show sidebar/i })
+          .first()
+          .click();
+        await page.getByRole("tab", { name: "Contents" }).click();
+        await page.getByRole("button", { name: "Chapter two" }).click();
+        await expect(
+          page.getByRole("button", { name: "Back to page 1" }),
+        ).toBeVisible();
       },
     },
     {
@@ -144,6 +207,18 @@ const OVERLAY_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
       },
     },
     {
+      name: "zoom popover",
+      open: async (page) => {
+        await openDocument(page);
+        await page.getByRole("button", { name: "Zoom settings" }).click();
+        await expect(page.locator(".zoom-popover")).toBeVisible();
+      },
+    },
+    {
+      name: "find bar",
+      open: openFindBar,
+    },
+    {
       name: "rename dialog",
       open: async (page) => {
         await openDocument(page);
@@ -187,6 +262,14 @@ const OVERLAY_STATES: { name: string; open: (page: Page) => Promise<void> }[] =
       },
     },
   ];
+
+// With a query, so the count and the previous and next buttons are all showing.
+async function openFindBar(page: Page) {
+  await openDocument(page);
+  await page.keyboard.press("Control+f");
+  await page.keyboard.type("a");
+  await expect(page.getByRole("search").getByRole("status")).not.toBeEmpty();
+}
 
 let outlinedPdfBytes: Buffer | null = null;
 async function outlinedPdf() {
@@ -301,7 +384,7 @@ async function audit(page: Page, exempt: string[]) {
       // A control covered by something else fails every other criterion at once, and a full-width transparent container is invisible to a check that looks at elements one at a time. While an overlay is open only its own contents are checked: an overlay is meant to cover what is behind it.
       const overlays = [
         ...document.querySelectorAll(
-          '[aria-modal="true"], [role="menu"], .menu, .floating-popover',
+          '[aria-modal="true"], [role="menu"], .menu',
         ),
       ].filter((el) => visible(el));
       const occlusionTargets = overlays.length
@@ -524,6 +607,18 @@ test.describe("at a 320px viewport", () => {
     expect(await page.locator(".tabbedapp-notice").count()).toBeGreaterThan(0);
     expect(editable.interactiveChecked).toBeGreaterThan(10);
     expect(withNotice.interactiveChecked).toBeGreaterThan(10);
+    expect(findings, `\n${report(findings)}\n`).toEqual([]);
+  });
+
+  // Docked in flow here, like the notices, where floating it would cover the document controls.
+  test("the find bar still passes", async ({ page }) => {
+    await openFindBar(page);
+    const { findings, interactiveChecked } = await audit(
+      page,
+      TARGET_SIZE_EXEMPT.map((entry) => entry.selector),
+    );
+
+    expect(interactiveChecked).toBeGreaterThan(10);
     expect(findings, `\n${report(findings)}\n`).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ import { ChevronRight } from "lucide-react";
 import { PdfDocumentEditor } from "../pdfdocumenteditor";
 import type {
   PdfDocumentEditorCloseRequest,
+  PdfDocumentEditorFindResults,
   PdfDocumentEditorHandle,
   PdfDocumentEditorReadOnlyState,
   PdfDocumentEditorViewState,
@@ -37,10 +38,15 @@ export type {
   SensitiveTabbedAppDocumentSession,
 } from "./tabbedAppSession";
 import { DocumentSidebar } from "./components/DocumentSidebar";
+import { FindBar } from "./components/FindBar";
 import type { DocumentSidebarTab } from "./components/DocumentSidebar";
-import { EMPTY_ANNOTATION_FILTER } from "./annotationList";
-import type { AnnotationListFilter } from "./annotationList";
 import {
+  EMPTY_ANNOTATION_FILTER,
+  annotationListMarkdown,
+} from "./annotationList";
+import type { AnnotationListFilter, AnnotationListRow } from "./annotationList";
+import {
+  FloatingBackControl,
   FloatingDocumentControls,
   FloatingHistoryControls,
   FloatingToolDock,
@@ -66,6 +72,12 @@ import { useExternalLinks } from "./useExternalLinks";
 import { useTabbedAppNotices } from "./useTabbedAppNotices";
 
 // A host for the document editor core: it owns no document state and reaches the core only through the command API on PdfDocumentEditorHandle.
+
+const NO_FIND_RESULTS: PdfDocumentEditorFindResults = {
+  complete: false,
+  current: 0,
+  total: 0,
+};
 
 export type TabbedAppDocumentHandle = {
   // A sensitive in-memory session; discard it when the tab is closed.
@@ -165,10 +177,20 @@ export const TabbedAppDocument = forwardRef<
   const [pageMenuIndex, setPageMenuIndex] = useState<number | null>(null);
   const [readOnlyState, setReadOnlyState] =
     useState<PdfDocumentEditorReadOnlyState>({
+      canUnlockOriginal: false,
       readOnly: false,
       ready: false,
       reason: null,
     });
+  const [findOpen, setFindOpen] = useState(false);
+  // Kept while the bar is closed, so reopening it offers the last search again.
+  const [findQuery, setFindQuery] = useState("");
+  const [findResults, setFindResults] = useState(NO_FIND_RESULTS);
+  // Bumped by every Ctrl+F, including one while the bar is open, which takes the reader back to the field.
+  const [findFocusRequest, setFindFocusRequest] = useState(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  // Where focus was before Ctrl+F, for closing the bar to give it back.
+  const findReturnFocusRef = useRef<HTMLElement | null>(null);
   const {
     notices,
     showNotice,
@@ -200,6 +222,13 @@ export const TabbedAppDocument = forwardRef<
     documentEditorRef.current?.remeasureViewport();
   }, [sidebarOpen, sidebarWidth]);
 
+  useEffect(() => {
+    if (findFocusRequest > 0) {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    }
+  }, [findFocusRequest]);
+
   // Stable identity, because the sidebar calls this from an effect.
   const ensureAllAnnotations = useCallback(() => {
     void documentEditorRef.current?.importAllAnnotations();
@@ -213,7 +242,9 @@ export const TabbedAppDocument = forwardRef<
       }
 
       return composeTabbedAppSession(session, {
-        activeToolKey,
+        // The image tool only lasts while its menu is open, and a restored tab reopens no menu.
+        activeToolKey:
+          activeToolKey === "imageStamp" ? "select" : activeToolKey,
         annotationFilter,
         showAnnotations,
         sidebarOpen,
@@ -247,14 +278,43 @@ export const TabbedAppDocument = forwardRef<
     [onDocumentTitleChange],
   );
 
+  // The image tool stays selected while its menu, or the picker one of its items opens, is up. Closing the menu any other way drops back to Select, not to the tool that was selected before it.
+  const closeToolSettings = useCallback(() => {
+    setSettingsToolKey(null);
+    setActiveToolKey((current) =>
+      current === "imageStamp" ? "select" : current,
+    );
+  }, []);
+
+  const openFind = useCallback(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !active.closest(".find-bar")) {
+      findReturnFocusRef.current = active;
+    }
+    setFindOpen(true);
+    setFindFocusRequest((request) => request + 1);
+  }, []);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    const returnFocus = findReturnFocusRef.current;
+    findReturnFocusRef.current = null;
+    if (returnFocus?.isConnected) {
+      returnFocus.focus({ preventScroll: true });
+    } else {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+  }, []);
+
   const handleDocumentReset = useCallback(() => {
     setPageMenuIndex(null);
-    setSettingsToolKey(null);
+    setFindOpen(false);
+    closeToolSettings();
     setSidebarOpen(false);
     setSidebarTab("pages");
     setAnnotationFilter(EMPTY_ANNOTATION_FILTER);
     resetExternalLinks();
-  }, [resetExternalLinks]);
+  }, [closeToolSettings, resetExternalLinks]);
 
   const handleSessionRestore = useCallback(() => {
     const chrome = initialSessionRef.current?.chrome;
@@ -368,6 +428,30 @@ export const TabbedAppDocument = forwardRef<
     setPageMenuIndex(null);
   }
 
+  // Plain text, so it pastes as Markdown wherever it lands.
+  async function copyAnnotationsAsMarkdown(
+    rows: AnnotationListRow[],
+    fileName: string,
+  ) {
+    const { count, markdown } = annotationListMarkdown(rows, fileName);
+    if (count === 0) {
+      showNotice("These annotations have no text to copy.", {
+        tone: "warning",
+      });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(markdown);
+      showNotice(
+        `Copied ${count} annotation${count === 1 ? "" : "s"} as Markdown.`,
+        { tone: "success" },
+      );
+    } catch {
+      showNotice("Could not copy the annotations.", { tone: "danger" });
+    }
+  }
+
   return (
     <main
       className={[
@@ -380,17 +464,32 @@ export const TabbedAppDocument = forwardRef<
       style={style}
     >
       {/* Outside the core, not in its overlay slot: below 700px this docks in flow and has to push the whole core - viewport and floating chrome together - down the page. */}
-      {notices.length > 0 || readOnlyBannerReason ? (
+      {notices.length > 0 || readOnlyBannerReason || findOpen ? (
         <TabbedAppNoticeStack
           notices={notices}
           onDismissNotice={dismissNotice}
           onPauseTimers={pauseNoticeTimers}
           onResumeTimers={resumeNoticeTimers}
         >
+          {findOpen ? (
+            <FindBar
+              inputRef={findInputRef}
+              onClose={closeFind}
+              onNext={() => documentEditorRef.current?.findNext()}
+              onPrevious={() => documentEditorRef.current?.findPrevious()}
+              onQueryChange={setFindQuery}
+              query={findQuery}
+              results={findResults}
+            />
+          ) : null}
           {readOnlyBannerReason ? (
             <ReadOnlyBanner
               canEditCopy={canEditReadOnlyCopy(readOnlyBannerReason)}
+              canUnlockOriginal={readOnlyState.canUnlockOriginal}
               onEnableEditing={() => documentEditorRef.current?.enableEditing()}
+              onUnlockOriginal={() =>
+                documentEditorRef.current?.unlockOriginal()
+              }
               reason={readOnlyBannerReason}
             />
           ) : null}
@@ -405,6 +504,7 @@ export const TabbedAppDocument = forwardRef<
         emptyTitle={emptyTitle}
         enableGlobalShortcuts={enableGlobalShortcuts}
         enableWheelZoom={enableWheelZoom}
+        findQuery={findOpen ? findQuery : ""}
         initialSession={initialSession}
         manageDocumentTitle={manageDocumentTitle}
         onBusyChange={onBusyChange}
@@ -412,11 +512,13 @@ export const TabbedAppDocument = forwardRef<
         onDirtyChange={onDirtyChange}
         onDocumentReplaced={() => {
           setPageMenuIndex(null);
-          setSettingsToolKey(null);
+          closeToolSettings();
         }}
         onDocumentReset={handleDocumentReset}
         onDocumentTitleChange={handleDocumentTitleChange}
         onExternalLinkRequest={requestExternalLink}
+        onFindRequest={openFind}
+        onFindResultsChange={setFindResults}
         onMalformedAnnotations={reportMalformedAnnotations}
         onNotice={showNotice}
         onSaveTargetChange={onSaveTargetChange}
@@ -449,6 +551,9 @@ export const TabbedAppDocument = forwardRef<
                 canMergePdf={view.mergeAvailable}
                 onChangeAnnotationFilter={setAnnotationFilter}
                 onChangeTab={setSidebarTab}
+                onCopyAnnotationsMarkdown={(rows) =>
+                  void copyAnnotationsAsMarkdown(rows, view.fileName)
+                }
                 onEnsureAllAnnotations={ensureAllAnnotations}
                 onRevealAnnotation={(annotationId) =>
                   documentEditorRef.current?.revealAnnotation(annotationId)
@@ -556,13 +661,15 @@ export const TabbedAppDocument = forwardRef<
                     onChangeSettings={(update) =>
                       updateToolSettings(update, view)
                     }
-                    onCloseSettings={() => setSettingsToolKey(null)}
-                    onPasteImageFile={() =>
-                      void documentEditorRef.current?.addImageFromSystemClipboard()
-                    }
-                    onPickImageFile={() =>
-                      void documentEditorRef.current?.addImageFromPicker()
-                    }
+                    onCloseSettings={closeToolSettings}
+                    onPasteImageFile={() => {
+                      setSettingsToolKey(null);
+                      void documentEditorRef.current?.addImageFromSystemClipboard();
+                    }}
+                    onPickImageFile={() => {
+                      setSettingsToolKey(null);
+                      void documentEditorRef.current?.addImageFromPicker();
+                    }}
                     onSelectTool={(toolKey) => selectDockTool(toolKey, view)}
                     onToggleSettings={(nextToolKey) =>
                       setSettingsToolKey((current) =>
@@ -590,6 +697,7 @@ export const TabbedAppDocument = forwardRef<
                       ? () => void documentEditorRef.current?.downloadCopy()
                       : undefined
                   }
+                  onFind={view.pages.length > 0 ? openFind : undefined}
                   onPrint={
                     view.printAvailable
                       ? () => void documentEditorRef.current?.print()
@@ -630,6 +738,17 @@ export const TabbedAppDocument = forwardRef<
                     documentEditorRef.current?.zoomBy(-ZOOM_STEP)
                   }
                 />
+
+                {view.backPageIndex !== null ? (
+                  <FloatingBackControl
+                    disabled={view.busy}
+                    onBack={() => documentEditorRef.current?.goBack()}
+                    pageIndex={view.backPageIndex}
+                    sidebarOpen={sidebarOpen}
+                    sidebarWidth={sidebarWidth}
+                    stacked={!view.readOnly}
+                  />
+                ) : null}
 
                 {!view.readOnly ? (
                   <FloatingHistoryControls
@@ -681,9 +800,8 @@ export const TabbedAppDocument = forwardRef<
             {pendingExternalLink ? (
               <ExternalLinkDialog
                 link={pendingExternalLink}
-                onAlways={() => confirmExternalLink({ always: true })}
                 onCancel={cancelExternalLink}
-                onOpen={() => confirmExternalLink()}
+                onOpen={(always) => confirmExternalLink({ always })}
                 cancelButtonRef={externalLinkCancelButtonRef}
               />
             ) : null}

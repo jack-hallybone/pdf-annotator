@@ -1,5 +1,7 @@
 # Build output
 /dist
+# Written by every build (scripts/prepare-renderer-assets.mjs), which ships it with the app
+/THIRD-PARTY-NOTICES.md
 /.generated
 /.vite
 /coverage

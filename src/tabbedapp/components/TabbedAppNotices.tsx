@@ -73,11 +73,15 @@ export function TabbedAppNoticeStack({
 
 export function ReadOnlyBanner({
   canEditCopy,
+  canUnlockOriginal,
   onEnableEditing,
+  onUnlockOriginal,
   reason,
 }: {
   canEditCopy: boolean;
+  canUnlockOriginal: boolean;
   onEnableEditing: () => void;
+  onUnlockOriginal: () => void;
   reason: PdfDocumentEditorReadOnlyReason;
 }) {
   return (
@@ -90,7 +94,7 @@ export function ReadOnlyBanner({
             : `This ${reason} file is open as read-only to protect the original.`}
       </p>
       {canEditCopy ? (
-        <div className="banner-actions">
+        <div className="banner-actions protected-pdf-actions">
           <button
             className="protected-pdf-edit-button compact"
             onClick={onEnableEditing}
@@ -98,6 +102,15 @@ export function ReadOnlyBanner({
           >
             Edit a copy
           </button>
+          {canUnlockOriginal ? (
+            <button
+              className="protected-pdf-edit-button compact"
+              onClick={onUnlockOriginal}
+              type="button"
+            >
+              Unlock original
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

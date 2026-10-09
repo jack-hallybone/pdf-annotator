@@ -392,6 +392,11 @@ function isSimpleInkAnnotation(annotation: ExistingPdfAnnotation) {
     return false;
   }
 
+  // Over the cap, the editable copy would hold only the first strokes, and editing it would write that loss back over the file's own ink. Such ink is left as the file draws it.
+  if (rawInkPointCount(annotation) > MAX_INK_POINTS_PER_ANNOTATION) {
+    return false;
+  }
+
   if (isInkHighlight(annotation)) {
     return true;
   }
@@ -426,13 +431,40 @@ function capRawInkList(list: InkList, maxPoints: number): InkList {
     : (list as number[] | Float32Array).slice(0, maxPoints * 2);
 }
 
-function normalizeInkLists(annotation: ExistingPdfAnnotation): PdfPoint[][] {
-  const rawInkLists =
+function rawInkListsOf(annotation: ExistingPdfAnnotation) {
+  return (
     annotation.inkLists ??
     annotation.inkList ??
     annotation.paths ??
     annotation.path ??
-    annotation.outlines?.points;
+    annotation.outlines?.points
+  );
+}
+
+/** The points an ink annotation claims before the cap, summed across its paths as the cap is; counting stops once past it. */
+function rawInkPointCount(annotation: ExistingPdfAnnotation) {
+  const rawInkLists = rawInkListsOf(annotation);
+  if (isFlatNumberList(rawInkLists)) {
+    return rawInkListLength(rawInkLists);
+  }
+  if (!isIterable(rawInkLists)) {
+    return 0;
+  }
+
+  let points = 0;
+  for (const inkList of rawInkLists as Iterable<unknown>) {
+    if (isFlatNumberList(inkList) || isPointObjectList(inkList)) {
+      points += rawInkListLength(inkList as InkList);
+    }
+    if (points > MAX_INK_POINTS_PER_ANNOTATION) {
+      break;
+    }
+  }
+  return points;
+}
+
+function normalizeInkLists(annotation: ExistingPdfAnnotation): PdfPoint[][] {
+  const rawInkLists = rawInkListsOf(annotation);
 
   if (!rawInkLists) {
     return [];

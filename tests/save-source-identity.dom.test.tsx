@@ -102,6 +102,53 @@ test("the model's own save resolves the second edit in the file it just wrote", 
   assert.deepEqual(await noteTexts(written.at(-1)!), ["B edited twice", "C"]);
 });
 
+// Preparing a file with pages of handwriting can hold the page for seconds, and the controls used to grey out only once that was done, so a save shows them busy, and lets that be painted, before it reads anything.
+test("a save is busy, and waits for a frame, before it prepares the file", async () => {
+  const written: Uint8Array[] = [];
+  const { result } = await mountWithNotes(["A"], written);
+  const model = () => result.current.model;
+  await act(async () => {
+    model().commitAnnotations((annotations) =>
+      annotations.map((annotation) =>
+        annotation.kind === "stickyNote"
+          ? { ...annotation, text: "A edited" }
+          : annotation,
+      ),
+    );
+  });
+
+  const frames: FrameRequestCallback[] = [];
+  const { requestAnimationFrame, setTimeout: setWindowTimeout } = window;
+  window.requestAnimationFrame = (callback) => frames.push(callback);
+  try {
+    let saving: Promise<boolean> | undefined;
+    await act(async () => {
+      // afterNextPaint's own 200 ms bound would let the save go ahead unpainted; it is set before handleSave's first await, so it is dropped there, and however long a slow runner stalls in the wait below, only the frame can let the save go ahead.
+      window.setTimeout = (() => 0) as unknown as typeof window.setTimeout;
+      try {
+        saving = model().handleSave();
+      } finally {
+        window.setTimeout = setWindowTimeout;
+      }
+      // Time for a save that skipped the frame to have written.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    assert.equal(model().busy, true);
+    assert.deepEqual(written, []);
+
+    await act(async () => {
+      for (const frame of frames.splice(0)) {
+        frame(performance.now());
+      }
+      assert.equal(await saving, true);
+    });
+  } finally {
+    window.requestAnimationFrame = requestAnimationFrame;
+  }
+  assert.equal(model().busy, false);
+  assert.deepEqual(await noteTexts(written.at(-1)!), ["A edited"]);
+});
+
 // The first save takes the annotation's dictionary out of the file, and restating that identity as `unresolved:shifted:` put an identity nothing can match onto the annotation the undo brings back, stopping the next save for the whole document.
 test("a note deleted, saved and undone is written fresh by the next save", async () => {
   const { sourceIdBeforeDelete } = await deleteSaveUndoSave(directNotesPdf);
@@ -256,6 +303,7 @@ function useStubView() {
       revealPreparationError: () => {},
       runAfterInitialVisualReady: (callback: () => void) => callback(),
       setActivePageIndex,
+      setBackStack: () => {},
       setFocusedAnnotationId,
       setScale: () => {},
       setSelectedAnnotationIds,

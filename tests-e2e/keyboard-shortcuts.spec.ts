@@ -44,6 +44,28 @@ test("Ctrl+Y also redoes", async ({ page }) => {
   await expect(redoButton).toBeDisabled();
 });
 
+// A Mac keyboard's delete key sends Backspace, so with only Delete bound a Mac had no key that deleted a mark.
+test("Backspace deletes the selected mark, as Delete does", async ({
+  page,
+}) => {
+  await openDocument(page);
+  const onStroke = await drawStroke(page);
+  // A selected stroke leaves the ink canvas and is drawn over the page, with its handles, until it is let go.
+  const overlay = page.locator(
+    ".pdfdocumenteditor-interaction-layer :is(path, polyline)",
+  );
+  await page.mouse.click(...onStroke);
+  await expect(overlay.first()).toBeVisible();
+
+  await page.keyboard.press("Backspace");
+  await expect(overlay).toHaveCount(0);
+  expect(await inkPixels(page)).toBe(0);
+
+  // Gone, not hidden: undoing brings it back.
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => inkPixels(page)).toBeGreaterThan(0);
+});
+
 test("Ctrl+O opens the same file picker as the Open PDFs button", async ({
   page,
 }) => {
@@ -92,6 +114,34 @@ async function drawStroke(page: Page) {
   await page.mouse.move(box.x + box.width * 0.8, y + 40, { steps: 20 });
   await page.mouse.up();
   await page.getByRole("button", { name: "Select", exact: true }).click();
+  // Halfway along the stroke, so a click there lands on it.
+  return [box.x + box.width * 0.5, y + 20] as const;
+}
+
+// The annotation canvases only, never the page canvas.
+function inkPixels(page: Page) {
+  return page
+    .locator(".pdfdocumenteditor-ink-canvas-layer")
+    .evaluateAll((canvases) => {
+      let ink = 0;
+      for (const element of canvases as HTMLCanvasElement[]) {
+        if (element.width === 0 || element.height === 0) continue;
+        const context = element.getContext("2d", {
+          willReadFrequently: true,
+        });
+        if (!context) continue;
+        const { data } = context.getImageData(
+          0,
+          0,
+          element.width,
+          element.height,
+        );
+        for (let at = 3; at < data.length; at += 4) {
+          if (data[at] > 8) ink += 1;
+        }
+      }
+      return ink;
+    });
 }
 
 // Written here rather than committed: the page exists to have nothing on it.

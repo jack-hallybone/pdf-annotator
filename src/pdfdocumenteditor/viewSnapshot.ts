@@ -7,9 +7,10 @@ export type PdfDocumentEditorViewPosition = {
   scrollLeftRatio: number;
 };
 
-/** `scale` is always captured but applied only where a zoom change is part of the restore: putting a tab back on screen is, undoing a page deletion is not. */
+/** `scale` is always captured but applied only where a zoom change is part of the restore: putting a tab back on screen is, undoing a page deletion is not. `backStack` comes back only with a tab, since a page operation renumbers the pages it names. */
 export type PdfDocumentEditorViewSnapshot = {
   activePageIndex: number;
+  backStack?: PdfDocumentEditorViewPosition[];
   scale: number;
   viewPosition?: PdfDocumentEditorViewPosition;
 };

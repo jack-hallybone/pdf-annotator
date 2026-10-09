@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 import {
+  ArrowLeft,
   ClipboardPaste,
   Eye,
   EyeOff,
   Download,
   Minus,
   MoreVertical,
+  MoveHorizontal,
+  MoveVertical,
+  Percent,
   Plus,
   Printer,
   Redo2,
+  RotateCcw,
   Save,
   SavePlus,
+  Search,
   Undo2,
   Upload,
   X,
@@ -35,8 +41,7 @@ import { ToolSettingsEditor } from "./ToolSettingsEditor";
 
 const FLOATING_FRAME_CLASS = "floating-frame panel raised z-floating no-print";
 const ICON_BUTTON_CLASS = "icon-button ghost icon-center";
-const MENU_BUTTON_CLASS = "menu-button ghost";
-const POPOVER_CLASS = "floating-popover panel floating";
+const MENU_CLASS = "panel floating menu";
 
 type FloatingToolDockProps = {
   activeTool: Tool;
@@ -85,26 +90,30 @@ export function FloatingToolDock({
         const fill = toolFillColor(tool, settings);
         const active = activeTool === tool && activeToolKey === key;
         const hasSettings = toolHasSettings(tool);
-        const commandOnly = tool === "imageStamp";
+        const opensMenu = tool === "imageStamp";
 
         return (
           <div className="tool-dock-row row nowrap xs" key={key}>
             <button
-              aria-expanded={commandOnly ? settingsToolKey === key : undefined}
-              aria-haspopup={commandOnly ? "menu" : undefined}
+              aria-expanded={opensMenu ? settingsToolKey === key : undefined}
+              aria-haspopup={opensMenu ? "menu" : undefined}
               aria-label={label}
-              aria-pressed={commandOnly ? undefined : active}
+              aria-pressed={opensMenu ? undefined : active}
               className={`tool-button ghost icon-center ${
                 active ? "selected" : ""
               }`}
               disabled={disabled}
               onClick={() => {
-                if (commandOnly) {
-                  onToggleSettings(key);
+                // A second press closes the menu, which ends the image tool like any other way of closing it.
+                if (opensMenu && settingsToolKey === key) {
+                  onCloseSettings();
                   return;
                 }
 
                 onSelectTool(key);
+                if (opensMenu) {
+                  onToggleSettings(key);
+                }
               }}
               title={label}
               type="button"
@@ -142,7 +151,7 @@ export function FloatingToolDock({
               </button>
             ) : null}
             {!disabled && hasSettings && settingsToolKey === key ? (
-              <div className={`${POPOVER_CLASS} menu tool-settings-popover`}>
+              <div className={`${MENU_CLASS} tool-settings-popover`}>
                 <ToolSettingsEditor
                   settings={settings}
                   tool={tool}
@@ -151,27 +160,14 @@ export function FloatingToolDock({
                 />
               </div>
             ) : null}
-            {!disabled && commandOnly && settingsToolKey === key ? (
-              <div
-                className={`${POPOVER_CLASS} menu image-tool-menu`}
-                role="menu"
-              >
-                <button
-                  onClick={() => {
-                    onCloseSettings();
-                    onPickImageFile();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
+            {!disabled && opensMenu && settingsToolKey === key ? (
+              <div className={`${MENU_CLASS} image-tool-menu`} role="menu">
+                <button onClick={onPickImageFile} role="menuitem" type="button">
                   <Upload size={15} />
                   <span>From file...</span>
                 </button>
                 <button
-                  onClick={() => {
-                    onCloseSettings();
-                    onPasteImageFile();
-                  }}
+                  onClick={onPasteImageFile}
                   role="menuitem"
                   type="button"
                 >
@@ -315,7 +311,7 @@ export function FloatingZoomControls({
   const zoomPanelRef = useRef<HTMLDivElement>(null);
   const [zoomPanelOpen, setZoomPanelOpen] = useState(false);
   const [pageText, setPageText] = useState(String(activePageIndex + 1));
-  const [zoomText, setZoomText] = useState(String(Math.round(scale * 100)));
+  const [zoomText, setZoomText] = useState(formatZoom(scale));
   useCloseOnOutsidePointer(zoomPanelRef, zoomPanelOpen, () =>
     setZoomPanelOpen(false),
   );
@@ -325,7 +321,7 @@ export function FloatingZoomControls({
   }, [activePageIndex]);
 
   useEffect(() => {
-    setZoomText(String(Math.round(scale * 100)));
+    setZoomText(formatZoom(scale));
   }, [scale]);
 
   function commitPage() {
@@ -343,12 +339,12 @@ export function FloatingZoomControls({
   function commitZoom() {
     const percent = Number.parseFloat(zoomText.replace("%", ""));
     if (!Number.isFinite(percent)) {
-      setZoomText(String(Math.round(scale * 100)));
+      setZoomText(formatZoom(scale));
       return;
     }
 
     const nextScale = clampZoom(percent / 100);
-    setZoomText(String(Math.round(nextScale * 100)));
+    setZoomText(formatZoom(nextScale));
     onSetZoom(nextScale);
   }
 
@@ -383,7 +379,7 @@ export function FloatingZoomControls({
         title="Zoom settings"
         type="button"
       >
-        {Math.round(scale * 100)}%
+        {formatZoom(scale)}
       </button>
       <button
         aria-label="Zoom in"
@@ -416,11 +412,12 @@ export function FloatingZoomControls({
         <span>of {pageCount}</span>
       </div>
       {!disabled && zoomPanelOpen ? (
-        <div className={`${POPOVER_CLASS} zoom-popover`}>
-          <label className="zoom-percent-field input-shell">
+        <div className={`${MENU_CLASS} zoom-popover`}>
+          <label className="menu-item number-setting">
+            <span>Zoom</span>
             <input
               aria-label="Zoom percent"
-              className="zoom-percent-input grow"
+              className="number-setting-input"
               inputMode="decimal"
               onBlur={commitZoom}
               onChange={(event) => setZoomText(event.target.value)}
@@ -432,48 +429,44 @@ export function FloatingZoomControls({
               }}
               value={zoomText}
             />
-            <span className="zoom-percent-unit">%</span>
           </label>
-          <div className="zoom-preset-grid">
-            <button
-              className={MENU_BUTTON_CLASS}
-              onClick={() => applyZoomPreset(onFitWidth)}
-              type="button"
-            >
-              Width
-            </button>
-            <button
-              className={MENU_BUTTON_CLASS}
-              onClick={() => applyZoomPreset(onFitHeight)}
-              type="button"
-            >
-              Height
-            </button>
-            <button
-              className={MENU_BUTTON_CLASS}
-              onClick={() => applyZoomPreset(() => onSetZoom(1))}
-              type="button"
-            >
-              100%
-            </button>
-            <button
-              className={MENU_BUTTON_CLASS}
-              onClick={() => applyZoomPreset(onDefaultZoom)}
-              type="button"
-            >
-              Default
-            </button>
-          </div>
+          <span className="menu-separator" role="separator" />
+          <button onClick={() => applyZoomPreset(onFitWidth)} type="button">
+            <MoveHorizontal size={15} />
+            <span>Fit width</span>
+          </button>
+          <button onClick={() => applyZoomPreset(onFitHeight)} type="button">
+            <MoveVertical size={15} />
+            <span>Fit height</span>
+          </button>
+          <button
+            onClick={() => applyZoomPreset(() => onSetZoom(1))}
+            type="button"
+          >
+            <Percent size={15} />
+            <span>100%</span>
+          </button>
+          <button onClick={() => applyZoomPreset(onDefaultZoom)} type="button">
+            <RotateCcw size={15} />
+            <span>Default</span>
+          </button>
         </div>
       ) : null}
     </div>
   );
 }
 
+// The zoom box carries its unit in its text, as the zoom button does; commitZoom strips it before parsing.
+function formatZoom(scale: number) {
+  return `${Math.round(scale * 100)}%`;
+}
+
 type FloatingDocumentControlsProps = {
   busy: boolean;
   onClosePdf: () => void;
   onDownload?: () => void;
+  // Ctrl+F's find bar, for a reader with a pen or a finger and no keyboard.
+  onFind?: () => void;
   onPrint?: () => void;
   onSave?: () => void;
   onSaveAs?: () => void;
@@ -487,6 +480,7 @@ export function FloatingDocumentControls({
   busy,
   onClosePdf,
   onDownload,
+  onFind,
   onPrint,
   onSave,
   onSaveAs,
@@ -501,6 +495,11 @@ export function FloatingDocumentControls({
       className={`${FLOATING_FRAME_CLASS} document-controls row nowrap xs`}
       role="toolbar"
     >
+      {onFind ? (
+        <IconButton label="Find in document" onClick={onFind}>
+          <Search size={16} />
+        </IconButton>
+      ) : null}
       <IconButton
         disabled={busy}
         label={
@@ -541,6 +540,43 @@ export function FloatingDocumentControls({
           <X size={16} />
         </IconButton>
       ) : null}
+    </div>
+  );
+}
+
+type FloatingBackControlProps = {
+  disabled?: boolean;
+  onBack: () => void;
+  pageIndex: number;
+  sidebarOpen: boolean;
+  sidebarWidth: number;
+  // Undo and redo hold this corner whenever the document can be edited, so this sits above them.
+  stacked: boolean;
+};
+
+// Mounted only while there is somewhere to go back to, so it can say where.
+export function FloatingBackControl({
+  disabled = false,
+  onBack,
+  pageIndex,
+  sidebarOpen,
+  sidebarWidth,
+  stacked,
+}: FloatingBackControlProps) {
+  return (
+    <div
+      className={`${FLOATING_FRAME_CLASS} back-control${stacked ? " stacked" : ""}`}
+      style={{ left: sidebarOpen ? sidebarWidth + 24 : 12 }}
+    >
+      <button
+        className="back-button ghost"
+        disabled={disabled}
+        onClick={onBack}
+        type="button"
+      >
+        <ArrowLeft size={16} />
+        Back to page {pageIndex + 1}
+      </button>
     </div>
   );
 }

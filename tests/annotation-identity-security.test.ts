@@ -94,15 +94,28 @@ test("a highlight claiming an absurd number of quads is capped on import, not ca
   assert.equal(highlight.rects.length, MAX_QUADPOINTS_PER_ANNOTATION);
 });
 
-test("an ink annotation claiming an absurd number of points is capped on import, not carried in full", async () => {
+// Over the cap, an editable copy would hold only the first strokes and a save would write that loss back into the file, so such ink is left as the file draws it: not imported, and never rewritten.
+test("an ink annotation claiming more points than the cap is left as the file draws it, not imported cut short", async () => {
   const rawPointCount = MAX_INK_POINTS_PER_ANNOTATION + 5_000;
   const bytes = await buildHugeInkListPdf(rawPointCount);
   const imported = await importPageAnnotations(bytes);
-  const ink = imported.find((annotation) => annotation.kind === "draw");
 
-  assert.ok(ink && ink.kind === "draw");
-  const totalPoints = ink.paths.reduce((sum, path) => sum + path.length, 0);
-  assert.equal(totalPoints, MAX_INK_POINTS_PER_ANNOTATION);
+  assert.equal(
+    imported.find((annotation) => annotation.kind === "draw"),
+    undefined,
+  );
+
+  // A save that rewrites the page's annotations, as an edit elsewhere on it does, keeps every point.
+  const output = await writePdfAnnotations(bytes, [], {
+    replaceAnnotationSourceIds: [],
+    replacePageIndexes: [0],
+  });
+  const ink = (await loadTestPdf(output))
+    .getPage(0)
+    .node.Annots()
+    ?.lookup(0, PDFDict);
+  const path = ink?.lookup(PDFName.of("InkList"), PDFArray).lookup(0, PDFArray);
+  assert.equal(path?.size(), rawPointCount * 2);
 });
 
 // A cap shared across every path in one annotation, not per-path: two merely-large paths add up to the same claim as one huge one.
@@ -110,11 +123,22 @@ test("an ink annotation's cap is shared across its paths, not reset for each one
   const perPath = Math.floor(MAX_INK_POINTS_PER_ANNOTATION / 2) + 2_000;
   const bytes = await buildHugeInkListPdf(perPath, 2);
   const imported = await importPageAnnotations(bytes);
+
+  assert.equal(
+    imported.find((annotation) => annotation.kind === "draw"),
+    undefined,
+  );
+});
+
+test("an ink annotation under the cap is still imported whole and editable", async () => {
+  const perPath = Math.floor(MAX_INK_POINTS_PER_ANNOTATION / 2) - 2_000;
+  const bytes = await buildHugeInkListPdf(perPath, 2);
+  const imported = await importPageAnnotations(bytes);
   const ink = imported.find((annotation) => annotation.kind === "draw");
 
   assert.ok(ink && ink.kind === "draw");
   const totalPoints = ink.paths.reduce((sum, path) => sum + path.length, 0);
-  assert.equal(totalPoints, MAX_INK_POINTS_PER_ANNOTATION);
+  assert.equal(totalPoints, perPath * 2);
 });
 
 test("a direct annotation dictionary is updated rather than duplicated", async () => {

@@ -2,7 +2,7 @@
 @import "../documentShell.css";
 @import "../splitResizer.css";
 
-/* src/theme.css is never edited here and is imported by this file and no other. */
+/* src/theme.css is imported by this file and no other. It is the canonical version of a stylesheet four other projects copy, so this app's own styling goes here, not there. */
 
 /* A new value snaps to theme.css's nearest existing token rather than defining a one-off, even at the cost of a small visual difference. */
 
@@ -251,26 +251,22 @@ textarea {
   width: fit-content;
 }
 
+/* Both hosts (the dock's settings popover and the selection toolbar) are .menu panels, so the rows here take theme.css's menu rhythm: .menu's text and 2xs gap, .menu-item's padding, .menu-separator between groups. */
 .settings-panel {
   box-sizing: border-box;
   display: grid;
-  /* Not .menu's own --theme-text-sm: this panel sits inside a popover styled with both .menu and .floating-popover (theme.css and tabbedapp/styles.css respectively), and at equal specificity .floating-popover's own --theme-text-xs wins there by source order, overriding .menu's. The image-tool-menu popover beside this one carries the same two classes, so --theme-text-xs is the size its own menu-item text actually renders at - matching it here, not .menu's nominal (but locally overridden) token, is what makes this panel's text match that sibling menu's. */
-  font-size: var(--theme-text-xs);
-  gap: var(--theme-space-sm);
+  gap: var(--theme-space-2xs);
   min-width: 12rem;
   width: max-content;
 }
 
-.settings-field {
-  font-size: var(--theme-text-xs);
-  gap: var(--theme-space-sm);
-}
-
+/* Padded like a .menu-item, so the first swatch lines up with the row labels below it. */
 .color-palette {
   align-items: center;
   display: grid;
   gap: var(--theme-space-sm);
   grid-template-columns: repeat(8, var(--theme-control-xs));
+  padding: var(--theme-space-xs) var(--theme-space-sm);
   width: max-content;
 }
 
@@ -365,29 +361,19 @@ textarea {
   }
 }
 
+/* A .menu-item with its box at the far end; 2xs block padding, not xs, keeps the row near a plain item's height around the 24px box. */
 .number-setting {
-  background: var(--theme-wash);
-  border: 1px solid var(--theme-border);
-  border-radius: var(--theme-radius-sm);
-  box-sizing: border-box;
-  color: var(--theme-ink);
-  /* --theme-text-xs, matching .settings-field above: see the comment on .settings-panel for why xs (not .menu's own sm) is this popover's actual text size. */
-  font-size: var(--theme-text-xs);
-  font-weight: var(--theme-weight-medium);
   justify-content: space-between;
-  min-height: var(--theme-control-sm);
-  padding: var(--theme-space-2xs) var(--theme-space-xs) var(--theme-space-2xs)
-    var(--theme-space-sm);
+  padding-block: var(--theme-space-2xs);
+  padding-inline-end: var(--theme-space-2xs);
 }
 
 .number-setting-input {
-  font-size: var(--theme-text-xs);
-  font-weight: var(--theme-weight-medium);
   height: var(--theme-control-xs);
   padding: 0 var(--theme-space-sm);
   /* Right-aligned digits sit under Windows/Chrome's native spinner arrows. */
   text-align: left;
-  width: 3.5rem;
+  width: 4.5rem;
 }
 
 .free-text-editor,
@@ -427,13 +413,13 @@ textarea {
 }
 
 .selection-toolbar {
-  box-sizing: border-box;
-  padding: var(--theme-space-md);
   width: max-content;
 }
 
+/* The same inline padding as the rows above, so the last button sits under the number boxes' right edge. */
 .selection-toolbar-actions {
   justify-content: flex-end;
+  padding: var(--theme-space-2xs);
 }
 
 .selection-copy-button,
@@ -577,6 +563,23 @@ textarea {
 
 .pdfdocumenteditor-page .pdfViewer .canvasWrapper .selection {
   background: rgb(from var(--app-selection) r g b / 0.24) !important;
+}
+
+/* Find matches, coloured by findHighlights.ts: the selection's blue, since a match is text the app has picked out - faint on every match, strong on the current one. */
+::highlight(pdfdocumenteditor-find-match) {
+  background-color: rgb(from var(--app-selection) r g b / 0.2);
+}
+
+::highlight(pdfdocumenteditor-find-current) {
+  background-color: rgb(from var(--app-selection) r g b / 0.5);
+}
+
+/* The browser's own Print (the app's prints the file) draws the pages as they are on screen, and a search is not part of the document. */
+@media print {
+  ::highlight(pdfdocumenteditor-find-match),
+  ::highlight(pdfdocumenteditor-find-current) {
+    background-color: transparent;
+  }
 }
 
 .pdfdocumenteditor-page .textLayer::selection {

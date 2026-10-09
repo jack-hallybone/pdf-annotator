@@ -31,11 +31,12 @@ export function ToolSettingsEditor({
   const color = (key: ColorKey) => (
     <ColorPalette
       color={settings[key]}
-      label={null}
       onChange={(value) => onChange({ [key]: value })}
       onCommit={onColorCommit}
     />
   );
+  // The swatches and the number rows are two groups, split the way a menu splits its own.
+  const separator = <span className="menu-separator" role="separator" />;
   const number = (
     key: NumberKey,
     label: string,
@@ -58,18 +59,21 @@ export function ToolSettingsEditor({
       {tool === "highlight" ? (
         <>
           {color("highlightColor")}
+          {separator}
           {number("highlightOpacity", "Opacity", 0.1, 0.8, 0.05)}
           {number("highlightWidth", "Stroke", 2, 28, 1)}
         </>
       ) : tool === "draw" ? (
         <>
           {color("drawColor")}
+          {separator}
           {number("drawWidth", "Stroke", 0.5, 8, 0.1)}
           {number("drawOpacity", "Opacity", 0.1, 1, 0.05)}
         </>
       ) : tool === "freeText" ? (
         <>
           {color("textColor")}
+          {separator}
           {number("textOpacity", "Opacity", 0.1, 1, 0.05)}
           {number("textFontSize", "Size", 8, 48, 1)}
         </>

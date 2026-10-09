@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { basename, dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  collectDataLicences,
   collectThirdPartyPackages,
   renderNotices,
 } from "./thirdPartyNotices.mjs";
@@ -145,7 +146,7 @@ function pageReferencedAssets() {
   return names;
 }
 
-// Tracked at the repository root and imported from there by the app footer, so one file answers both a repository reader and an installed offline copy. Regenerated on every build, because a hand-kept one goes stale in silence.
+// Written at the repository root (gitignored, never committed) and imported from there by the app footer, so an installed offline copy carries it. Regenerated on every build and dev start, because a hand-kept one goes stale in silence.
 function writeThirdPartyNotices() {
   const { packages, missing } = collectThirdPartyPackages(root);
   // A licence that cannot be found fails the build rather than emitting a notices file with a hole in it.
@@ -158,7 +159,11 @@ function writeThirdPartyNotices() {
   const { name } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   writeFileSync(
     join(root, "THIRD-PARTY-NOTICES.md"),
-    renderNotices(name, packages),
+    renderNotices(
+      name,
+      packages,
+      collectDataLicences(pdfjsSourceRoot, assetDirs),
+    ),
     "utf8",
   );
   console.log(

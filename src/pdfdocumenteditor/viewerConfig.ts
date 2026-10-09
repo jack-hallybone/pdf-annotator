@@ -14,6 +14,9 @@ export const MAX_BAND_LOAD_PAGES = 32;
 /* Device pixels of page canvas a view keeps rendered, 128 MB at 4 bytes each; the displayed pages and the load band render regardless. A loaded page is rarely released and each rendered one holds full-resolution canvases, so reading through a long document grew the renderer by gigabytes until it stalled or crashed. */
 export const RENDERED_PAGE_PIXEL_BUDGET = 32 * 1024 * 1024;
 
+/* Enough jumps to retrace a trail of citations, and no list that grows for as long as a document stays open. */
+export const BACK_HISTORY_LIMIT = 20;
+
 export const ACTUAL_SIZE_ZOOM = 1.75;
 export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 6;

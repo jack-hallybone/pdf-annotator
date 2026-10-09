@@ -62,6 +62,7 @@ import {
 } from "./useTabbedAppNotices";
 import { useFocusTrap } from "./useFocusTrap";
 import { DocumentPaneErrorBoundary } from "./DocumentPaneErrorBoundary";
+import { composeTabbedAppSession } from "./tabbedAppSession";
 
 const TabbedAppDocument = lazy(async () => ({
   default: (await import("./TabbedAppDocument")).TabbedAppDocument,
@@ -1354,8 +1355,10 @@ export const TabbedAppShell = forwardRef<
       closingDirty.length > 0 &&
       closingDirty.every(
         (document) =>
-          Boolean(documentRefs.current.get(document.id)) ||
-          Boolean(document.session),
+          // Firefox and Safari have no save target or Save As at all, so offering "Save changes" there led only to a dialog whose one action was disabled.
+          documentCanSave(document) &&
+          (Boolean(documentRefs.current.get(document.id)) ||
+            Boolean(document.session)),
       )
     );
   }
@@ -1383,7 +1386,8 @@ export const TabbedAppShell = forwardRef<
       new Set(dirty.map((document) => document.id));
 
     const unresolved = dirty.filter((document) => failedIds.has(document.id));
-    if (unresolved.length > 0) {
+    // With no Save As for any of them, the dialog would offer only disabled buttons; the failure notice says what to do instead.
+    if (unresolved.some(documentCanSaveAs)) {
       setSaveDestinationRequest({
         documentIds: unresolved.map((document) => document.id),
       });
@@ -1441,13 +1445,15 @@ export const TabbedAppShell = forwardRef<
       }
 
       const savedSession = documentEditorSessionAfterSave(session, output);
-      const nextSession = {
-        ...savedSession,
-        chrome: session.chrome,
-        fileKey: result.fileKey ?? savedSession.fileKey,
-        fileName: result.fileName ?? savedSession.fileName,
-        saveTarget: result.saveTarget ?? savedSession.saveTarget,
-      } as SensitiveTabbedAppDocumentSession;
+      const nextSession = composeTabbedAppSession(
+        {
+          ...savedSession,
+          fileKey: result.fileKey ?? savedSession.fileKey,
+          fileName: result.fileName ?? savedSession.fileName,
+          saveTarget: result.saveTarget ?? savedSession.saveTarget,
+        },
+        session.chrome,
+      );
 
       setDocuments((current) => {
         const next = current.map((item) =>
@@ -1516,12 +1522,17 @@ export const TabbedAppShell = forwardRef<
         const output = await documentEditorSessionOutput(session);
         const result = await write(output.bytes);
         const savedSession = documentEditorSessionAfterSave(session, output);
-        savedSessions.set(document.id, {
-          ...savedSession,
-          chrome: session.chrome,
-          fileKey: result?.fileKey ?? savedSession.fileKey,
-          saveTarget: result?.saveTarget ?? savedSession.saveTarget,
-        } as SensitiveTabbedAppDocumentSession);
+        savedSessions.set(
+          document.id,
+          composeTabbedAppSession(
+            {
+              ...savedSession,
+              fileKey: result?.fileKey ?? savedSession.fileKey,
+              saveTarget: result?.saveTarget ?? savedSession.saveTarget,
+            },
+            session.chrome,
+          ),
+        );
         savedCount += 1;
       } catch {
         failures.push(document);
@@ -1558,8 +1569,11 @@ export const TabbedAppShell = forwardRef<
       .map((document) => document.title)
       .join(", ");
     const rest = failures.length > 4 ? ` and ${failures.length - 4} more` : "";
+    const downloadHint = failures.some(documentCanSaveAs)
+      ? ""
+      : " None of them can be saved from here, so use Download a copy to keep the changes.";
     showNotice(
-      `${savedCount > 0 ? `${saved} ` : ""}Could not save ${named}${rest}. Those files still have unsaved changes.`,
+      `${savedCount > 0 ? `${saved} ` : ""}Could not save ${named}${rest}. Those files still have unsaved changes.${downloadHint}`,
       { tone: "danger" },
     );
   }
@@ -2761,8 +2775,8 @@ export const TabbedAppShell = forwardRef<
             <h2 className="dialog-title" id={renameDialogTitleId}>
               Rename file
             </h2>
-            <label>
-              <span>Filename</span>
+            <label className="field">
+              <span className="field-label">Filename</span>
               <input
                 autoFocus
                 value={renameDialog.value}
@@ -2850,7 +2864,7 @@ function CloseDocumentsDialog({
       <h2 className="dialog-title" id={titleId}>
         There are unsaved changes
       </h2>
-      <p>The following file(s) have unsaved changes:</p>
+      <p className="dialog-body">The following file(s) have unsaved changes:</p>
       {dirtyDocuments.length > 0 ? (
         <ul aria-label="Unsaved PDFs">
           {dirtyDocuments.slice(0, 4).map((document) => (
@@ -2866,6 +2880,12 @@ function CloseDocumentsDialog({
           ) : null}
         </ul>
       ) : null}
+      {request.canSaveChanges ? null : (
+        <p className="dialog-body">
+          These can&rsquo;t be saved from here. To keep the changes, choose
+          Cancel, then Download a copy.
+        </p>
+      )}
       <div className="dialog-actions">
         <button
           autoFocus={!request.canSaveChanges}
@@ -2925,7 +2945,9 @@ function SaveDestinationDialog({
       <h2 className="dialog-title" id={titleId}>
         Choose where to save
       </h2>
-      <p>These don&rsquo;t have a file of their own to save back to yet:</p>
+      <p className="dialog-body">
+        These don&rsquo;t have a file of their own to save back to yet:
+      </p>
       <ul aria-label="Files needing a save location">
         {documents.map((document) => (
           <li
@@ -3085,7 +3107,9 @@ function applySessionToDocument(
       kind: "bytes",
       fileKey: session.fileKey ?? document.source.fileKey,
       saveTarget:
-        session.readOnlyReason && session.editingEnabled
+        session.readOnlyReason &&
+        session.editingEnabled &&
+        !session.unlockedOriginal
           ? null
           : (session.saveTarget ?? document.source.saveTarget ?? null),
       downloadTarget:

@@ -472,10 +472,7 @@ test("the tab menu's Save and Print stay available for the secondary panel's own
   await splitFromTab(page, 1, "Split Right");
 
   // Right-click the secondary panel's own tab (second.pdf), not the primary panel's - its Save/Print used to be disabled because "available" only ever compared the right-clicked tab against the left panel's document.
-  await page.locator(TAB).nth(1).click({ button: "right" });
-  await expect(
-    page.getByRole("menuitem", { name: "Save", exact: true }),
-  ).toBeEnabled();
+  await expect(await openTabMenu(page, 1, "Save")).toBeEnabled();
   await expect(
     page.getByRole("menuitem", { name: "Print", exact: true }),
   ).toBeEnabled();
@@ -556,11 +553,24 @@ async function splitFromTab(
   tabIndex: number,
   item: "Split Right" | "Split Down",
 ) {
-  await page.locator(TAB).nth(tabIndex).click({ button: "right" });
-  await page.getByRole("menuitem", { name: item }).click();
+  await (await openTabMenu(page, tabIndex, item)).click();
+  // The render that closes the menu is the one that splits and marks the documents coming into view busy; under load it can land well after the click, and a settle wait started before it would end at once.
+  await expect(page.locator(".tabbedapp-tab-context-menu")).toHaveCount(0);
 
   // A busy shell (still settling a newly mounted document pane) drops right-click silently, so a follow-up split or swap has to wait this out first.
   await waitForShellSettled(page);
+}
+
+// Under heavy load the settle wait can still end in the gap between StrictMode's two waves, and the right-click is then dropped, so it is repeated until the menu shows the item; never over a menu that did open, which opens where the tab was clicked.
+async function openTabMenu(page: Page, tabIndex: number, item: string) {
+  const menuItem = page.getByRole("menuitem", { name: item, exact: true });
+  await expect(async () => {
+    if (!(await menuItem.isVisible())) {
+      await page.locator(TAB).nth(tabIndex).click({ button: "right" });
+    }
+    await expect(menuItem).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
+  return menuItem;
 }
 
 async function openDocuments(page: Page, files: string[]) {

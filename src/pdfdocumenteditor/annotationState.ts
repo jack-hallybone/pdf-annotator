@@ -97,20 +97,25 @@ export function annotationSourceIdsForReplacement(
   return sourceIds;
 }
 
+// The string JSON.stringify makes of { annotations: each annotation's signature in id order, pdfFingerprint }, built from the fingerprints below so an unchanged annotation isn't serialised again.
 export function createWorkSignature(
   pdfFingerprint: string,
   annotations: PdfAnnotation[],
 ) {
-  return JSON.stringify({
-    annotations: annotations
-      .map(annotationSignature)
-      .sort((a, b) => a.id.localeCompare(b.id)),
-    pdfFingerprint,
-  });
+  const inIdOrder = [...annotations].sort((a, b) => a.id.localeCompare(b.id));
+  return `{"annotations":[${inIdOrder.map(annotationFingerprint).join(",")}],"pdfFingerprint":${JSON.stringify(pdfFingerprint)}}`;
 }
 
+// Every change and every save compares signatures of the whole document, and pages of handwriting hold tens of thousands of points. An annotation is never changed in place (an edit makes a new object), so each one's fingerprint is worked out once and kept for as long as the annotation is.
+const fingerprints = new WeakMap<PdfAnnotation, string>();
+
 export function annotationFingerprint(annotation: PdfAnnotation) {
-  return JSON.stringify(annotationSignature(annotation));
+  let fingerprint = fingerprints.get(annotation);
+  if (fingerprint === undefined) {
+    fingerprint = JSON.stringify(annotationSignature(annotation));
+    fingerprints.set(annotation, fingerprint);
+  }
+  return fingerprint;
 }
 
 function annotationSignature(annotation: PdfAnnotation) {

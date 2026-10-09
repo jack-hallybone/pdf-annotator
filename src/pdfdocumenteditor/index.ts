@@ -94,6 +94,7 @@ export type {
 export type {
   PdfDocumentEditorHistorySnapshot,
   PdfDocumentEditorCloseRequest,
+  PdfDocumentEditorFindResults,
   PdfDocumentEditorModel,
   PdfDocumentEditorSharedProps,
   PdfDocumentEditorViewportProps,

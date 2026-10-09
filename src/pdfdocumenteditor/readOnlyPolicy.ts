@@ -13,7 +13,7 @@ export function canCreateOutputCopy(
   return reason !== "password protected";
 }
 
-// "Edit a copy" leaves the original's bytes in place, PDF/A claim and signature included, so until its first save every file it produces has to come out of the writer, which strips them, edited or not.
+// "Edit a copy" and "Unlock original" both leave the original's bytes in place, PDF/A claim and signature included, so until the first save every file the tab produces has to come out of the writer, which strips them, edited or not.
 export function isProtectedCopy(
   reason: PdfDocumentEditorReadOnlyReason | null | undefined,
   editingEnabled: boolean | undefined,

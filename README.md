@@ -8,4 +8,4 @@ This project was written by AI, directed and reviewed by a human.
 
 ## Licence
 
-Unlicensed — all rights reserved. Bundled third-party components keep their own licences, reproduced in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md) and linked from the app.
+Unlicensed — all rights reserved. Bundled third-party components keep their own licences, reproduced in `THIRD-PARTY-NOTICES.md`, which every build generates (`scripts/prepare-renderer-assets.mjs`) and the app links to, so the repository keeps no copy.
